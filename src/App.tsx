@@ -1,35 +1,49 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React, { useState } from "react";
+import Sidebar from "./components/main/Sidebar";
+import MainContent from "./components/main/MainContent";
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [responses, setResponses] = useState([]);
+
+  const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+
+  const addResponse = (query) => {
+    // Simule une réponse (à remplacer par un appel API)
+    setResponses([...responses, { query, answer: `Response to: "${query}"` }]);
+  };
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
-}
+    <div className="flex min-h-screen w-screen">
+      {/* Sidebar Section */}
+      <div className="flex">
+        
+        {/* Sidebar Content */}
+        <div
+          className={`bg-gray-200 transition-all duration-300 ${
+            isSidebarOpen ? 'w-64' : 'w-0'
+          } overflow-hidden`}
+        >
+          <Sidebar />
+        </div>
 
-export default App
+        {/* Toggle Button */}
+        <button
+          onClick={toggleSidebar}
+          className="bg-gray-300 text-gray-700 p-2 h-10 flex items-center justify-center"
+        >
+          {isSidebarOpen ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        <MainContent addResponse={addResponse} responses={responses} />
+        {/* Footer */}
+        <footer className="w-full p-4 text-center text-gray-500 text-sm">
+          Pro • Enterprise • API • Blog • Careers • Store • Finance • English
+        </footer>
+      </div>
+    </div>
+  );
+}
