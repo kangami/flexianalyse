@@ -1,16 +1,28 @@
 import React, { useState } from "react";
 import Sidebar from "./components/main/Sidebar";
 import MainContent from "./components/main/MainContent";
+import FileSelectedComponent from "./components/main/FileSelectedComponent";
 
-export default function App() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+interface FileDetails {
+  content: string;
+  description: string;
+}
+
+const App: React.FC = () => {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileDetails, setFileDetails] = useState<FileDetails | null>(null);
+  const [isFileContentVisible, setIsFileContentVisible] = useState<boolean>(true);
   const [responses, setResponses] = useState([]);
+
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
-  const addResponse = (query) => {
-    // Simule une réponse (à remplacer par un appel API)
-    setResponses([...responses, { query, answer: `Response to: "${query}"` }]);
+  const handleFileSelect = (file: File, details: FileDetails) => {
+    setSelectedFile(file);
+    setFileDetails(details);
+    setIsFileContentVisible(true);
   };
 
   return (
@@ -24,7 +36,7 @@ export default function App() {
             isSidebarOpen ? 'w-64' : 'w-0'
           } overflow-hidden`}
         >
-          <Sidebar />
+          <Sidebar onFileSelect={handleFileSelect} />
         </div>
 
         {/* Toggle Button */}
@@ -38,7 +50,14 @@ export default function App() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        <MainContent addResponse={addResponse} responses={responses} />
+        {selectedFile && fileDetails ? (
+          <FileSelectedComponent file={selectedFile} details={fileDetails} 
+          isFileContentVisible={isFileContentVisible}
+          setIsFileContentVisible={setIsFileContentVisible}
+          />
+        ) : (
+          <MainContent responses={responses}/>
+        )}
         {/* Footer */}
         <footer className="w-full p-4 text-center text-gray-500 text-sm">
           Pro • Enterprise • API • Blog • Careers • Store • Finance • English
@@ -46,4 +65,6 @@ export default function App() {
       </div>
     </div>
   );
-}
+};
+
+export default App;
