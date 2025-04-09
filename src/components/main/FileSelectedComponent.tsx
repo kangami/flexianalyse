@@ -1,11 +1,16 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import QueryForm from './QueryForm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import mammoth from 'mammoth';
+import { Document, Page, pdfjs } from 'react-pdf';
+import * as pdfjsLib from 'pdfjs-dist';
 
+// Set up the pdf.js worker using the local worker script
+pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.js';
 
 interface FileDetails {
-  content: string;
+  content: string | ArrayBuffer; // Use ArrayBuffer for binary files
   description: string;
 }
 
@@ -17,6 +22,74 @@ interface FileSelectedComponentProps {
 }
 
 const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, details, isFileContentVisible, setIsFileContentVisible }) => {
+  // Define code file extensions
+  const codeExtensions = [
+    '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
+    '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx',
+    '.tsx', '.sql',
+  ];
+
+  // Determine file type
+  const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+  const isCodeFile = codeExtensions.includes(extension);
+  const isDocxFile = extension === '.docx';
+  const isPdfFile = extension === '.pdf';
+
+  // State for .docx content
+  const [docxContent, setDocxContent] = useState<string | null>(null);
+  // State for .pdf pages
+  const [numPages, setNumPages] = useState<number | null>(null);
+  // State for PDF loading error
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // Extract .docx content using mammoth
+  useEffect(() => {
+    if (isDocxFile && details.content instanceof ArrayBuffer) {
+      mammoth
+        .extractRawText({ arrayBuffer: details.content })
+        .then((result) => {
+          setDocxContent(result.value);
+        })
+        .catch((err) => {
+          console.error('Error extracting .docx content:', err);
+          setDocxContent('Error extracting .docx content.');
+        });
+    }
+  }, [isDocxFile, details.content]);
+
+  // Determine language for syntax highlighting
+  const getLanguage = (ext: string): string => {
+    switch (ext) {
+      case '.java': return 'java';
+      case '.py': return 'python';
+      case '.cs': return 'csharp';
+      case '.js': return 'javascript';
+      case '.ts': return 'typescript';
+      case '.cpp': case '.c': case '.h': return 'cpp';
+      case '.rb': return 'ruby';
+      case '.go': return 'go';
+      case '.php': return 'php';
+      case '.html': return 'html';
+      case '.css': return 'css';
+      case '.scss': return 'scss';
+      case '.jsx': return 'jsx';
+      case '.tsx': return 'tsx';
+      case '.sql': return 'sql';
+      default: return 'text';
+    }
+  };
+
+  // Handle PDF load success
+  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
+    setNumPages(numPages);
+    setPdfError(null);
+  };
+  // Handle PDF load error
+  const onDocumentLoadError = (error: Error) => {
+    console.error('Error loading PDF:', error);
+    setPdfError('Failed to load PDF file.');
+  };
+
   return (
     <div className="flex-1 flex flex-col h-screen">
       {/* Scrollable File Description (Main Discussion Chat) */}
@@ -63,13 +136,50 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
             </button>
           </div>
           <div className="h-full overflow-y-auto">
-            <pre className="text-sm text-gray-800">
-              <code>
-                <SyntaxHighlighter language="java" style={vscDarkPlus} className="rounded-md">
-                  {details.content}
-                </SyntaxHighlighter>
-              </code>
-            </pre>
+            {isCodeFile && typeof details.content === 'string' ? (
+              <SyntaxHighlighter
+                language={getLanguage(extension)}
+                style={vscDarkPlus}
+                customStyle={{ margin: 0, padding: 4, background: 'black' }}
+              >
+                {details.content}
+              </SyntaxHighlighter>
+            ) : isDocxFile ? (
+              docxContent ? (
+                <pre className="text-sm text-gray-800 whitespace-pre-wrap">
+                  {docxContent}
+                </pre>
+              ) : (
+                <div className="text-gray-600 text-sm">
+                  Loading .docx content...
+                </div>
+              )
+            ) : isPdfFile && details.content instanceof ArrayBuffer ? (
+              pdfError ? (
+                <div className="text-red-600 text-sm">
+                  {pdfError}
+                </div>
+              ) : (
+                <Document
+                  file={details.content}
+                  onLoadSuccess={onDocumentLoadSuccess}
+                  onLoadError={onDocumentLoadError}
+                >
+                  {numPages &&
+                    Array.from(new Array(numPages), (el, index) => (
+                      <Page
+                        key={`page_${index + 1}`}
+                        pageNumber={index + 1}
+                        scale={0.5} // Adjust scale to fit within the container
+                      />
+                    ))}
+                </Document>
+              )
+            ) : (
+              <div className="text-gray-600 text-sm">
+                Unsupported file type.
+              </div>
+            )}
           </div>
         </div>
       )}

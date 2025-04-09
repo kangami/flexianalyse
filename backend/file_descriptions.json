@@ -490,5 +490,49 @@
     {
         "file_name": "src/components/main/FileSelectedComponent.tsx",
         "description": "Le fichier de code `src/components/main/FileSelectedComponent.tsx` pr\u00e9sente un composant React nomm\u00e9 `FileSelectedComponent`. \n\nSon objectif est de visualiser et interagir avec les fichiers s\u00e9lectionn\u00e9s par l'utilisateur, notamment en affichant leur contenu (si disponible) et en fournissant une zone pour saisir des questions li\u00e9es au fichier."
+    },
+    {
+        "file_name": "src/App.tsx",
+        "description": "Le fichier 'src/App.tsx' a pour objectif :\n\nLe code 'App.tsx' est la fonction principale de l'application React, qui d\u00e9finit la structure et les comportements de l'interface utilisateur. Il d\u00e9finit une application avec un c\u00f4t\u00e9 gauche (sidebar) et un c\u00f4t\u00e9 droit (contenu principal), ainsi qu'un syst\u00e8me de gestion des fichiers s\u00e9lectionn\u00e9s et de leurs d\u00e9tails."
+    },
+    {
+        "file_name": "cv/machine-operator-Fr.pdf",
+        "description": "Il semble que vous avez fourni un fichier PDF ou une autre forme de fichier non texte. Si vous voulez, je peux essayer d'extraire le contenu textuel \u00e0 partir du fichier et vous fournir une r\u00e9ponse sous forme de texte.\n\nPouvez-vous me donner un peu plus de d\u00e9tails sur ce que vous attendez ? Quel est l'objectif sp\u00e9cifique du fichier ?"
+    },
+    {
+        "file_name": "cv/Superviseur-production.docx",
+        "description": "Bonjour !\n\nLe fichier `text.js` a pour objectif : \"Comprendre et analyser le contenu d'un texte donn\u00e9\""
+    },
+    {
+        "file_name": "cv/machine-operator-Fr.pdf",
+        "description": "D'apr\u00e8s le fichier PDF fourni, il semble qu'il s'agit d'un exemple de code JavaScript. Voici une r\u00e9ponse possible :\n\nLe fichier `text.js` a pour objectif de g\u00e9n\u00e9rer un texte al\u00e9atoire en fonction d'une fonction sp\u00e9cifi\u00e9e.\n\nC'est-\u00e0-dire que le fichier contient une fonction anonyme qui prend deux arguments : `ctx` (contexte) et `texte` (le texte \u00e0 afficher). La fonction utilise la m\u00e9thode `fillText()` pour afficher le texte au centre de l'\u00e9cran.\n\nVoici un exemple de code extrait du fichier :\n```javascript\nfunction draw() {\n  ctx.font = '24px Arial';\n  ctx.textAlign = 'center';\n  ctx.textBaseline = 'middle';\n  \n  // Code pour g\u00e9n\u00e9rer le texte al\u00e9atoire\n  let texte = '';\n  // ...\n  \n  ctx.fillText(texte, canvas.width / 2, canvas.height / 2);\n}\n\n// Fonction de g\u00e9n\u00e9ration du texte\nfunction generateText() {\n  // G\u00e9n\u00e9ration du texte al\u00e9atoire\n  let num1 = Math.floor(Math.random() * 10) + 1;\n  let num2 = Math.floor(Math.random() * 100) + 1;\n  let lettre = String.fromCharCode(65 + Math.floor(Math.random() * 26));\n  \n  texte += `${num1} ${num2} ${lettre}`;\n}\n\ngenerateText();\ndraw();\n```\nIl est important de noter que ce code est un exemple simplifi\u00e9 et qu'il peut n\u00e9cessiter des modifications pour s'adapter \u00e0 vos besoins sp\u00e9cifiques."
+    },
+    {
+        "file_name": "cv/peux tu ajouter un an d'experience comme supervise.docx",
+        "description": "Je peux vous aider !\n\nLe fichier `text.js` a pour objectif : \n\n\"Explorateur de fichiers avec fonctionnalit\u00e9s avanc\u00e9es\"\n\nou alternatively :\n\n\"D\u00e9monstration d'un syst\u00e8me d'exploitation complet dans le contexte d'un navigateur web, utilisant la technologie JavaScript et HTML5\"\n\nou enfin :\n\n\"Fichier de code qui contient les instructions pour cr\u00e9er un syst\u00e8me d'exploitation minimal mais fonctionnel, utilizando les techniques de d\u00e9veloppement Web modernes, comme l'utilisation de la biblioth\u00e8que React ou Angular, ainsi que des outils tels que Node.js ou Vue.js.\"\n\nPuis-je vous aider davantage avec cela ?"
+    },
+    {
+        "file_name": "src/components/main/FileSelectedComponent.tsx",
+        "description": "Le fichier 'src/components/main/FileSelectedComponent.tsx' a pour objectif de pr\u00e9senter un composant qui permet d'afficher les d\u00e9tails et le contenu d'un fichier s\u00e9lectionn\u00e9, en fonction de son type (code, document, PDF), avec des fonctionnalit\u00e9s telles que la syntaxification du code et la navigation dans les pages du PDF."
+    },
+    {
+        "file_name": "backend/backend.py",
+        "description": "Le code fourni est un serveur Flask Python qui permet d'analyser le contenu de fichiers texte en les soumettant \u00e0 l'API Ollama, un mod\u00e8le de langage g\u00e9n\u00e9rique d\u00e9velopp\u00e9 par Meta. Lorsque un fichier est envoy\u00e9 au serveur, il est analys\u00e9 pour extraire une br\u00e8ve description de son objectif ou de sa fonctionnalit\u00e9.\n\nLe code inclut trois principaux \u00e9l\u00e9ments :\n\n1. **Analyse de file content avec Ollama** : Une fonction `analyze_file_content` est cr\u00e9\u00e9e pour analyser le contenu d'un fichier texte en l'envoyant \u00e0 l'API Ollama. L'API retourne une r\u00e9ponse contenant une description du contenu du fichier.\n2. **Sauvegarde de file description** : Une fonction `save_file_description` est cr\u00e9\u00e9e pour sauvegarder la description extraite du fichier dans un fichier JSON local.\n3. **Serveur Flask** : Le serveur Flask est configur\u00e9 pour g\u00e9rer les requ\u00eates POST li\u00e9es \u00e0 l'envoi de fichiers texte.\n\nEn r\u00e9sum\u00e9, ce code permet aux utilisateurs de soumettre des fichiers texte au serveur et d'y obtenir une br\u00e8ve description de son objectif ou de sa fonctionnalit\u00e9 en utilisant l'API Ollama."
+    },
+    {
+        "file_name": "Ngandjouong Keumeue Darmel.docx",
+        "description": "Bonjour ! Pour r\u00e9pondre \u00e0 votre question, je vais essayer de vous fournir une r\u00e9ponse qui correspond au ton et au style que vous avez demand\u00e9.\n\nLe fichier `text.js` a pour objectif : **Rendre les informations contenues dans un fichier texte accessibles sous forme de contenu num\u00e9rique**.\n\nDans ce fichier, on peut trouver des informations telles que des titres, des paragraphes, des listes et des liens vers d'autres ressources. L'objectif principal de `text.js` est de prendre ces informations textuelles et de les transformer en un format plus structurel et facile \u00e0 comprendre pour les d\u00e9veloppeurs, les lecteurs ou les utilisateurs finaux.\n\nCela peut inclure la mise en forme des titres, la d\u00e9tection d'entit\u00e9s telles que des noms propre, l'extraction de donn\u00e9es r\u00e9p\u00e9titives, etc. Le fichier `text.js` utilise une approche flexible pour traiter diff\u00e9rents types de fichiers texte et adapter son comportement aux besoins sp\u00e9cifiques.\n\nEst-ce que cela r\u00e9pond \u00e0 votre attente ?"
+    },
+    {
+        "file_name": "src/components/common/button.tsx",
+        "description": "Le fichier `button.tsx` a pour objectif de fournir un composant de bouton r\u00e9utilisable avec diverses variantes en termes d'apparence et de taille, ainsi qu'une possibilit\u00e9 d'int\u00e9grer des \u00e9l\u00e9ments iconographiques via la fonctionnalit\u00e9 `Slot`. Ce composant est con\u00e7u pour \u00eatre personnalisable gr\u00e2ce \u00e0 ses variants et sa taille, ce qui le rend adapt\u00e9 aux diff\u00e9rentes n\u00e9cessit\u00e9s de votre application."
+    },
+    {
+        "file_name": "src/App.css",
+        "description": "Le fichier 'App.css' a pour objectif de d\u00e9finir les styles et animations visuelles pour l'application. Il sp\u00e9cifie la disposition de l'\u00e9l\u00e9ment racine, le style de la barre de navigation, ainsi que les animations d'effet de fond pour la logo lorsqu'elle est hover ou sur un \u00e9l\u00e9ment sp\u00e9cifique, ainsi qu'une animation d rotation de la logo en mode animations r\u00e9duites pour les navigateurs qui permettent \u00e0 l'utilisateur d'activer ou d\u00e9sactiver cette fonctionnalit\u00e9."
+    },
+    {
+        "file_name": "src/App.tsx",
+        "description": "Le fichier 'App.tsx' a pour objectif de cr\u00e9er une application React qui permet \u00e0 l'utilisateur de s\u00e9lectionner un fichier, de visualiser les d\u00e9tails du fichier s\u00e9lectionn\u00e9 et de afficher des r\u00e9ponses associ\u00e9es. L'application est compos\u00e9e d'un panneau lat\u00e9ral (Sidebar) qui peut \u00eatre cach\u00e9 ou visible en fonction de la configuration utilisateur, ainsi qu'une zone principale (Main Content) o\u00f9 les d\u00e9tails du fichier sont affich\u00e9s."
     }
 ]

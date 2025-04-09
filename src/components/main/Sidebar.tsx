@@ -14,7 +14,7 @@ interface FileNode {
 }
 
 interface FileDetails {
-    content: string;
+    content: string | ArrayBuffer;
     description: string;
 }
 
@@ -35,7 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
   const allowedExtensions: string[] = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
     '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx',
-    '.tsx', '.sql',
+    '.tsx', '.sql', '.docx',
   ];
 
   // Close dropdown when clicking outside
@@ -153,8 +153,24 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
   const handleFileClick = async (file: File) => {
     setIsLoading(true);
     try {
+        // Determine file type
+        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        const isBinaryFile = ['.docx', '.pdf'].includes(extension);
+
         // Read file content
-        const content = await file.text();
+        let content: string | ArrayBuffer;
+        if (isBinaryFile) {
+            // Read binary files as ArrayBuffer
+            content = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as ArrayBuffer);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsArrayBuffer(file);
+            });
+        } else {
+            // Read text files as string
+            content = await file.text();
+        }
   
         // Upload file to backend
         const formData = new FormData();

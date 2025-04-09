@@ -4,7 +4,7 @@ import MainContent from "./components/main/MainContent";
 import FileSelectedComponent from "./components/main/FileSelectedComponent";
 
 interface FileDetails {
-  content: string;
+  content: string | ArrayBuffer; // Use ArrayBuffer for binary files
   description: string;
 }
 
