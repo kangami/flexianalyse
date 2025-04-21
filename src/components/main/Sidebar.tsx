@@ -20,29 +20,40 @@ interface FileDetails {
 
 interface SidebarProps {
     onFileSelect: (file: File, details: FileDetails) => void;
+    getRepoStructure:() => string;
+    selectedModel: string;
+    setSelectedModel: (model: string) => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
+const Sidebar: React.FC<SidebarProps> = ({ onFileSelect, getRepoStructure, selectedModel, setSelectedModel }) => {
     const [files, setFiles] = useState<FileNode[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [isFileDropdownOpen, setIsFileDropdownOpen] = useState<boolean>(false);
+    const [isModelDropdownOpen, setIsModelDropdownOpen] = useState<boolean>(false);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const folderInputRef = useRef<HTMLInputElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   // Define allowed code file extensions
   const allowedExtensions: string[] = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
     '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx',
-    '.tsx', '.sql', '.docx',
+    '.tsx', '.sql', '.docx', '.pdf',
   ];
+
+  // Model options
+  const modelOptions = ['LLaMA 3.2', 'OpenAI', 'Mistral', 'Claude'];
 
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsFileDropdownOpen(false);
+      }
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -99,36 +110,43 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
     return tree;
   };
 
+  const generateRepoStructure = (nodes: FileNode[], indent: number = 0): string => {
+    let structure = '';
+    nodes.forEach((node) => {
+      const prefix = '  '.repeat(indent);
+      if (node.children) {
+          structure += `${prefix}- ${node.name}/\n`;
+          structure += generateRepoStructure(node.children, indent + 1);
+      } else {
+          structure += `${prefix}- ${node.name}\n`;
+      }
+    });
+
+    return structure;
+  }
+
   // Handle file selection
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>): void => {
     if (event.target.files) {
+      setIsLoading(true);
       const acceptedFiles = filterFiles(event.target.files);
       const fileTree = buildFileTree(acceptedFiles);
       setFiles(fileTree);
       setError(null);
+      setIsLoading(false);
     }
   };
 
   // Handle folder selection
   const handleFolderChange = (event: ChangeEvent<HTMLInputElement>): void => {
     if (event.target.files) {
+      setIsLoading(true);
       const acceptedFiles = filterFiles(event.target.files);
       const fileTree = buildFileTree(acceptedFiles);
       setFiles(fileTree);
       setError(null);
+      setIsLoading(false);
     }
-  };
-
-  // Trigger file input click
-  const handleImportFileClick = () => {
-    fileInputRef.current?.click();
-    setIsFileDropdownOpen(false);
-  };
-
-  // Trigger folder input click
-  const handleImportFolderClick = () => {
-    folderInputRef.current?.click();
-    setIsFileDropdownOpen(false);
   };
 
   // Toggle folder open/close
@@ -151,7 +169,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
 
   // Handle file click
   const handleFileClick = async (file: File) => {
-    setIsLoading(true);
+    //setIsLoading(true);
     try {
         // Determine file type
         const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -173,7 +191,7 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
         }
   
         // Upload file to backend
-        const formData = new FormData();
+        /*const formData = new FormData();
         formData.append('files', file);
   
         const response = await fetch('http://localhost:5000/upload', {
@@ -186,21 +204,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
           throw new Error(`Upload failed: ${errorData.error || response.statusText}`);
         }
   
-        const data = await response.json();
-        const description = data.results[0]?.description || 'No description available';
+        const data = await response.json();*/
+        const description =  'No description available';
   
         // Pass file details to parent
         onFileSelect(file, { content, description });
         setError(null);
       } catch (error) {
         console.error('Error uploading file:', error);
-        if (error.message.includes('Failed to fetch')) {
-          setError('Could not connect to the backend. Please ensure the server is running on http://localhost:5000.');
-        } else {
-          setError(error.message || 'An error occurred while uploading the file.');
-        }
       }finally {
-        setIsLoading(false);
+        //setIsLoading(false);
       }
   };
 
@@ -216,17 +229,17 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
                 className={`mr-1 mb-2 text-white px-2 py-1 rounded ${
                     node.isOpen ? 'bg-red-500' : 'bg-green-500'
                 }`}>
-                {node.isOpen ? '–' : '+'}
+                {node.isOpen ?  '▼' : '▶'}
             </button>
             <span className="font-semibold">{node.name}</span>
           </div>
         ) : (
-          <button
+          <div 
             onClick={() => handleFileClick(node.file!)}
-            className="text-blue-500 hover:underline"
+            className="text-blue-500 hover:underline cursor-pointer mb-1/2 hover:bg-gray-100 p-1"
           >
             {node.name}
-          </button>
+          </div>
         )}
         {node.children && node.isOpen && (
           <ul className="ml-4">
@@ -236,6 +249,12 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
       </li>
     ));
   };
+
+  // Expose the repo structure via the prop
+  useEffect(() => {
+    const structure = generateRepoStructure(files);
+    getRepoStructure(() => structure);
+  }, [files, getRepoStructure]);
 
   return (
     <div className="w-64 h-screen bg-gray-100 p-4 flex flex-col">
@@ -292,8 +311,33 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
         {/* Context Menu (Placeholder) */}
         <a href='#' className="text-gray-700 hover:text-blue-500">Export</a>
 
-        {/* Model Menu (Placeholder) */}
-        <a href='#' className="text-gray-700 hover:text-blue-500">Model</a>
+        {/* Model Menu with Dropdown */}
+        <div className="relative" ref={modelDropdownRef}>
+            <a
+                href="#"
+                onClick={() => setIsModelDropdownOpen((prev) => !prev)}
+                className="text-gray-700 hover:text-blue-500"
+            >
+                Model
+            </a>
+            {isModelDropdownOpen && (
+                <div className="absolute w-40 bg-white shadow-md mt-1 z-10">
+                    {modelOptions.map((model) => (
+                        <a
+                            key={model}
+                            href="#"
+                            onClick={() => {
+                                setSelectedModel(model);
+                                setIsModelDropdownOpen(false);
+                            }}
+                            className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 whitespace-nowrap"
+                        >
+                            {model}
+                        </a>
+                    ))}
+                </div>
+            )}
+        </div>
       </div>
               
       {/* Loading Spinner */}
@@ -330,14 +374,40 @@ const Sidebar: React.FC<SidebarProps> = ({ onFileSelect }) => {
       )}
 
       {/* File Structure */}
-      {files.length > 0 && (
-        <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
           <h3 className="text-sm font-semibold mb-3">EXPLORER</h3>
-          <ul className="text-sm text-gray-600">
-            {renderFileTree(files)}
-          </ul>
-        </div>
-      )}
+          {isLoading ? (
+              <div className="flex items-center text-blue-600 text-sm">
+                  <svg
+                      className="animate-spin h-5 w-5 mr-2 text-blue-600"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0.0.0 24"
+                  >
+                      <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                      ></circle>
+                      <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                  </svg>
+                  Loading files...
+              </div>
+          ) : files.length > 0 ? (
+              <ul className="text-sm text-gray-600">
+                  {renderFileTree(files)}
+              </ul>
+          ) : (
+              <p className="text-sm text-gray-600">No files imported yet.</p>
+          )}
+      </div>
     </div>
   );
 };
