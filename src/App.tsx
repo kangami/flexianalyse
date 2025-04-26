@@ -6,7 +6,7 @@ import mammoth from 'mammoth';
 import { PDFExtract } from 'pdf.js-extract';
 
 interface FileDetails {
-  content: string | ArrayBuffer; // Use ArrayBuffer for binary files
+  content: string | ArrayBuffer;
   description: string;
 }
 
@@ -158,7 +158,7 @@ const App: React.FC = () => {
         updatedHistory[updatedHistory.length - 1] = { userQuery: query, aiResponse: 'Error processing your query.' };
         return updatedHistory;
       });
-    } finally{
+    } finally {
       setLoading(false);
     }
   };
@@ -167,12 +167,11 @@ const App: React.FC = () => {
     <div className="flex min-h-screen w-screen">
       {/* Sidebar Section */}
       <div className="flex">
-        
         {/* Sidebar Content */}
         <div
-          className={`bg-gray-200 transition-all duration-300 ${
+          className={`bg-gray-200 transition-all duration-300 fixed top-0 left-0 h-full overflow-y-auto ${
             isSidebarOpen ? 'w-64' : 'w-0'
-          } overflow-hidden`}
+          }`} // Added fixed, top-0, left-0, h-full, overflow-y-auto
         >
           <Sidebar
             onFileSelect={handleFileSelect}
@@ -183,7 +182,9 @@ const App: React.FC = () => {
         </div>
         <button
           onClick={toggleSidebar}
-          className="bg-gray-300 text-gray-700 p-2 h-10 flex items-center justify-center"
+          className={`bg-gray-300 text-gray-700 p-2 h-10 flex items-center justify-center transition-all duration-300 fixed top-0 ${
+            isSidebarOpen ? 'left-64' : 'left-0'
+          }`} // Added fixed, top-0, dynamic left positioning
         >
           <svg
             className="h-5 w-5"
@@ -196,26 +197,30 @@ const App: React.FC = () => {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth="2"
-              d={isSidebarOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'} // Left arrow when open, right arrow when closed
+              d={isSidebarOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'}
             />
           </svg>
         </button>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col">
+      <div
+        className={`flex-1 flex flex-col transition-all duration-300 ${
+          isSidebarOpen ? 'ml-64' : 'ml-10'
+        }`} // Added margin-left to shift content, transition for smooth movement
+      >
         {selectedFile && fileDetails ? (
           <FileSelectedComponent
-          file={selectedFile}
-          details={fileDetails}
-          isFileContentVisible={isFileContentVisible}
-          setIsFileContentVisible={setIsFileContentVisible}
-          chatHistory={chatHistory}
-          setFileDetails={setFileDetails}
-          onQuerySubmit={handleQuerySubmit}
-          loading={loading}
-          selectedModel={selectedModel}
-        />
+            file={selectedFile}
+            details={fileDetails}
+            isFileContentVisible={isFileContentVisible}
+            setIsFileContentVisible={setIsFileContentVisible}
+            chatHistory={chatHistory}
+            setFileDetails={setFileDetails}
+            onQuerySubmit={handleQuerySubmit}
+            loading={loading}
+            selectedModel={selectedModel}
+          />
         ) : (
           <MainContent responses={responses}/>
         )}

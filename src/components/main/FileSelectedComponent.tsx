@@ -12,7 +12,6 @@ import { htmlToText } from 'html-to-text';
 import ace from 'ace-builds/src-noconflict/ace'; 
 
 // Import Ace editor modes and themes
-
 import 'ace-builds/src-noconflict/mode-java';
 import 'ace-builds/src-noconflict/mode-python';
 import 'ace-builds/src-noconflict/mode-csharp';
@@ -32,13 +31,14 @@ ace.config.set('basePath', '/node_modules/ace-builds/src-noconflict');
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.js';
 
 interface FileDetails {
-  content: string | ArrayBuffer; // Use ArrayBuffer for binary files
+  content: string | ArrayBuffer;
   description: string;
 }
 
 interface ChatMessage {
   userQuery: string;
   aiResponse: string;
+  displayedAiResponse?: string;
 }
 
 interface FileSelectedComponentProps {
@@ -53,7 +53,8 @@ interface FileSelectedComponentProps {
   selectedModel: string;
 }
 
-const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, details, isFileContentVisible, setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, loading, selectedModel}) => {
+const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, details, isFileContentVisible, 
+  setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, loading, selectedModel}) => {
   // Define code file extensions
   const codeExtensions = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
@@ -79,6 +80,9 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   // State for .pdf pages
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+
+  // State for animated chat messages
+  const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
 
   // Update codeContent when the file or details change
   useEffect(() => {
@@ -176,6 +180,65 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
     }
   }, [isDocxFile, chatHistory, docxContent, originalDocxBuffer]);
 
+  // Typing animation effect for aiResponse
+  useEffect(() => {
+    // If no new message or chatHistory is empty, reset or do nothing
+    if (chatHistory.length === 0) {
+      setAnimatedChatHistory([]);
+      return;
+    }
+
+    // Check if the latest message in chatHistory already exists in animatedChatHistory
+    const latestChatMessage = chatHistory[chatHistory.length - 1];
+    const latestAnimatedMessage = animatedChatHistory[animatedChatHistory.length - 1];
+
+    // If the latest message is already in animatedChatHistory, or if there's no aiResponse, do nothing
+    if (latestAnimatedMessage && latestAnimatedMessage.userQuery === latestChatMessage.userQuery && latestAnimatedMessage.aiResponse === latestChatMessage.aiResponse) {
+      return;
+    }
+
+    // If the latest message in chatHistory doesn't have an aiResponse yet, do nothing
+    if (!latestChatMessage.aiResponse) return;
+
+    // Update animatedChatHistory with the latest message (which now has an aiResponse)
+    const newMessageIndex = chatHistory.length - 1;
+    const newMessage = chatHistory[newMessageIndex];
+
+    const updatedChatHistory = [...animatedChatHistory];
+    updatedChatHistory[newMessageIndex] = { ...newMessage, displayedAiResponse: '' };
+    setAnimatedChatHistory(updatedChatHistory);
+
+    let currentIndex = 0;
+    const fullContent = newMessage.aiResponse;
+    const typingSpeed = 10;
+
+    const typingInterval = setInterval(() => {
+      if (currentIndex < fullContent.length) {
+        setAnimatedChatHistory((prev) => {
+          const newHistory = [...prev];
+          newHistory[newMessageIndex].displayedAiResponse = fullContent.slice(0, currentIndex + 1);
+          return newHistory;
+        });
+        currentIndex++;
+      } else {
+        clearInterval(typingInterval);
+      }
+    }, typingSpeed);
+
+    // Clean up
+    return () => clearInterval(typingInterval);
+  }, [chatHistory]);
+
+  // Handle query submission to show user query immediately
+  const handleQuerySubmit = (query: string) => {
+    // Immediately append the user query to animatedChatHistory
+    const newMessage: ChatMessage = { userQuery: query, aiResponse: '' };
+    setAnimatedChatHistory((prev) => [...prev, newMessage]);
+
+    // Call the original onQuerySubmit to trigger the API call
+    onQuerySubmit(query);
+  };
+
   // Determine language for syntax highlighting
   const getLanguage = (ext: string): string => {
     switch (ext) {
@@ -248,13 +311,11 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
               const href = el.getAttribute('href') || '';
               currentTextRuns.push(new TextRun({ text: `${text} (${href})`, color: '0000FF', underline: { type: 'SINGLE' } }));
             } else if (el.tagName === 'BR') {
-              // If we have accumulated text runs, create a paragraph
               if (currentTextRuns.length > 0) {
                 paragraphs.push(new Paragraph({ children: [...currentTextRuns] }));
-                currentTextRuns.length = 0; // Clear the current text runs
+                currentTextRuns.length = 0;
               }
-              currentTextRuns.push(TextRun.break()); // Add a line break
-              
+              currentTextRuns.push(TextRun.break());
             } else {
               Array.from(el.childNodes).forEach(child => processNode(child, currentTextRuns));
             }
@@ -270,7 +331,6 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
 
     return paragraphs;
   };
-  
 
   // Save edited .docx content
   const handleSaveDocx = () => {
@@ -295,12 +355,11 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-4">
           <h2 className="text-lg font-semibold">{file.name}</h2>
-          <p className="text-gray-600">{details.description}</p>
         </div>
         <div className="mt-4 flex justify-center">
           <div className="w-full max-w-2xl">
-            {chatHistory.length > 0 ? (
-              chatHistory.map((message, index) => (
+            {animatedChatHistory.length > 0 ? (
+              animatedChatHistory.map((message, index) => (
                 <div key={index} className="mb-4">
                   {/* User Query (Right Side, Light Blue Background) */}
                   <div className="flex justify-end mb-2">
@@ -311,7 +370,7 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
                   {/* Model Response (Left Side, Light Gray Background) */}
                   <div className="flex justify-start">
                     <div className=" text-gray-800 p-3 max-w-md">
-                      <p className="whitespace-pre-wrap">{message.aiResponse}</p>
+                      <p className="whitespace-pre-wrap">{message.displayedAiResponse || ''}</p>
                     </div>
                   </div>
                 </div>
@@ -439,7 +498,7 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
       <QueryForm
         isFileContentVisible={isFileContentVisible}
         setIsFileContentVisible={setIsFileContentVisible}
-        onQuerySubmit={onQuerySubmit}
+        onQuerySubmit={handleQuerySubmit}
         loading={loading}
         selectedModel={selectedModel}
       />
