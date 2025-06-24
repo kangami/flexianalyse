@@ -380,11 +380,9 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
             )}
             {/* Loading Animation (Left Side) */}
             {loading && (
-              <div className="flex justify-start mb-2">
-                <div className="bg-gray-100 p-3 rounded-lg max-w-md flex items-center">
-                  <div className="w-6 h-6 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-                </div>
-              </div>
+              <div className="flex justify-center items-center">
+                <div className="w-10 h-10 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
             )}
           </div>
         </div>
