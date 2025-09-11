@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import QueryForm from './QueryForm';
 import AceEditor from 'react-ace';
 import mammoth from 'mammoth';
@@ -8,6 +8,8 @@ import { saveAs } from 'file-saver';
 import { CKEditor } from '@ckeditor/ckeditor5-react';
 import ClassicEditor from '@ckeditor/ckeditor5-build-classic';
 import { htmlToText } from 'html-to-text';
+import workerSrc from 'pdfjs-dist/legacy/build/pdf.worker?url';
+import ResponseDisplay from "./ResponseDisplay";
 
 import ace from 'ace-builds/src-noconflict/ace'; 
 
@@ -28,7 +30,7 @@ import 'ace-builds/src-noconflict/theme-monokai';
 
 // Configure Ace to load worker scripts from the correct path
 ace.config.set('basePath', '/node_modules/ace-builds/src-noconflict');
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.js';
+pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 
 interface FileDetails {
   content: string | ArrayBuffer;
@@ -36,6 +38,7 @@ interface FileDetails {
 }
 
 interface ChatMessage {
+  id: string;
   userQuery: string;
   aiResponse: string;
   displayedAiResponse?: string;
@@ -48,18 +51,20 @@ interface FileSelectedComponentProps {
   setIsFileContentVisible: (visible: boolean) => void;
   chatHistory: ChatMessage[];
   setFileDetails: (details: FileDetails | null) => void;
-  onQuerySubmit: (query: string) => void;
+  onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
   loading: boolean;
   selectedModel: string;
+  researchMode: 'online' | 'local';
+  setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
 }
 
 const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, details, isFileContentVisible, 
-  setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, loading, selectedModel}) => {
+  setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, researchMode, setResearchMode, loading, selectedModel}) => {
   // Define code file extensions
   const codeExtensions = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
     '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx',
-    '.tsx', '.sql',
+    '.tsx', '.sql', '.docx', '.pdf', '.json', '.xml', '.md', '.txt'
   ];
 
   // Determine file type
@@ -84,6 +89,24 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   // State for animated chat messages
   const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(600); // valeur par défaut
+
+  useEffect(() => {
+    if (containerRef.current) {
+      setContainerWidth(containerRef.current.offsetWidth);
+    }
+  }, [isFileContentVisible]);
+
+
+  const pdfFileData = useMemo(() => {
+    if (isPdfFile && details.content instanceof ArrayBuffer) {
+      return new Blob([details.content], { type: "application/pdf" });
+    }
+    return null;
+  }, [isPdfFile, details.content]);
+  
+
   // Update codeContent when the file or details change
   useEffect(() => {
     if (isCodeFile && typeof details.content === 'string') {
@@ -99,7 +122,7 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
     if (isDocxFile && details.content instanceof ArrayBuffer) {
       setOriginalDocxBuffer(details.content);
       mammoth
-        .convertToHtml({ arrayBuffer: details.content })
+        .convertToHtml({ arrayBuffer: details.content as ArrayBuffer}) // Use slice to avoid modifying the original buffer
         .then((result) => {
           setDocxContent(result.value);
           setEditedDocxContent(result.value);
@@ -181,62 +204,70 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   }, [isDocxFile, chatHistory, docxContent, originalDocxBuffer]);
 
   // Typing animation effect for aiResponse
-  useEffect(() => {
-    // If no new message or chatHistory is empty, reset or do nothing
+  /*useEffect(() => {
     if (chatHistory.length === 0) {
       setAnimatedChatHistory([]);
       return;
     }
 
-    // Check if the latest message in chatHistory already exists in animatedChatHistory
-    const latestChatMessage = chatHistory[chatHistory.length - 1];
-    const latestAnimatedMessage = animatedChatHistory[animatedChatHistory.length - 1];
+    // Synchroniser en préservant l'ordre et en utilisant les IDs
+    setAnimatedChatHistory(prevAnimated => {
+      const newAnimated = [...chatHistory];
+      
+      return newAnimated.map(chatMsg => {
+        // Chercher si ce message existe déjà dans l'animation
+        const existingAnimated = prevAnimated.find(animMsg => animMsg.id === chatMsg.id);
+        
+        // Si le message existe et l'animation est terminée, le garder
+        if (existingAnimated && existingAnimated.displayedAiResponse === chatMsg.aiResponse) {
+          return existingAnimated;
+        }
+        
+        // Si c'est un nouveau message avec réponse, démarrer l'animation
+        if (chatMsg.aiResponse && (!existingAnimated || existingAnimated.aiResponse !== chatMsg.aiResponse)) {
+          const animatedMessage = {
+            ...chatMsg,
+            displayedAiResponse: ''
+          };
+          
+          // Démarrer l'animation après un court délai
+          setTimeout(() => {
+            let currentIndex = 0;
+            const fullContent = chatMsg.aiResponse;
+            const typingSpeed = 2;
 
-    // If the latest message is already in animatedChatHistory, or if there's no aiResponse, do nothing
-    if (latestAnimatedMessage && latestAnimatedMessage.userQuery === latestChatMessage.userQuery && latestAnimatedMessage.aiResponse === latestChatMessage.aiResponse) {
-      return;
-    }
-
-    // If the latest message in chatHistory doesn't have an aiResponse yet, do nothing
-    if (!latestChatMessage.aiResponse) return;
-
-    // Update animatedChatHistory with the latest message (which now has an aiResponse)
-    const newMessageIndex = chatHistory.length - 1;
-    const newMessage = chatHistory[newMessageIndex];
-
-    const updatedChatHistory = [...animatedChatHistory];
-    updatedChatHistory[newMessageIndex] = { ...newMessage, displayedAiResponse: '' };
-    setAnimatedChatHistory(updatedChatHistory);
-
-    let currentIndex = 0;
-    const fullContent = newMessage.aiResponse;
-    const typingSpeed = 10;
-
-    const typingInterval = setInterval(() => {
-      if (currentIndex < fullContent.length) {
-        setAnimatedChatHistory((prev) => {
-          const newHistory = [...prev];
-          newHistory[newMessageIndex].displayedAiResponse = fullContent.slice(0, currentIndex + 1);
-          return newHistory;
-        });
-        currentIndex++;
-      } else {
-        clearInterval(typingInterval);
-      }
-    }, typingSpeed);
-
-    // Clean up
-    return () => clearInterval(typingInterval);
-  }, [chatHistory]);
+            const typingInterval = setInterval(() => {
+              if (currentIndex < fullContent.length) {
+                setAnimatedChatHistory(prev => {
+                  return prev.map(msg => 
+                    msg.id === chatMsg.id
+                      ? { ...msg, displayedAiResponse: fullContent.slice(0, currentIndex + 1) }
+                      : msg
+                  );
+                });
+                currentIndex++;
+              } else {
+                clearInterval(typingInterval);
+              }
+            }, typingSpeed);
+          }, 100);
+          
+          return animatedMessage;
+        }
+        
+        // Message sans réponse ou existant
+        return {
+          ...chatMsg,
+          displayedAiResponse: chatMsg.aiResponse || ''
+        };
+      });
+    });
+  }, [chatHistory]);*/
 
   // Handle query submission to show user query immediately
-  const handleQuerySubmit = (query: string) => {
-    // Immediately append the user query to animatedChatHistory
-    const newMessage: ChatMessage = { userQuery: query, aiResponse: '' };
-    setAnimatedChatHistory((prev) => [...prev, newMessage]);
-
+  const handleQuerySubmit = (query: string, mode: string) => {
     // Call the original onQuerySubmit to trigger the API call
-    onQuerySubmit(query);
+    onQuerySubmit(query, mode);
   };
 
   // Determine language for syntax highlighting
@@ -351,40 +382,15 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   };
 
   return (
-    <div className="flex-1 flex flex-col h-screen">
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold">{file.name}</h2>
-        </div>
-        <div className="mt-4 flex justify-center">
-          <div className="w-full max-w-2xl">
-            {animatedChatHistory.length > 0 ? (
-              animatedChatHistory.map((message, index) => (
-                <div key={index} className="mb-4">
-                  {/* User Query (Right Side, Light Blue Background) */}
-                  <div className="flex justify-end mb-2">
-                    <div className="bg-blue-100 text-gray-800 p-3 rounded-lg max-w-md">
-                      <p>{message.userQuery}</p>
-                    </div>
-                  </div>
-                  {/* Model Response (Left Side, Light Gray Background) */}
-                  <div className="flex justify-start">
-                    <div className=" text-gray-800 p-3 max-w-md">
-                      <p className="whitespace-pre-wrap">{message.displayedAiResponse || ''}</p>
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-gray-600 text-center">No messages yet. Ask a question below!</p>
-            )}
-            {/* Loading Animation (Left Side) */}
-            {loading && (
-              <div className="flex justify-center items-center">
-                <div className="w-10 h-10 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
-            </div>
-            )}
-          </div>
+    <div className="h-screen flex flex-col flex-1 overflow-y-auto">
+
+      {/* Zone des messages */}
+      <div className="flex-1 overflow-y-auto p-8 flex justify-center">
+        <div className="w-full max-w-2xl">
+          <ResponseDisplay 
+            chatHistory={chatHistory}
+            loading={loading}
+          />
         </div>
       </div>
 
@@ -405,11 +411,12 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
                 onClick={() => setIsFileContentVisible(false)}
                 className="text-gray-500 hover:text-blue-700"
               >
+                -
                 <svg
                   className="h-5 w-5"
                   fill="none"
                   stroke="currentColor"
-                  viewBox="0.0.0 24"
+                  viewBox="0 0 0 24"
                   xmlns="http://www.w3.org/2000/svg"
                 >
                   <path
@@ -443,6 +450,7 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
             ) : isDocxFile ? (
               docxContent ? (
                 <CKEditor
+                  
                   editor={ClassicEditor}
                   data={editedDocxContent}
                   onChange={(event, editor) => {
@@ -450,6 +458,7 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
                     setEditedDocxContent(data);
                   }}
                   config={{
+                    licenseKey:'eyJhbGciOiJFUzI1NiJ9.eyJleHAiOjE3ODI2OTExOTksImp0aSI6ImE0ZWMxMGMyLWE2NDQtNGE3Ni04Y2NkLTQzZDQyMTBkNmU0MCIsInVzYWdlRW5kcG9pbnQiOiJodHRwczovL3Byb3h5LWV2ZW50LmNrZWRpdG9yLmNvbSIsImRpc3RyaWJ1dGlvbkNoYW5uZWwiOlsiY2xvdWQiLCJkcnVwYWwiXSwiZmVhdHVyZXMiOlsiRFJVUCIsIkUyUCIsIkUyVyJdLCJ2YyI6IjFiNmM2YzRlIn0.3fGRYoOuTpAx1bCLLtIRKWQhF36z3eGwJ-2XYEgJRfNUi96GCvms4LDwK9Sc8GtfW7edrsFfSE5Kov3lYQaL9Q',
                     toolbar: [
                       'heading', '|',
                       'bold', 'italic', 'underline', 'strikethrough', '|',
@@ -469,20 +478,22 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
                   {pdfError}
                 </div>
               ) : (
-                <Document
-                  file={details.content}
-                  onLoadSuccess={onDocumentLoadSuccess}
-                  onLoadError={onDocumentLoadError}
-                >
-                  {numPages &&
-                    Array.from(new Array(numPages), (el, index) => (
-                      <Page
-                        key={`page_${index + 1}`}
-                        pageNumber={index + 1}
-                        scale={0.5}
-                      />
-                    ))}
-                </Document>
+                <div ref={containerRef} style={{ width: '100%', overflow: 'auto' }}>
+                  <Document
+                    file={pdfFileData}
+                    onLoadSuccess={onDocumentLoadSuccess}
+                    onLoadError={onDocumentLoadError}
+                  >
+                    {numPages &&
+                      Array.from(new Array(numPages), (el, index) => (
+                        <Page
+                          key={`page_${index + 1}`}
+                          pageNumber={index + 1}
+                          width={containerWidth}
+                        />
+                      ))}
+                  </Document>
+                </div>
               )
             ) : (
               <div className="text-gray-600 text-sm">
@@ -493,13 +504,20 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
         </div>
       )}
 
-      <QueryForm
-        isFileContentVisible={isFileContentVisible}
-        setIsFileContentVisible={setIsFileContentVisible}
-        onQuerySubmit={handleQuerySubmit}
-        loading={loading}
-        selectedModel={selectedModel}
-      />
+      {/* Zone du formulaire (fixée en bas) */}
+      <div className="border-t p-4 bg-white">
+        <div className="w-full max-w-2xl mx-auto">
+          <QueryForm
+            isFileContentVisible={isFileContentVisible}
+            setIsFileContentVisible={setIsFileContentVisible}
+            onQuerySubmit={handleQuerySubmit}
+            loading={loading}
+            selectedModel={selectedModel}
+            researchMode={researchMode}
+            setResearchMode={setResearchMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

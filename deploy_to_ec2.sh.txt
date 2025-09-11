@@ -1,0 +1,31 @@
+#!/bin/bash
+
+#Variables
+EC2_USER="ec2-user"
+EC2_IP="18.223.125.154"
+PEM_FILE="/c/Users/KARIM NGAMI TEUMI/Downloads/flexianalyse.pem"
+EC2_PATH="/var/www/html"
+LOCAL_BUILD_DIR="dist"
+
+
+#1 build du projet React
+
+npm run build
+
+if [ $? -ne 0 ]; then
+  echo "❌ Échec du transfert des fichiers."
+  exit 1
+fi
+
+echo "✅ Transfert terminé."
+
+# 3. Déplacement des fichiers et reload de Nginx
+echo "🚀 Déploiement sur le serveur..."
+ssh -i "$PEM_FILE" $EC2_USER@$EC2_IP << EOF
+  sudo rm -rf $EC2_PATH*
+  sudo mv /home/$EC2_USER/* $EC2_PATH
+  sudo systemctl reload nginx
+  echo "✅ Déploiement terminé et Nginx relancé."
+EOF
+
+echo "🎉 Déploiement complet avec succès."

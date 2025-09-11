@@ -53,7 +53,20 @@ module.exports = {
   		}
   	}
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+	require("tailwindcss-animate"),
+	require("tailwind-scrollbar"),
+  ],
+  safelist: [
+	{
+	  pattern: /bg-(red|green|blue|yellow|purple|pink)-(100|200|300|400|500)/,
+	  variants: ['hover', 'focus']
+	},
+	{
+	  pattern: /text-(red|green|blue|yellow|purple|pink)-(100|200|300|400|500)/,
+	  variants: ['hover', 'focus']
+	}
+  ]
 }
 
 
