@@ -414,6 +414,118 @@ const FlexiAnalyseApp: React.FC = () => {
     }
   };
 
+  // Nouvelle fonction pour gérer les requêtes avec streaming
+  const handleQuerySubmitWithStream = async (query: string, mode: 'online' | 'local') => {
+    // Si mode local, utiliser l'ancienne méthode pour l'instant
+    if (mode === 'local') {
+      return handleQuerySubmit(query, mode);
+    }
+
+    const language = detectLanguage(query);
+    console.log(`🚀 Mode streaming activé - Mode: ${mode}, Langue: ${language}`);
+    
+    const messageId = Math.random().toString(36).substr(2, 9);
+    const newMessage: ChatMessage = { 
+      id: messageId,
+      userQuery: query, 
+      aiResponse: '' 
+    };
+    
+    // Ajouter le message à l'historique
+    setChatHistory((prev) => [...prev, newMessage]);
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${apiUrl}/query-stream`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Session-ID': sessionId
+        },
+        body: JSON.stringify({
+          user_query: query,
+          selected_model: selectedModel,
+          language: language,
+          research_mode: mode,
+          enable_online_search: mode === 'online'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Lire le stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedResponse = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          // Décoder le chunk
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            // Traiter les lignes SSE (format: "data: {...}")
+            if (line.startsWith('data: ')) {
+              try {
+                const jsonData = JSON.parse(line.slice(6));
+                
+                if (jsonData.content) {
+                  // Ajouter le contenu à la réponse accumulée
+                  accumulatedResponse += jsonData.content;
+                  
+                  // Mettre à jour l'interface en temps réel
+                  setChatHistory((prev) => 
+                    prev.map(msg => 
+                      msg.id === messageId 
+                        ? { ...msg, aiResponse: accumulatedResponse }
+                        : msg
+                    )
+                  );
+                }
+                
+                if (jsonData.done) {
+                  console.log('✅ Streaming terminé');
+                }
+                
+                if (jsonData.error) {
+                  console.error('❌ Erreur streaming:', jsonData.error);
+                  throw new Error(jsonData.error);
+                }
+                
+              } catch (e) {
+                // Ignorer les erreurs de parsing pour les lignes vides
+                if (line.trim() !== 'data: ') {
+                  console.error('Erreur parsing SSE:', e);
+                }
+              }
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('Erreur lors du streaming:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Erreur lors du traitement de votre requête.';
+      
+      setChatHistory((prev) => {
+        return prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, aiResponse: `Erreur: ${errorMessage}` }
+            : msg
+        );
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   const getRepoStructure = useCallback((structureFn: () => string, files: File[]) => {
     const structure = structureFn();
     setRepoStructure(structure);
@@ -501,7 +613,7 @@ const FlexiAnalyseApp: React.FC = () => {
             setIsFileContentVisible={setIsFileContentVisible}
             chatHistory={chatHistory}
             setFileDetails={setFileDetails}
-            onQuerySubmit={handleQuerySubmit}
+            onQuerySubmit={handleQuerySubmitWithStream}
             loading={loading}
             selectedModel={selectedModel}
             researchMode={researchMode}
@@ -513,7 +625,7 @@ const FlexiAnalyseApp: React.FC = () => {
             selectedModel={selectedModel}
             isFileContentVisible={isFileContentVisible}
             setIsFileContentVisible={setIsFileContentVisible}
-            onQuerySubmit={handleQuerySubmit}
+            onQuerySubmit={handleQuerySubmitWithStream}
             loading={loading}
             researchMode={researchMode}
             setResearchMode={setResearchMode}
