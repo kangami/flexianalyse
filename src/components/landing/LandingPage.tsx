@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, FileText, Search, Zap, Shield, Globe, Brain, Sparkles, Target } from 'lucide-react';
 import LoginModal from '../auth/LoginModal';
+import { Link } from 'react-router-dom';
 
 const LandingPage: React.FC = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -264,8 +265,10 @@ const LandingPage: React.FC = () => {
               <span className="text-xl font-bold">FlexiAnalyse</span>
             </div>
             <div className="flex items-center space-x-6 text-gray-400">
-              <span className="hover:text-white transition-colors cursor-pointer">Pro</span>
-              <span className="hover:text-white transition-colors cursor-pointer">Enterprise</span>
+              <Link to="/privacy-policy" className="hover:text-white transition-colors cursor-pointer">Privacy Policy</Link>
+              <Link to="/terms-of-use" className="hover:text-white transition-colors cursor-pointer">Terms of Use</Link>
+              <span className="hover:text-white transition-colors cursor-pointer">About Us</span>
+              <span className="hover:text-white transition-colors cursor-pointer">Contact</span>
               <span className="hover:text-white transition-colors cursor-pointer">API</span>
               <span className="hover:text-white transition-colors cursor-pointer">Blog</span>
               <span className="hover:text-white transition-colors cursor-pointer">Careers</span>

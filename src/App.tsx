@@ -1,15 +1,16 @@
 // src/App.tsx - Version avec Error Boundary
 import React from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/auth/AuthProvider';
 import LandingPage from './components/landing/LandingPage';
 import FlexiAnalyseApp from './FlexiAnalyseApp';
 import ErrorBoundary from './components/ErrorBoundary';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfUse from './pages/TermsOfUse';
 
 // Composant qui gère l'affichage conditionnel
 const AppContent: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-
-  console.log('AppContent - État d\'authentification:', { isAuthenticated, isLoading });
 
   // Affichage pendant le chargement
   if (isLoading) {
@@ -28,14 +29,22 @@ const AppContent: React.FC = () => {
     );
   }
 
-  // Affichage conditionnel selon l'état d'authentification
-  if (true) { // Remplacer par isAuthenticated pour la version finale de l'application
-    console.log('Affichage de FlexiAnalyseApp');
-    return <FlexiAnalyseApp />;
-  } else {
-    console.log('Affichage de LandingPage');
-    return <LandingPage />;
-  }
+  return (
+    <Routes>
+      {/* Page publique */}
+      <Route path="/" element={isAuthenticated ? <Navigate to="/app" replace /> : <LandingPage />} />
+      
+      {/* App principale (protégée) */}
+      <Route path="/app" element={isAuthenticated ? <FlexiAnalyseApp /> : <Navigate to="/" replace />} />
+      
+      {/* Pages légales */}
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/terms-of-use" element={<TermsOfUse />} />
+      
+      {/* Catch-all (optionnel) */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 };
 
 // Composant principal App
@@ -44,7 +53,9 @@ const App: React.FC = () => {
     <ErrorBoundary>
       <div className="min-h-screen w-full">
         <AuthProvider>
+
           <AppContent />
+          
         </AuthProvider>
       </div>
     </ErrorBoundary>

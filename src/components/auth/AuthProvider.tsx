@@ -23,7 +23,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   });
 
   const [googleClientId, setGoogleClientId] = useState<string>('');
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const API_URL = import.meta.env.VITE_API_URL || 'https://flexianalyse.com' //'http://localhost:5000';
 
   useEffect(() => {
     const initAuth = async () => {
