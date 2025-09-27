@@ -86,3 +86,66 @@ html, body {
     @apply border-border;
   }
 }
+
+@keyframes gradientFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes borderPulse {
+  0% { 
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7),
+                0 0 0 0 rgba(147, 51, 234, 0.7),
+                0 0 0 0 rgba(236, 72, 153, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0),
+                0 0 0 15px rgba(147, 51, 234, 0),
+                0 0 0 20px rgba(236, 72, 153, 0);
+  }
+  100% { 
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0),
+                0 0 0 0 rgba(147, 51, 234, 0),
+                0 0 0 0 rgba(236, 72, 153, 0);
+  }
+}
+
+@keyframes borderGlow {
+  0% { border-color: rgb(59, 130, 246); }
+  25% { border-color: rgb(147, 51, 234); }
+  50% { border-color: rgb(236, 72, 153); }
+  75% { border-color: rgb(251, 191, 36); }
+  100% { border-color: rgb(59, 130, 246); }
+}
+
+.gradient-text-flow {
+  background: linear-gradient(-45deg, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #10b981);
+  background-size: 400% 400%;
+  animation: gradientFlow 3s ease-in-out infinite;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.pulse-border {
+  animation: borderPulse 2s infinite;
+  border: 3px solid transparent;
+  background: linear-gradient(45deg, #3b82f6, #8b5cf6, #ec4899) border-box;
+  background-clip: padding-box, border-box;
+}
+
+.glow-border {
+  animation: borderGlow 3s ease-in-out infinite;
+  border: 2px solid;
+}
+
+.typing-cursor::after {
+  content: '|';
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}

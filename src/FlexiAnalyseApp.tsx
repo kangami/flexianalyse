@@ -74,7 +74,7 @@ const FlexiAnalyseApp: React.FC = () => {
     setIsFileContentVisible(true);
   };
 
-  const apiUrl = 'http://127.0.0.1:5000'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+  const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
 
   // Fonctions d'extraction de texte (restent identiques)
   const extractTextFromDocx = async (content: ArrayBuffer): Promise<string> => {

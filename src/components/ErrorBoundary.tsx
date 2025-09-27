@@ -40,7 +40,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
             </h2>
             
             <p className="text-gray-600 mb-4">
-              L'application a rencontré une erreur inattendue. Veuillez rafraîchir la page.
+              FlexiAnalyse a rencontré une erreur inattendue. Veuillez rafraîchir la page.
             </p>
             
             <div className="space-y-3">
