@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 from dotenv import load_dotenv
 from docx import Document as DocxDocument
@@ -88,7 +88,7 @@ MODEL_CONFIG = {
     "mistral": {
         "name": "Mistral Medium",
         "provider": "Mistral AI",
-        "model_id": "mistral-medium-2505",
+        "model_id": "mistral-medium-latest",
         "max_tokens": 500,
         "description": "Efficient multilingual model",
         "cost_tier": "medium",
@@ -119,7 +119,7 @@ MODEL_CONFIG = {
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODELS = ["llama3.2", "llama3"]
 DEFAULT_MODEL = "gpt-3.5-turbo"  # Set GPT-3.5-Turbo as default
-MISTRAL_MODEL = "mistral-medium-2505"
+MISTRAL_MODEL = "mistral-medium-latest"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
@@ -577,6 +577,126 @@ def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3):
                 raise e
     
     raise RuntimeError("[OpenAI] Max retries exceeded")
+
+def stream_response(prompt, selected_model="gpt-3.5-turbo"):
+    """
+    Génère une réponse en streaming pour n'importe quel modèle
+    """
+    model_config = get_model_config(selected_model)
+    
+    try:
+        # Pour les modèles OpenAI avec support du streaming
+        if selected_model.lower() in ["gpt-3.5-turbo", "gpt-4o", "openai"]:
+            model_id = model_config["model_id"]
+            
+            stream = openai_client.chat.completions.create(
+                model=model_id,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5,
+                max_tokens=model_config.get("max_tokens", 500),
+                stream=True
+            )
+            
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
+            
+            yield f"data: {json.dumps({'done': True})}\n\n"
+            
+        # Pour Mistral - pas de streaming natif, on simule
+        elif selected_model.lower() == "mistral":
+            try:
+                # Appel normal à Mistral (sans streaming)
+                response = call_mistral_api(prompt)
+                
+                # Simuler le streaming en envoyant par morceaux
+                words = response.split(' ')
+                for i in range(0, len(words), 3):  # Envoyer 3 mots à la fois
+                    chunk = ' '.join(words[i:i+3])
+                    if i + 3 < len(words):
+                        chunk += ' '
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+                    time.sleep(0.05)  # Petit délai pour simuler le streaming
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+            except Exception as mistral_error:
+                # Si Mistral échoue, fallback vers GPT-3.5
+                logger.warning(f"Mistral failed: {str(mistral_error)}, falling back to GPT-3.5")
+                yield f"data: {json.dumps({'warning': 'Mistral indisponible, utilisation de GPT-3.5'})}\n\n"
+                
+                # Utiliser GPT-3.5 en fallback
+                stream = openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
+                    max_tokens=500,
+                    stream=True
+                )
+                
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+        
+        # Pour Llama/Ollama - pas de streaming natif
+        elif selected_model.lower() in ["llama3", "llama3.2"]:
+            try:
+                response = call_ollama_api(prompt, selected_model)
+                
+                # Simuler le streaming
+                words = response.split(' ')
+                for i in range(0, len(words), 3):
+                    chunk = ' '.join(words[i:i+3])
+                    if i + 3 < len(words):
+                        chunk += ' '
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+                    time.sleep(0.05)
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+            except Exception as ollama_error:
+                logger.warning(f"Ollama failed: {str(ollama_error)}, falling back to GPT-3.5")
+                yield f"data: {json.dumps({'warning': 'Ollama indisponible, utilisation de GPT-3.5'})}\n\n"
+                
+                # Fallback vers GPT-3.5
+                stream = openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
+                    max_tokens=500,
+                    stream=True
+                )
+                
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+        
+        else:
+            # Modèle inconnu, utiliser GPT-3.5 par défaut
+            logger.warning(f"Unknown model {selected_model}, using GPT-3.5")
+            yield f"data: {json.dumps({'warning': f'Modèle {selected_model} inconnu, utilisation de GPT-3.5'})}\n\n"
+            
+            stream = openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.5,
+                max_tokens=500,
+                stream=True
+            )
+            
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
+            
+            yield f"data: {json.dumps({'done': True})}\n\n"
+            
+    except Exception as e:
+        logger.error(f"Erreur streaming: {str(e)}")
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 def call_mistral_api(prompt, max_retries=3):
     mistral_api_key = os.getenv("MISTRAL_API_KEY")
@@ -1394,6 +1514,107 @@ async def handle_query():
             "mode": effective_mode,
             "model_used": selected_model
         }), 500
+
+@app.route('/query-stream', methods=['POST'])
+def handle_query_stream():
+    """
+    Version streaming de la route query pour réponses en temps réel
+    """
+    data = request.get_json()
+    
+    # Récupérer les paramètres
+    user_query = data.get('user_query')
+    research_mode = data.get('research_mode', 'local')
+    selected_model = data.get('selected_model', DEFAULT_MODEL)
+    language = data.get('language', 'en')
+    session_id = request.headers.get('Session-ID', 'default')
+    
+    if not user_query:
+        return jsonify({"error": "user_query est requis"}), 400
+    
+    # Validation du modèle
+    if selected_model not in MODEL_CONFIG:
+        logger.warning(f"Unknown model {selected_model}, using default {DEFAULT_MODEL}")
+        selected_model = DEFAULT_MODEL
+    
+    logger.info(f"🚀 Streaming request - Model: {selected_model}, Mode: {research_mode}")
+    
+    try:
+        # MODE ONLINE
+        if research_mode == 'online' or data.get('enable_online_search'):
+            t = translations.get(language, translations['en'])
+            
+            prompt = (
+                f"{t['online_mode_title']}\n"
+                f"{t['recent_info_mention']}\n\n"
+                f"{t['question']}: {user_query}\n\n"
+                f"{t['online_instructions_title']}\n"
+                f"{t['give_best_answer']}\n"
+                f"{t['be_precise_dates']}\n"
+                f"{t['mention_recent_useful']}\n\n"
+                f"{t['emoji']}"
+            )
+            
+            return Response(
+                stream_with_context(stream_response(prompt, selected_model)),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'X-Accel-Buffering': 'no'
+                }
+            )
+        
+        # MODE LOCAL
+        elif research_mode == 'local':
+            file_name = data.get('file_name')
+            file_content = data.get('file_content', '')
+            directory_content = data.get('directory_content', [])
+            repo_structure = data.get('repo_structure', '')
+            
+            if not file_name:
+                return jsonify({"error": "Mode local nécessite un file_name"}), 400
+            
+            t = translations.get(language, translations['en'])
+            
+            # Construire le prompt local
+            directory_content_summary = ' '.join(
+                [f"{t['other_file']}: {doc['fileName']} : {doc['content']}" 
+                 for doc in directory_content]
+            ) if directory_content else t['no_other_files']
+            
+            prompt = (
+                f"{t['local_analysis_mode']}\n"
+                f"{t['no_external_search']}\n\n"
+                f"{t['project_structure']}:\n{repo_structure}\n\n"
+                f"{t['main_file']}: {file_name}\n\n"
+                f"{t['file_content']}:\n{file_content}\n\n"
+                f"{t['directory_context']}:\n{directory_content_summary}\n\n"
+                f"{t['question']}: {user_query}\n\n"
+                f"{t['instructions']}:\n"
+                f"{t['base_response_only']}\n"
+                f"{t['missing_info_clarify']}\n"
+                f"{t['no_speculation']}\n"
+                f"{t['focus_local_analysis']}\n\n"
+                f"{t['emoji']}"
+            )
+            
+            return Response(
+                stream_with_context(stream_response(prompt, selected_model)),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'X-Accel-Buffering': 'no'
+                }
+            )
+        
+        else:
+            return jsonify({"error": f"Mode non supporté: {research_mode}"}), 400
+            
+    except Exception as e:
+        logger.error(f"Erreur dans handle_query_stream: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/vector-store-status', methods=['GET'])
