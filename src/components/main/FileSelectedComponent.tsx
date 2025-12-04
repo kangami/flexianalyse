@@ -44,6 +44,19 @@ interface ChatMessage {
   displayedAiResponse?: string;
 }
 
+interface SuggestedAction {
+  id: string;
+  title: string;
+  description: string;
+  sample_prompt: string;
+}
+
+interface EditableFile {
+  file: File;
+  content: string | ArrayBuffer;
+  type: 'code' | 'docx';
+}
+
 interface FileSelectedComponentProps {
   file: File;
   details: FileDetails;
@@ -56,10 +69,16 @@ interface FileSelectedComponentProps {
   selectedModel: string;
   researchMode: 'online' | 'local';
   setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
+  suggestedActions?: SuggestedAction[];
+  onSuggestedActionClick?: (action: SuggestedAction) => void;
+  editableFiles?: EditableFile[];
+  onTextSelect?: (text: string) => void;
+  getEditableFiles?: () => Promise<EditableFile[]>;
+  isSearchingOnline?: boolean;
 }
 
 const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, details, isFileContentVisible, 
-  setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, researchMode, setResearchMode, loading, selectedModel}) => {
+  setIsFileContentVisible, chatHistory, setFileDetails, onQuerySubmit, researchMode, setResearchMode, loading, selectedModel, suggestedActions = [], onSuggestedActionClick, editableFiles = [], onTextSelect, getEditableFiles, isSearchingOnline = false}) => {
   // Define code file extensions
   const codeExtensions = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
@@ -88,6 +107,12 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
 
   // State for animated chat messages
   const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
+  
+  // State for inline editing
+  const [selectedTextToInsert, setSelectedTextToInsert] = useState<string>('');
+  const [showInsertDialog, setShowInsertDialog] = useState<boolean>(false);
+  const [insertLineNumber, setInsertLineNumber] = useState<string>('');
+  const [insertMode, setInsertMode] = useState<'auto' | 'manual'>('auto');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(600); // valeur par défaut
@@ -364,6 +389,51 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   };
 
   // Save edited .docx content
+  // Fonction pour insérer du texte dans le document
+  const handleInsertText = (text: string, lineNumber?: number) => {
+    if (isCodeFile && typeof details.content === 'string') {
+      const lines = codeContent.split('\n');
+      
+      if (lineNumber !== undefined && lineNumber > 0 && lineNumber <= lines.length) {
+        // Insérer à la ligne spécifiée (index 0-based)
+        lines.splice(lineNumber - 1, 0, text);
+      } else {
+        // Auto-ajouter à la fin
+        lines.push(text);
+      }
+      
+      const newContent = lines.join('\n');
+      setCodeContent(newContent);
+      
+      // Mettre à jour fileDetails
+      setFileDetails({
+        ...details,
+        content: newContent
+      });
+    } else if (isDocxFile && editedDocxContent) {
+      // Pour DOCX, on insère dans le contenu HTML
+      if (lineNumber !== undefined && lineNumber > 0) {
+        // Essayer d'insérer à une position spécifique (approximatif pour HTML)
+        const htmlLines = editedDocxContent.split('</p>');
+        if (lineNumber <= htmlLines.length) {
+          const insertIndex = lineNumber - 1;
+          htmlLines[insertIndex] = htmlLines[insertIndex] + `<p>${text}</p>`;
+          setEditedDocxContent(htmlLines.join('</p>'));
+        } else {
+          // Ajouter à la fin
+          setEditedDocxContent(editedDocxContent + `<p>${text}</p>`);
+        }
+      } else {
+        // Auto-ajouter à la fin
+        setEditedDocxContent(editedDocxContent + `<p>${text}</p>`);
+      }
+    }
+    
+    setShowInsertDialog(false);
+    setSelectedTextToInsert('');
+    setInsertLineNumber('');
+  };
+
   const handleSaveDocx = () => {
     const paragraphs = parseHtmlToDocx(editedDocxContent);
     const doc = new DocxDocument({
@@ -382,20 +452,32 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   };
 
   return (
-    <div className="h-screen flex flex-col flex-1 overflow-y-auto">
+    <div className="h-screen flex flex-col flex-1 overflow-y-auto" style={{ overflowY: 'auto', scrollbarWidth: 'thin' }}>
 
       {/* Zone des messages */}
-      <div className="flex-1 overflow-y-auto p-8 flex justify-center">
-        <div className="w-full max-w-2xl">
+      <div className="flex-1 overflow-y-auto p-2 md:p-4 flex justify-center">
+        <div className="w-full max-w-4xl">
           <ResponseDisplay 
             chatHistory={chatHistory}
             loading={loading}
+            enableTextSelection={isFileContentVisible && (isCodeFile || isDocxFile)}
+            editableFiles={editableFiles}
+            onTextSelect={onTextSelect || ((text) => {
+              // S'assurer que le fichier est visible quand on sélectionne du texte
+              if (!isFileContentVisible) {
+                setIsFileContentVisible(true);
+              }
+              setSelectedTextToInsert(text);
+              setShowInsertDialog(true);
+            })}
+            getEditableFiles={getEditableFiles}
+            isSearchingOnline={isSearchingOnline}
           />
         </div>
       </div>
 
       {isFileContentVisible && (
-        <div className="fixed pb-20 mb-8 ml-20 mr-20 h-2/3 bottom-20 left-72 right-4 z-10 bg-gray-50 p-4 rounded-md shadow-md border border-gray-200">
+        <div className="fixed pb-32 mb-4 ml-20 mr-4 h-[calc(100vh-200px)] bottom-32 left-72 right-4 z-20 bg-gray-50 p-4 rounded-md shadow-md border border-gray-200">
           <div className="flex justify-between items-center">
             <h3 className="text-sm font-semibold">{file.name}</h3>
             <div className="flex items-center space-x-2">
@@ -504,9 +586,9 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
         </div>
       )}
 
-      {/* Zone du formulaire (fixée en bas) */}
-      <div className="border-t p-4 bg-white">
-        <div className="w-full max-w-2xl mx-auto">
+      {/* Zone du formulaire (fixée en bas, alignée avec QueryForm) */}
+      <div className="border-t bg-white">
+        <div className="w-full max-w-3xl mx-auto">
           <QueryForm
             isFileContentVisible={isFileContentVisible}
             setIsFileContentVisible={setIsFileContentVisible}
@@ -515,9 +597,102 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
             selectedModel={selectedModel}
             researchMode={researchMode}
             setResearchMode={setResearchMode}
+            suggestedActions={suggestedActions}
+            onSuggestedActionClick={onSuggestedActionClick}
           />
         </div>
       </div>
+
+      {/* Dialog pour choisir où insérer le texte */}
+      {showInsertDialog && selectedTextToInsert && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">
+              📝 Insérer le texte dans le document
+            </h3>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-2">Texte sélectionné :</p>
+              <div className="bg-gray-50 p-3 rounded border border-gray-200 max-h-32 overflow-y-auto">
+                <p className="text-sm text-gray-800">{selectedTextToInsert}</p>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Mode d'insertion :
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="auto"
+                    checked={insertMode === 'auto'}
+                    onChange={(e) => setInsertMode(e.target.value as 'auto' | 'manual')}
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-700">Auto : Ajouter à la fin du document</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    value="manual"
+                    checked={insertMode === 'manual'}
+                    onChange={(e) => setInsertMode(e.target.value as 'auto' | 'manual')}
+                    className="mr-2"
+                  />
+                  <span className="text-sm text-gray-700">Manuel : Spécifier le numéro de ligne</span>
+                </label>
+              </div>
+            </div>
+
+            {insertMode === 'manual' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Numéro de ligne :
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  value={insertLineNumber}
+                  onChange={(e) => setInsertLineNumber(e.target.value)}
+                  placeholder="Ex: 10"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {isCodeFile 
+                    ? `Le document a ${codeContent.split('\n').length} lignes`
+                    : 'Le texte sera inséré à la position approximative'}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setShowInsertDialog(false);
+                  setSelectedTextToInsert('');
+                  setInsertLineNumber('');
+                }}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 text-sm font-medium"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  const lineNum = insertMode === 'manual' && insertLineNumber 
+                    ? parseInt(insertLineNumber, 10) 
+                    : undefined;
+                  handleInsertText(selectedTextToInsert, lineNum);
+                }}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm font-medium"
+              >
+                {insertMode === 'auto' ? 'Ajouter' : 'Insérer à la ligne'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

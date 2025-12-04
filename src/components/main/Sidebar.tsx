@@ -118,15 +118,44 @@ class AIBackendService {
       }
       
       const data = await response.json();
+
+      // Inject client-side "Auto" smart selector model at the top
+      const autoModel: ModelInfo = {
+        id: 'auto',
+        name: 'Auto (recommended)',
+        provider: 'Smart selector',
+        description: 'Automatically picks the best model for each query based on its content.',
+        cost_tier: 'smart',
+        is_default: true,
+      };
+
+      const modelsWithAuto = [
+        autoModel,
+        ...(Array.isArray(data.models) ? data.models : []),
+      ];
+
+      const enrichedData = {
+        ...data,
+        models: modelsWithAuto,
+        default_model: 'auto',
+      };
+
       // Cache the result
-      cacheUtils.set(CACHE_CONFIG.MODELS_KEY, data);
-      return data;
+      cacheUtils.set(CACHE_CONFIG.MODELS_KEY, enrichedData);
+      return enrichedData;
     } catch (error) {
       console.error('Error fetching models:', error);
       // Fallback models if backend is unavailable
       const fallbackData = {
         models: [
-          { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI', is_default: true, cost_tier: 'low' },
+          {
+            id: 'auto',
+            name: 'Auto (recommended)',
+            provider: 'Smart selector',
+            is_default: true,
+            cost_tier: 'smart',
+          },
+          { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI', is_default: false, cost_tier: 'low' },
           { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', is_default: false, cost_tier: 'high' },
           { id: 'gpt-5', name: 'GPT-5', provider: 'OpenAI', is_default: false, cost_tier: 'premium' },
           { id: 'gpt-5-nano', name: 'GPT-5 Nano', provider: 'OpenAI', is_default: false, cost_tier: 'premium' },
@@ -134,7 +163,7 @@ class AIBackendService {
           { id: 'llama3', name: 'Llama 3.2', provider: 'Local', is_default: false, cost_tier: 'free' },
           { id: 'openai', name: 'OpenAI Legacy', provider: 'OpenAI', is_default: false, cost_tier: 'medium' }
         ],
-        default_model: 'gpt-3.5-turbo'
+        default_model: 'auto'
       };
       // Cache fallback data for shorter time
       cacheUtils.set(CACHE_CONFIG.MODELS_KEY, fallbackData);
@@ -257,8 +286,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Debounced upload function
   const debouncedUpload = useCallback(
     debounce(async (filesToUpload: File[], model: string) => {
+      const effectiveModelForUploads = model === 'auto' ? 'gpt-3.5-turbo' : model;
       try {
-        await apiService.uploadFiles(filesToUpload, model);
+        await apiService.uploadFiles(filesToUpload, effectiveModelForUploads);
         console.log('Files uploaded successfully to backend');
         setPendingFiles(prev => prev.filter(f => !filesToUpload.includes(f)));
       } catch (uploadError) {
@@ -550,7 +580,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       // Upload this specific file if not already uploaded
       if (pendingFiles.includes(file)) {
         try {
-          await apiService.uploadFiles([file], selectedModel);
+          const effectiveModelForUploads = selectedModel === 'auto' ? 'gpt-3.5-turbo' : selectedModel;
+          await apiService.uploadFiles([file], effectiveModelForUploads);
           setPendingFiles(prev => prev.filter(f => f !== file));
           console.log('File uploaded on demand:', file.name);
         } catch (uploadError) {

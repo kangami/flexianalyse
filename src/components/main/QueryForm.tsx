@@ -1,5 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 
+interface SuggestedAction {
+  id: string;
+  title: string;
+  description: string;
+  sample_prompt: string;
+}
+
 interface QueryFormProps {
     isFileContentVisible: boolean;
     setIsFileContentVisible: (visible: boolean) => void;
@@ -8,6 +15,8 @@ interface QueryFormProps {
     selectedModel: string;
     researchMode: 'online' | 'local';
     setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
+    suggestedActions?: SuggestedAction[];
+    onSuggestedActionClick?: (action: SuggestedAction) => void;
 }
 
 const QueryForm: React.FC<QueryFormProps> = ({ 
@@ -17,7 +26,9 @@ const QueryForm: React.FC<QueryFormProps> = ({
     loading, 
     selectedModel,
     researchMode, 
-    setResearchMode 
+    setResearchMode,
+    suggestedActions = [],
+    onSuggestedActionClick
 }) => {
     const [query, setQuery] = useState<string>('');
     const [isMobile, setIsMobile] = useState(false);
@@ -79,6 +90,24 @@ const QueryForm: React.FC<QueryFormProps> = ({
         )}
 
         <div className="p-3 sm:p-4">
+          {/* Panneau d'actions suggérées avec scroll horizontal */}
+          {suggestedActions.length > 0 && onSuggestedActionClick && (
+            <div className="mb-2 pb-2 border-b border-gray-200">
+              <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+                {suggestedActions.map((action) => (
+                  <button
+                    key={action.id}
+                    onClick={() => onSuggestedActionClick(action)}
+                    className="flex-shrink-0 bg-white hover:bg-blue-50 text-gray-800 border border-gray-200 rounded-md px-2 py-1 text-[10px] leading-tight transition-colors shadow-sm hover:shadow whitespace-nowrap"
+                    title={action.description}
+                  >
+                    {action.title}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Textarea */}
           <textarea
             ref={textareaRef}
@@ -104,11 +133,13 @@ const QueryForm: React.FC<QueryFormProps> = ({
             {/* Left controls */}
             <div className="flex flex-wrap gap-2">
               {/* Model badge */}
-              <span className={`
-                bg-gray-100 text-gray-700 rounded-full px-3 py-1 text-xs
-                ${isMobile ? 'font-medium' : 'font-normal'}
-              `}>
-                {selectedModel}
+              <span
+                className={`
+                  bg-gray-100 text-gray-700 rounded-full px-3 py-1 text-xs
+                  ${isMobile ? 'font-medium' : 'font-normal'}
+                `}
+              >
+                {selectedModel === 'auto' ? 'Auto model selection' : selectedModel}
               </span>
 
               {/* File toggle */}

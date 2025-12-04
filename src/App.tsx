@@ -31,18 +31,9 @@ const AppContent: React.FC = () => {
 
   return (
     <Routes>
-      {/* Page publique */}
-      <Route path="/" element={isAuthenticated ? <Navigate to="/app" replace /> : <LandingPage />} />
-      
-      {/* App principale (protégée) */}
-      <Route path="/app" element={isAuthenticated ? <FlexiAnalyseApp /> : <Navigate to="/" replace />} />
-      
-      {/* Pages légales */}
-      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-      <Route path="/terms-of-use" element={<TermsOfUse />} />
       
       {/* Catch-all (optionnel) */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<FlexiAnalyseApp />} />
     </Routes>
   );
 };

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from flask import request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from google.oauth2 import id_token
-from google.auth.transport import requests as grequests
+from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ def auth_google():
         logger.info("Vérification du token Google...")
         idinfo = id_token.verify_oauth2_token(
             google_token, 
-            grequests.Request(), 
+            Request(), 
             client_id
         )
         
@@ -211,11 +211,14 @@ def auth_google():
         logger.info(f"Token Google valide pour: {email}")
         
         # Sauvegarder/récupérer l'utilisateur
+        logger.info("Ouverture de la connexion SQLite...")
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
+        logger.info("Connexion SQLite ouverte.")
         
         cursor.execute('SELECT * FROM users WHERE email = ? OR google_id = ?', (email, google_id))
         user = cursor.fetchone()
+        logger.info(f"Utilisateur trouvé: {user}")
         
         if user:
             # Utilisateur existant
@@ -250,7 +253,10 @@ def auth_google():
         }
         
         token = create_jwt_token(user_data)
+        logger.info("Token JWT créé.")
+
         save_marketing_email(email, final_name, 'google')
+        logger.info("Email marketing sauvegardé.")
         
         logger.info(f"Authentification Google réussie pour: {email}")
         
@@ -267,7 +273,7 @@ def auth_google():
             'error': 'Token Google invalide'
         }), 400
     except Exception as e:
-        logger.error(f"Erreur authentification Google: {str(e)}")
+        logger.error(f"Erreur lors de l'authentification Google: {str(e)}", exc_info=True) 
         return jsonify({
             'success': False,
             'error': 'Erreur lors de l\'authentification Google'

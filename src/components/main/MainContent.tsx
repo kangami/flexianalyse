@@ -2,6 +2,19 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import QueryForm from "./QueryForm";
 import ResponseDisplay from "./ResponseDisplay";
 
+interface SuggestedAction {
+  id: string;
+  title: string;
+  description: string;
+  sample_prompt: string;
+}
+
+interface EditableFile {
+  file: File;
+  content: string | ArrayBuffer;
+  type: 'code' | 'docx';
+}
+
 interface MainContentProps {
   responses: { query: string; answer: string }[];
   selectedModel: string;
@@ -12,6 +25,11 @@ interface MainContentProps {
   researchMode: 'online' | 'local';
   setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
   chatHistory: ChatMessage[];
+  suggestedActions?: SuggestedAction[];
+  onSuggestedActionClick?: (action: SuggestedAction) => void;
+  editableFiles?: EditableFile[];
+  onTextSelect?: (text: string) => void;
+  getEditableFiles?: () => Promise<EditableFile[]>;
 }
 
 interface ChatMessage {
@@ -25,7 +43,7 @@ interface Response {
   answer: string;
 }
 
-const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isFileContentVisible, setIsFileContentVisible, onQuerySubmit, loading, researchMode, chatHistory, setResearchMode}) => {
+const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isFileContentVisible, setIsFileContentVisible, onQuerySubmit, loading, researchMode, chatHistory, setResearchMode, suggestedActions = [], onSuggestedActionClick, editableFiles = [], onTextSelect, getEditableFiles, isSearchingOnline = false}) => {
   // State for animated chat messages
   const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
   // Typing animation effect for aiResponse
@@ -98,13 +116,17 @@ const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isF
   const chatMessages = convertResponsesToChatMessages(responses);
   
   return (
-    <div className="h-screen flex flex-col flex-1 overflow-y-auto">
+    <div className="h-screen flex flex-col flex-1 overflow-y-auto" style={{ overflowY: 'auto', scrollbarWidth: 'thin' }}>
       {/* Zone des messages - Modifiée pour le responsive */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center">
-        <div className="w-full max-w-2xl px-2 md:px-0">
+      <div className="flex-1 overflow-y-auto p-2 md:p-4 flex justify-center">
+        <div className="w-full max-w-4xl px-2 md:px-0">
           <ResponseDisplay 
             chatHistory={chatHistory}
             loading={loading}
+            editableFiles={editableFiles}
+            onTextSelect={onTextSelect}
+            getEditableFiles={getEditableFiles}
+            isSearchingOnline={isSearchingOnline}
           />
         </div>
       </div>
@@ -120,6 +142,8 @@ const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isF
             selectedModel={selectedModel}
             researchMode={researchMode}
             setResearchMode={setResearchMode}
+            suggestedActions={suggestedActions}
+            onSuggestedActionClick={onSuggestedActionClick}
           />
         </div>
       </div>
