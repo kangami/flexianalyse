@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../auth/AuthProvider';
 
 interface SuggestedAction {
   id: string;
@@ -17,6 +19,7 @@ interface QueryFormProps {
     setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
     suggestedActions?: SuggestedAction[];
     onSuggestedActionClick?: (action: SuggestedAction) => void;
+    language?: 'en' | 'fr' | 'es';
 }
 
 const QueryForm: React.FC<QueryFormProps> = ({ 
@@ -28,12 +31,45 @@ const QueryForm: React.FC<QueryFormProps> = ({
     researchMode, 
     setResearchMode,
     suggestedActions = [],
-    onSuggestedActionClick
+    onSuggestedActionClick,
+    language = 'en'
 }) => {
+    const { t } = useLanguage();
+    const { isAuthenticated } = useAuth();
     const [query, setQuery] = useState<string>('');
     const [isMobile, setIsMobile] = useState(false);
+    const [alertMessage, setAlertMessage] = useState<string>('');
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    
+    // Faire disparaître automatiquement l'alerte après 5 secondes
+    useEffect(() => {
+      if (alertMessage) {
+        const timer = setTimeout(() => {
+          setAlertMessage('');
+        }, 5000);
+        return () => clearTimeout(timer);
+      }
+    }, [alertMessage]);
+    
+    // Fonction pour vérifier la limite de requêtes
+    const checkQueryLimit = (): boolean => {
+      if (isAuthenticated) return true;
+      
+      const today = new Date().toDateString();
+      const stored = localStorage.getItem('daily_queries');
+      if (!stored) return true;
+      
+      try {
+        const data = JSON.parse(stored);
+        if (data.date === today) {
+          return (data.count || 0) < 5;
+        }
+      } catch (e) {
+        console.error('Error reading daily queries:', e);
+      }
+      return true;
+    };
     
     // Détection mobile
     useEffect(() => {
@@ -58,6 +94,12 @@ const QueryForm: React.FC<QueryFormProps> = ({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (query.trim() && !loading) {
+            // Vérifier la limite de requêtes pour les utilisateurs non connectés
+            if (!isAuthenticated && !checkQueryLimit()) {
+                setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+                return;
+            }
+            
             onQuerySubmit(query, researchMode);
             setQuery('');
         }
@@ -66,21 +108,28 @@ const QueryForm: React.FC<QueryFormProps> = ({
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
+            // Vérifier la limite avant de soumettre
+            if (query.trim() && !loading) {
+                if (!isAuthenticated && !checkQueryLimit()) {
+                    setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+                    return;
+                }
+            }
             handleSubmit(e);
         }
     };
 
     return (
     <div className={`
-      fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-200
+      w-full bg-white
       ${isMobile 
-        ? 'px-3 pt-2 pb-3 bg-white border-t border-gray-200' 
+        ? 'px-3 pt-2 pb-3' 
         : 'px-4 pb-4'
       }
     `}>
       <div className={`
         w-full bg-white shadow-lg rounded-xl border
-        ${isMobile ? 'max-w-none' : 'max-w-3xl mx-auto'}
+        ${isMobile ? 'max-w-none' : 'max-w-full mx-auto'}
       `}>
         {/* Mobile handle */}
         {isMobile && (
@@ -90,6 +139,28 @@ const QueryForm: React.FC<QueryFormProps> = ({
         )}
 
         <div className="p-3 sm:p-4">
+          {/* Alerte temporaire pour les limitations */}
+          {alertMessage && (
+            <div className="mb-3 bg-yellow-500 text-white px-4 py-3 rounded-lg shadow-lg animate-slide-in-right">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2 flex-1">
+                  <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                  <p className="text-sm font-medium">{alertMessage}</p>
+                </div>
+                <button
+                  onClick={() => setAlertMessage('')}
+                  className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+          
           {/* Panneau d'actions suggérées avec scroll horizontal */}
           {suggestedActions.length > 0 && onSuggestedActionClick && (
             <div className="mb-2 pb-2 border-b border-gray-200">
@@ -114,7 +185,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="What do you want to know?"
+            placeholder={t('query.placeholder')}
             className={`
               w-full bg-transparent outline-none text-gray-700 placeholder-gray-400
               resize-none overflow-y-auto whitespace-pre-wrap
@@ -139,7 +210,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
                   ${isMobile ? 'font-medium' : 'font-normal'}
                 `}
               >
-                {selectedModel === 'auto' ? 'Auto model selection' : selectedModel}
+                {selectedModel === 'auto' ? t('query.autoModel') : selectedModel}
               </span>
 
               {/* File toggle */}
@@ -152,7 +223,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
                   `}
                 >
                   <span>📄</span>
-                  <span>File</span>
+                  <span>{t('query.file')}</span>
                 </button>
               )}
 
@@ -174,7 +245,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
                     >
                       <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clipRule="evenodd" />
                     </svg>
-                    Research
+                    {t('query.research')}
                   </>
                 ) : (
                   <>
@@ -186,7 +257,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
                     >
                       <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5z" clipRule="evenodd" />
                     </svg>
-                    Local
+                    {t('query.local')}
                   </>
                 )}
               </button>
@@ -231,7 +302,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
           {/* Mobile helper text */}
           {isMobile && (
             <div className="mt-2 text-xs text-gray-500 text-center">
-              Press Enter to send, Shift+Enter for new line
+              {t('query.mobile.help')}
             </div>
           )}
         </div>

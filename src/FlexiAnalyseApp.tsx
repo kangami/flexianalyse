@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import Sidebar from "./components/main/Sidebar";
-import MainContent from "./components/main/MainContent";
-import FileSelectedComponent from "./components/main/FileSelectedComponent";
+import FileViewer from "./components/main/FileViewer";
+import ChatPanel from "./components/main/ChatPanel";
 import StructuredDataDisplay from "./components/main/StructuredDataDisplay";
 import InsertTextModal from "./components/main/InsertTextModal";
 import mammoth from 'mammoth';
@@ -11,6 +11,8 @@ import * as pdfjslib from 'pdfjs-dist/legacy/build/pdf';
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker?url';
 import { franc } from 'franc-min';
 import { useAuth } from './components/auth/AuthProvider';
+import { useTheme } from './contexts/ThemeContext';
+import { useLanguage } from './contexts/LanguageContext';
 
 interface FileDetails {
   content: string | ArrayBuffer;
@@ -55,7 +57,9 @@ const chooseModelForQuery = (query: string): string => {
 };
 
 const FlexiAnalyseApp: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, isAuthenticated } = useAuth();
+  const { theme } = useTheme();
+  const { language } = useLanguage();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileDetails, setFileDetails] = useState<FileDetails | null>(null);
@@ -85,9 +89,84 @@ const FlexiAnalyseApp: React.FC = () => {
   // États pour l'insertion de texte
   const [showInsertModal, setShowInsertModal] = useState<boolean>(false);
   const [selectedTextToInsert, setSelectedTextToInsert] = useState<string>('');
+  
+  // État pour l'animation de chargement lors du drop
+  const [isProcessingDrop, setIsProcessingDrop] = useState<boolean>(false);
+  
+  // État pour savoir si un répertoire est sélectionné
+  const [selectedDirectory, setSelectedDirectory] = useState<File[] | null>(null);
+  
+  // État pour l'infobulle de limitation
+  const [showLimitInfo, setShowLimitInfo] = useState<boolean>(false);
+  const [limitMessage, setLimitMessage] = useState<string>('');
 
   // Ref pour tracker les derniers fichiers indexés
   const lastIndexedFilesRef = useRef<File[]>([]);
+  
+  // Fonctions utilitaires pour gérer les limitations des utilisateurs non connectés
+  const getDailyQueries = useCallback((): number => {
+    const today = new Date().toDateString();
+    const stored = localStorage.getItem('daily_queries');
+    if (!stored) return 0;
+    
+    try {
+      const data = JSON.parse(stored);
+      if (data.date === today) {
+        return data.count || 0;
+      }
+    } catch (e) {
+      console.error('Error reading daily queries:', e);
+    }
+    return 0;
+  }, []);
+  
+  const incrementDailyQueries = useCallback(() => {
+    const today = new Date().toDateString();
+    const currentCount = getDailyQueries();
+    localStorage.setItem('daily_queries', JSON.stringify({
+      date: today,
+      count: currentCount + 1
+    }));
+  }, [getDailyQueries]);
+  
+  const getUploadedFilesCount = useCallback((): number => {
+    const stored = localStorage.getItem('uploaded_files');
+    if (!stored) return 0;
+    
+    try {
+      const data = JSON.parse(stored);
+      return data.count || 0;
+    } catch (e) {
+      console.error('Error reading uploaded files:', e);
+    }
+    return 0;
+  }, []);
+  
+  const incrementUploadedFiles = useCallback(() => {
+    const currentCount = getUploadedFilesCount();
+    localStorage.setItem('uploaded_files', JSON.stringify({
+      count: currentCount + 1
+    }));
+  }, [getUploadedFilesCount]);
+  
+  const checkQueryLimit = useCallback((): boolean => {
+    if (isAuthenticated) return true;
+    const queryCount = getDailyQueries();
+    return queryCount < 5;
+  }, [isAuthenticated, getDailyQueries]);
+  
+  const checkFileUploadLimit = useCallback((): boolean => {
+    if (isAuthenticated) return true;
+    const fileCount = getUploadedFilesCount();
+    return fileCount < 1;
+  }, [isAuthenticated, getUploadedFilesCount]);
+  
+  // Fonction pour afficher l'infobulle de limitation
+  const showLimitInfoBubble = useCallback((message: string) => {
+    setLimitMessage(message);
+    setShowLimitInfo(true);
+    setTimeout(() => setShowLimitInfo(false), 5000);
+  }, []);
 
   // Détection mobile (reste identique)
   useEffect(() => {
@@ -109,7 +188,15 @@ const FlexiAnalyseApp: React.FC = () => {
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
-  const handleFileSelect = (file: File, details: FileDetails) => {
+  // Fonction pour ajouter un fichier à la sidebar
+  const addFileToSidebar = useCallback((file: File) => {
+    // Utiliser la fonction exposée par la Sidebar si elle existe
+    if ((window as any).__addFileToSidebar) {
+      (window as any).__addFileToSidebar(file);
+    }
+  }, []);
+
+  const handleFileSelect = async (file: File, details: FileDetails) => {
     const clonedContent = details.content instanceof ArrayBuffer ? details.content.slice(0) : details.content;
     setSelectedFile(file);
     setFileDetails({ ...details, content: clonedContent });
@@ -125,20 +212,511 @@ const FlexiAnalyseApp: React.FC = () => {
       }
       return prevFiles;
     });
+
+    // Ajouter le fichier à la sidebar
+    addFileToSidebar(file);
+    
+    // Si le fichier fait partie d'un répertoire, régénérer les suggested actions
+    if (selectedDirectory && selectedDirectory.length > 1) {
+      await regenerateSuggestedActionsForFile(file);
+    }
+    
+    // Générer automatiquement un résumé avec animation de typing
+    await generateFileSummaryWithStreaming(file, clonedContent);
   };
+  
 
-  const apiUrl = 'http://127.0.0.1:5000'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+  // Gestion du drag & drop pour FileViewer
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
-  // Fonctions d'extraction de texte (restent identiques)
+  const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+
+  // Fonctions d'extraction de texte (doivent être définies avant generateFileSummary)
   const extractTextFromDocx = async (content: ArrayBuffer): Promise<string> => {
     try {
+      if (content.byteLength === 0) {
+        console.error('Error: DOCX file is empty');
+        return 'Error: Le fichier DOCX est vide ou corrompu.';
+      }
       const result = await mammoth.extractRawText({ arrayBuffer: content });
+      if (!result || !result.value || result.value.trim().length === 0) {
+        return 'Le fichier DOCX ne contient pas de texte extractible.';
+      }
       return result.value;
     } catch (error) {
       console.error('Error extracting text from .docx:', error);
-      return 'Error extracting text from .docx';
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('Corrupted zip') || errorMessage.includes('data length = 0')) {
+        return 'Error: Le fichier DOCX est corrompu ou invalide. Veuillez vérifier le fichier.';
+      }
+      return `Error extracting text from .docx: ${errorMessage}`;
     }
   };
+
+  const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    try {
+      const bufferCopy = arrayBuffer.slice(0);
+      const pdf = await pdfjslib.getDocument({ data: bufferCopy }).promise;
+      let text = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item: any) => item.str).join(' ');
+        text += strings + '\n';
+      }
+      return text;
+    } catch (error) {
+      console.error('Error extracting text from PDF:', error);
+      return 'Error extracting text from PDF';
+    }
+  };
+
+  // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
+  const generateFileSummaryWithStreaming = useCallback(async (file: File, content: string | ArrayBuffer) => {
+    try {
+      let fileContent: string;
+      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      
+      if (extension === '.pdf') {
+        fileContent = await extractTextFromPdf(content as ArrayBuffer);
+      } else if (extension === '.docx') {
+        fileContent = await extractTextFromDocx(content as ArrayBuffer);
+      } else {
+        fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
+      }
+      
+      // Limiter le contenu pour la requête
+      const limitedContent = fileContent.substring(0, 2000);
+      
+      // Créer un message dans le chat history pour le résumé
+      const messageId = Math.random().toString(36).substr(2, 9);
+      const summaryMessage: ChatMessage = {
+        id: messageId,
+        userQuery: `📄 ${file.name}`,
+        aiResponse: ''
+      };
+      
+      // Ajouter le message à l'historique
+      setChatHistory((prev) => [...prev, summaryMessage]);
+      setLoading(true);
+      
+      // Utiliser le streaming pour le résumé
+      const response = await fetch(`${apiUrl}/summarize_file_stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: file.name,
+          file_content: limitedContent,
+          language: language
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Lire le stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedResponse = '';
+      
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Décoder le chunk
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            // Traiter les lignes SSE (format: "data: {...}")
+            if (line.startsWith('data: ')) {
+              try {
+                const jsonData = JSON.parse(line.slice(6));
+                
+                if (jsonData.content) {
+                  // Ajouter le contenu à la réponse accumulée
+                  accumulatedResponse += jsonData.content;
+                  
+                  // Limiter à 4 lignes maximum
+                  const lines = accumulatedResponse.split('\n').filter(l => l.trim());
+                  const limitedResponse = lines.slice(0, 4).join('\n');
+                  
+                  // Mettre à jour l'interface en temps réel
+                  setChatHistory((prev) => 
+                    prev.map(msg => 
+                      msg.id === messageId 
+                        ? { ...msg, aiResponse: limitedResponse }
+                        : msg
+                    )
+                  );
+                }
+                
+                if (jsonData.done) {
+                  console.log('✅ Résumé terminé');
+                  setLoading(false);
+                }
+                
+                if (jsonData.error) {
+                  console.error('❌ Erreur streaming:', jsonData.error);
+                  setLoading(false);
+                  throw new Error(jsonData.error);
+                }
+                
+              } catch (e) {
+                // Ignorer les erreurs de parsing pour les lignes vides
+                if (line.trim() !== 'data: ') {
+                  console.error('Erreur parsing SSE:', e);
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      setLoading(false);
+    } catch (error) {
+      console.error('Error generating file summary:', error);
+      setLoading(false);
+    }
+  }, [apiUrl, extractTextFromPdf, extractTextFromDocx]);
+
+  // Fonction pour générer un résumé d'un fichier (ancienne version, gardée pour compatibilité)
+  const generateFileSummary = useCallback(async (file: File, content: string | ArrayBuffer) => {
+    await generateFileSummaryWithStreaming(file, content);
+  }, [generateFileSummaryWithStreaming]);
+
+  // Fonction pour générer un résumé de répertoire avec streaming
+  const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
+    try {
+      // Créer un message dans le chat history pour le résumé
+      const messageId = Math.random().toString(36).substr(2, 9);
+      const repoMessage: ChatMessage = {
+        id: messageId,
+        userQuery: `📁 Répertoire (${files.length} fichier${files.length > 1 ? 's' : ''})`,
+        aiResponse: ''
+      };
+      
+      // Ajouter le message à l'historique
+      setChatHistory((prev) => [...prev, repoMessage]);
+      setLoading(true);
+      
+      // Utiliser le streaming pour le résumé du répertoire
+      const response = await fetch(`${apiUrl}/summarize_repository_stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: files.slice(0, 20).map(file => ({
+            name: file.name,
+            // Extraire juste le nom du fichier sans le chemin
+            display_name: file.name.split('/').pop() || file.name
+          })),
+          language: language
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      // Lire le stream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedResponse = '';
+      
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          // Décoder le chunk
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          for (const line of lines) {
+            // Traiter les lignes SSE (format: "data: {...}")
+            if (line.startsWith('data: ')) {
+              try {
+                const jsonData = JSON.parse(line.slice(6));
+                
+                if (jsonData.content) {
+                  // Ajouter le contenu à la réponse accumulée
+                  accumulatedResponse += jsonData.content;
+                  
+                  // Mettre à jour l'interface en temps réel
+                  setChatHistory((prev) => 
+                    prev.map(msg => 
+                      msg.id === messageId 
+                        ? { ...msg, aiResponse: accumulatedResponse }
+                        : msg
+                    )
+                  );
+                }
+                
+                if (jsonData.done) {
+                  console.log('✅ Résumé du répertoire terminé');
+                  setLoading(false);
+                }
+                
+                if (jsonData.error) {
+                  console.error('❌ Erreur streaming:', jsonData.error);
+                  setLoading(false);
+                  throw new Error(jsonData.error);
+                }
+                
+              } catch (e) {
+                // Ignorer les erreurs de parsing pour les lignes vides
+                if (line.trim() !== 'data: ') {
+                  console.error('Erreur parsing SSE:', e);
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      setLoading(false);
+    } catch (error) {
+      console.error('Error generating repository summary:', error);
+      setLoading(false);
+    }
+  }, [apiUrl]);
+  
+  // Fonction pour régénérer les suggested actions pour un fichier spécifique
+  const regenerateSuggestedActionsForFile = useCallback(async (file: File) => {
+    try {
+      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      let fileContent: string;
+      
+      if (extension === '.pdf') {
+        const arrayBuffer = await file.arrayBuffer();
+        fileContent = await extractTextFromPdf(arrayBuffer);
+      } else if (extension === '.docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        fileContent = await extractTextFromDocx(arrayBuffer);
+      } else {
+        fileContent = await file.text();
+      }
+      
+      const limitedContent = fileContent.substring(0, 2000);
+      
+      const response = await fetch(`${apiUrl}/infer-corpus-actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documents: [{
+            file_name: file.name,
+            content: limitedContent
+          }],
+          language: language
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.suggested_actions) {
+          setSuggestedActions(result.suggested_actions);
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating suggested actions:', error);
+    }
+  }, [apiUrl, extractTextFromPdf, extractTextFromDocx]);
+  
+  // Fonction pour gérer l'import d'un répertoire
+  const handleDirectorySelect = useCallback(async (files: File[]) => {
+    // Bloquer l'import de répertoires pour les utilisateurs non connectés
+    if (!isAuthenticated) {
+      showLimitInfoBubble('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
+      return;
+    }
+    
+    // Ajouter tous les fichiers à directoryFiles
+    setDirectoryFiles(prevFiles => {
+      const newFiles: File[] = [];
+      for (const file of files) {
+        const fileExists = prevFiles.some(f => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified);
+        if (!fileExists) {
+          newFiles.push(file);
+        }
+      }
+      // Ne retourner que si de nouveaux fichiers ont été ajoutés pour éviter les boucles
+      if (newFiles.length === 0) {
+        return prevFiles; // Pas de changement, retourner la même référence
+      }
+      return [...prevFiles, ...newFiles];
+    });
+    
+    // Les fichiers sont déjà ajoutés à la sidebar dans handleFolderChange,
+    // donc pas besoin de les ajouter à nouveau ici pour éviter les doublons
+    
+    // Marquer qu'un répertoire est sélectionné
+    setSelectedDirectory(files);
+    
+    // Réinitialiser le fichier sélectionné pour afficher le message de sélection
+    setSelectedFile(null);
+    setFileDetails(null);
+    
+    // Générer automatiquement un résumé du répertoire avec streaming
+    await generateRepositorySummaryWithStreaming(files);
+  }, [generateRepositorySummaryWithStreaming, isAuthenticated, showLimitInfoBubble]);
+  
+  // Fonction pour générer des descriptions pour un répertoire (ancienne version, gardée pour compatibilité)
+  const generateRepositorySummaries = useCallback(async (files: File[]) => {
+    await generateRepositorySummaryWithStreaming(files);
+  }, [generateRepositorySummaryWithStreaming]);
+
+  // Fonction helper pour extraire tous les fichiers d'un répertoire
+  const extractFilesFromDirectory = async (entry: FileSystemEntry | null, path: string = ''): Promise<File[]> => {
+    const files: File[] = [];
+    
+    if (!entry) return files;
+    
+    if (entry.isFile) {
+      const fileEntry = entry as FileSystemFileEntry;
+      return new Promise((resolve) => {
+        fileEntry.file((file: File) => {
+          // Créer le chemin relatif complet
+          const relativePath = path ? `${path}/${file.name}` : file.name;
+          
+          // Créer un nouveau File avec le chemin complet dans le nom
+          const fileWithPath = new File([file], file.name, { type: file.type });
+          
+          // Ajouter webkitRelativePath pour que buildFileTree puisse l'utiliser
+          (fileWithPath as any).webkitRelativePath = relativePath;
+          
+          resolve([fileWithPath]);
+        });
+      });
+    } else if (entry.isDirectory) {
+      const dirEntry = entry as FileSystemDirectoryEntry;
+      const reader = dirEntry.createReader();
+      const entries = await new Promise<FileSystemEntry[]>((resolve) => {
+        reader.readEntries((entries) => resolve(Array.from(entries)));
+      });
+      
+      for (const subEntry of entries) {
+        const subPath = path ? `${path}/${subEntry.name}` : subEntry.name;
+        const subFiles = await extractFilesFromDirectory(subEntry, subPath);
+        files.push(...subFiles);
+      }
+    }
+    
+    return files;
+  };
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setIsProcessingDrop(true);
+    
+    try {
+      const items = Array.from(e.dataTransfer.items);
+      const allFiles: File[] = [];
+      
+      // Traiter chaque item (peut être un fichier ou un répertoire)
+      for (const item of items) {
+        const entry = item.webkitGetAsEntry();
+        if (entry) {
+          const files = await extractFilesFromDirectory(entry);
+          allFiles.push(...files);
+        }
+      }
+      
+      // Si aucun fichier n'a été trouvé via webkitGetAsEntry, essayer avec files
+      if (allFiles.length === 0) {
+        const files = Array.from(e.dataTransfer.files);
+        allFiles.push(...files);
+      }
+      
+      if (allFiles.length === 0) {
+        setIsProcessingDrop(false);
+        return;
+      }
+      
+      const allowedExtensions = [
+        '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
+        '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx',
+        '.tsx', '.sql', '.docx', '.pdf', '.json', '.xml', '.md', '.txt'
+      ];
+      
+      // Filtrer les fichiers supportés
+      const supportedFiles = allFiles.filter(file => {
+        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        return allowedExtensions.includes(extension);
+      });
+      
+      if (supportedFiles.length === 0) {
+        alert('Aucun fichier supporté trouvé');
+        setIsProcessingDrop(false);
+        return;
+      }
+      
+      // Vérifier les limitations pour les utilisateurs non connectés
+      if (!isAuthenticated) {
+        // Bloquer l'upload de répertoires pour les non connectés
+        if (supportedFiles.length > 1) {
+          showLimitInfoBubble('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
+          setIsProcessingDrop(false);
+          return;
+        }
+        
+        // Vérifier la limite d'upload de fichiers
+        if (!checkFileUploadLimit()) {
+          showLimitInfoBubble('You have reached the limit of 1 file upload. Please sign in to upload more files.');
+          setIsProcessingDrop(false);
+          return;
+        }
+      }
+      
+      // Si c'est un seul fichier, traiter comme avant
+      if (supportedFiles.length === 1) {
+        const file = supportedFiles[0];
+        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        
+        let content: string | ArrayBuffer;
+        if (extension === '.pdf' || extension === '.docx') {
+          content = await file.arrayBuffer();
+        } else {
+          content = await file.text();
+        }
+        
+        // Réinitialiser isProcessingDrop avant d'appeler handleFileSelect
+        // car handleFileSelect peut prendre du temps avec le streaming
+        setIsProcessingDrop(false);
+        
+        // Incrémenter le compteur de fichiers uploadés pour les non connectés
+        if (!isAuthenticated) {
+          incrementUploadedFiles();
+        }
+        
+        // handleFileSelect appellera automatiquement generateFileSummaryWithStreaming
+        // Ne pas attendre pour éviter de bloquer si le streaming échoue
+        handleFileSelect(file, { content, description: file.name }).catch(error => {
+          console.error('Error in handleFileSelect:', error);
+        });
+      } else {
+        // C'est un répertoire avec plusieurs fichiers
+        // Réinitialiser isProcessingDrop avant d'appeler handleDirectorySelect
+        setIsProcessingDrop(false);
+        
+        // Gérer l'import du répertoire
+        // Ne pas attendre pour éviter de bloquer si le streaming échoue
+        handleDirectorySelect(supportedFiles).catch(error => {
+          console.error('Error in handleDirectorySelect:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Error handling drop:', error);
+      alert('Erreur lors du traitement des fichiers: ' + (error instanceof Error ? error.message : 'Erreur inconnue'));
+      setIsProcessingDrop(false);
+    }
+  }, [handleFileSelect, handleDirectorySelect, isAuthenticated, checkFileUploadLimit, incrementUploadedFiles, showLimitInfoBubble]);
 
   const detectLanguage = (text: string): string => {
     const langCode = franc(text);
@@ -146,26 +724,6 @@ const FlexiAnalyseApp: React.FC = () => {
     if(langCode === 'eng') return 'en';
     if(langCode === 'spa') return 'es';
     return 'en';
-  };
-
-  const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-    try {
-      const bufferCopy = arrayBuffer.slice(0);
-      const pdf = await pdfjslib.getDocument({ data: bufferCopy }).promise;
-
-      let text = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map(item => (item as any).str).join(' ');
-        text += strings + '\n';
-      }
-
-      return text;
-    } catch (error) {
-      console.error('Error extracting text from PDF:', error);
-      return 'Error extracting text from PDF';
-    }
   };
 
   const extractTextFromFile = async (file: File): Promise<string> => {
@@ -223,7 +781,8 @@ const FlexiAnalyseApp: React.FC = () => {
           'Session-ID': sessionId
         },
         body: JSON.stringify({
-          files: fileContents
+          files: fileContents,
+          language: language
         }),
       });
 
@@ -260,11 +819,13 @@ const FlexiAnalyseApp: React.FC = () => {
   // NOUVEAU useEffect: Indexation automatique des fichiers du répertoire
   useEffect(() => {
     const loadDirectoryFiles = async () => {
-      const currentFileNames = directoryFiles.map(file => file.name).sort();
-      const lastFileNames = lastIndexedFilesRef.current.map(file => file.name).sort();
+      // Comparer les fichiers par nom, taille et lastModified pour détecter les vrais changements
+      const currentFileKeys = directoryFiles.map(f => `${f.name}-${f.size}-${f.lastModified}`).sort();
+      const lastFileKeys = lastIndexedFilesRef.current.map(f => `${f.name}-${f.size}-${f.lastModified}`).sort();
       const hasFilesChanged =
         directoryFiles.length !== lastIndexedFilesRef.current.length ||
-        currentFileNames.some((name, index) => name !== lastFileNames[index]);
+        currentFileKeys.length !== lastFileKeys.length ||
+        currentFileKeys.some((key, index) => key !== lastFileKeys[index]);
 
       console.log('=== VÉRIFICATION DES FICHIERS DU RÉPERTOIRE ===');
       console.log('Fichiers actuels:', directoryFiles.length);
@@ -274,13 +835,15 @@ const FlexiAnalyseApp: React.FC = () => {
       if (directoryFiles.length > 0 && hasFilesChanged) {
         console.log('🔄 Démarrage de l\'indexation backend...');
         await indexDirectoryContentOnBackend(directoryFiles);
-        lastIndexedFilesRef.current = directoryFiles;
-      } else if (directoryFiles.length > 0) {
+        // Mettre à jour la référence avec une copie pour éviter les problèmes de référence
+        lastIndexedFilesRef.current = [...directoryFiles];
+      } else if (directoryFiles.length > 0 && !hasFilesChanged) {
         console.log('ℹ️ Fichiers déjà indexés, pas de changement');
         setIsDirectoryIndexed(true);
-      } else {
+      } else if (directoryFiles.length === 0) {
         console.log('📂 Aucun fichier de répertoire à indexer');
         setIsDirectoryIndexed(false);
+        lastIndexedFilesRef.current = [];
       }
     };
 
@@ -289,10 +852,26 @@ const FlexiAnalyseApp: React.FC = () => {
 
   // Fonction principale de gestion des requêtes utilisateur
   const handleQuerySubmit = async (query: string, mode: 'online' | 'local') => {
+    // Vérifier la limite de requêtes pour les utilisateurs non connectés
+    if (!isAuthenticated && !checkQueryLimit()) {
+      showLimitInfoBubble('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+      return;
+    }
+    
+    // Incrémenter le compteur de requêtes pour les non connectés
+    if (!isAuthenticated) {
+      incrementDailyQueries();
+    }
+    
     //setResearchMode(mode);
     
-    const language = detectLanguage(query);
-    console.log(`Mode de recherche: ${mode}, Langue détectée: ${language}`);
+    // Ajouter la requête à l'historique de recherche
+    if ((window as any).__addToSearchHistory) {
+      (window as any).__addToSearchHistory(query);
+    }
+    
+    // Utiliser la langue de l'interface pour les suggested actions, mais le modèle répondra dans la langue du prompt
+    console.log(`Mode de recherche: ${mode}, Langue interface: ${language}`);
     
     const messageId = Math.random().toString(36).substr(2, 9);
     const newMessage: ChatMessage = { 
@@ -322,10 +901,10 @@ const FlexiAnalyseApp: React.FC = () => {
         { role: 'assistant', content: msg.aiResponse },
       ]);
 
+      // Le modèle répondra dans la langue du prompt, pas besoin de passer la langue de l'interface
       let requestPayload: any = {
         user_query: query,
         selected_model: effectiveModel,
-        language: language,
         research_mode: effectiveMode,
         conversation_history: conversationHistory,
       };
@@ -520,6 +1099,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
   // Nouvelle fonction pour gérer les requêtes avec streaming
   const handleQuerySubmitWithStream = async (query: string, mode: 'online' | 'local') => {
+    // Vérifier la limite de requêtes pour les utilisateurs non connectés
+    if (!isAuthenticated && !checkQueryLimit()) {
+      showLimitInfoBubble('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+      return;
+    }
+    
+    // Incrémenter le compteur de requêtes pour les non connectés
+    if (!isAuthenticated) {
+      incrementDailyQueries();
+    }
+    
     // Si mode local, utiliser l'ancienne méthode pour l'instant
     if (mode === 'local') {
       return handleQuerySubmit(query, mode);
@@ -640,7 +1230,8 @@ const FlexiAnalyseApp: React.FC = () => {
   const getRepoStructure = useCallback((structureFn: () => string, files: File[]) => {
     const structure = structureFn();
     setRepoStructure(structure);
-    setDirectoryFiles(files);
+    // Ne pas modifier directoryFiles ici pour éviter les boucles infinies
+    // directoryFiles est déjà géré par handleDirectorySelect et handleFileSelect
   }, []);
 
   // Fonction pour extraire les données structurées
@@ -672,7 +1263,7 @@ const FlexiAnalyseApp: React.FC = () => {
           file_name: selectedFile.name,
           file_content: fileContent,
           selected_model: effectiveModel,
-          language: 'fr'
+          language: language
         })
       });
 
@@ -936,7 +1527,32 @@ const FlexiAnalyseApp: React.FC = () => {
   }, [selectedFile, fileDetails, getEditableFiles, setIsFileContentVisible]);
 
   return (
-    <div className="flex min-h-screen w-full relative overflow-x-hidden">
+    <div className={`flex min-h-screen w-full relative overflow-x-hidden theme-${theme}`}>
+      {/* Infobulle de limitation pour les utilisateurs non connectés */}
+      {showLimitInfo && (
+        <div className="fixed top-4 right-4 z-50 bg-yellow-500 text-white px-6 py-4 rounded-lg shadow-xl max-w-md animate-slide-in-right">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+                <h3 className="font-semibold text-lg">Limit Reached</h3>
+              </div>
+              <p className="text-sm">{limitMessage}</p>
+            </div>
+            <button
+              onClick={() => setShowLimitInfo(false)}
+              className="text-white hover:text-gray-200 transition-colors"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+      
       {/* Sidebar Container - reste identique */}
       <div className="flex">
         <div className={`hidden lg:block bg-gray-200 transition-all duration-300 fixed top-0 left-0 h-full ${
@@ -949,6 +1565,8 @@ const FlexiAnalyseApp: React.FC = () => {
             setSelectedModel={setSelectedModel}
             isSidebarOpen={isSidebarOpen}
             toggleSidebar={toggleSidebar}
+            addFileToSidebar={addFileToSidebar}
+            onDirectorySelect={handleDirectorySelect}
           />
         </div>
 
@@ -1002,52 +1620,43 @@ const FlexiAnalyseApp: React.FC = () => {
         )}
       */}
       
-      {/* Main Content */}
+      {/* Main Content - Layout 3 colonnes */}
       <div
-        className={`flex-1 flex flex-col transition-all duration-300 ${
+        className={`flex-1 flex transition-all duration-300 ${
           isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'
-        } relative z-30 overflow-y-auto`}
-        style={{ height: '100vh', overflowY: 'auto' }}
+        } relative z-30 h-screen overflow-hidden`}
       >
-        {selectedFile && fileDetails ? (
-          <FileSelectedComponent
+        {/* Colonne centrale - FileViewer */}
+        <div className="w-2/5 flex-shrink-0 border-r border-gray-200 overflow-hidden mr-2 h-full flex flex-col">
+          <FileViewer
             file={selectedFile}
-            details={fileDetails}
-            isFileContentVisible={isFileContentVisible}
-            setIsFileContentVisible={setIsFileContentVisible}
+            fileDetails={fileDetails}
+            onFileSelect={handleFileSelect}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            isProcessingDrop={isProcessingDrop}
+          />
+        </div>
+
+        {/* Colonne droite - ChatPanel */}
+        <div className="flex-1 w-3/5 flex-shrink-0 overflow-hidden ml-2">
+          <ChatPanel
             chatHistory={chatHistory}
-            setFileDetails={setFileDetails}
+            loading={loading || isProcessingDrop}
             onQuerySubmit={handleQuerySubmitWithStream}
-            loading={loading}
             selectedModel={selectedModel}
             researchMode={researchMode}
             setResearchMode={setResearchMode}
             suggestedActions={suggestedActions}
             onSuggestedActionClick={handleSuggestedActionClick}
             getEditableFiles={getEditableFiles}
+            isProcessingDrop={isProcessingDrop}
             onTextSelect={handleTextSelect}
             isSearchingOnline={isSearchingOnline}
-          />
-        ) : (
-          <MainContent 
-            responses={responses}
-            selectedModel={selectedModel}
             isFileContentVisible={isFileContentVisible}
             setIsFileContentVisible={setIsFileContentVisible}
-            onQuerySubmit={handleQuerySubmitWithStream}
-            loading={loading}
-            researchMode={researchMode}
-            setResearchMode={setResearchMode}
-            chatHistory={chatHistory}
-            suggestedActions={suggestedActions}
-            onSuggestedActionClick={handleSuggestedActionClick}
-            getEditableFiles={getEditableFiles}
-            onTextSelect={handleTextSelect}
           />
-        )}
-        <footer className="w-full p-4 text-center text-gray-500 text-sm">
-          Pro • Enterprise • API • Blog • Careers • Store • Finance • English
-        </footer>
+        </div>
       </div>
 
       {/* Modal d'affichage des données structurées */}

@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowRight, FileText, Search, Zap, Shield, Globe, Brain, Sparkles, Target } from 'lucide-react';
 import LoginModal from '../auth/LoginModal';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const LandingPage: React.FC = () => {
+  const navigate = useNavigate();
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [displayText, setDisplayText] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -53,7 +54,7 @@ const LandingPage: React.FC = () => {
               </span>
             </div>
             <button
-              onClick={() => setIsLoginModalOpen(true)}
+              onClick={() => navigate('/app')}
               className="relative bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-2 rounded-full font-semibold hover:from-blue-700 hover:to-purple-700 transition-all pulse-border overflow-hidden group"
             >
               <span className="relative z-10">Try it</span>
@@ -123,7 +124,7 @@ const LandingPage: React.FC = () => {
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
             <button
-              onClick={() => setIsLoginModalOpen(true)}
+              onClick={() => navigate('/app')}
               className="relative bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white px-8 py-4 rounded-full font-semibold hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 transition-all flex items-center justify-center gap-2 shadow-xl pulse-border overflow-hidden group"
             >
               <span className="relative z-10">Experience the Future Now</span>

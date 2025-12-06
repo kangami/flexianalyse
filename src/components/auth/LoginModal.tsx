@@ -6,12 +6,14 @@ import { useAuth } from './AuthProvider';
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSwitchToSignUp?: () => void;
 }
 
-const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
+const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onSwitchToSignUp }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const { login, loginWithGoogle, isLoading, error, clearError, isAuthenticated } = useAuth();
 
   // Fermer automatiquement la modal si l'utilisateur est authentifié
@@ -20,6 +22,13 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
       handleClose();
     }
   }, [isAuthenticated]);
+
+  // Réinitialiser l'état de sortie quand le modal s'ouvre
+  useEffect(() => {
+    if (isOpen) {
+      setIsExiting(false);
+    }
+  }, [isOpen]);
 
   const handleEmailLogin = async (e?: React.FormEvent) => {
     if (e) {
@@ -50,11 +59,24 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleClose = () => {
-    clearError();
-    setEmail('');
-    setPassword('');
-    setShowPassword(false);
-    onClose();
+    setIsExiting(true);
+    setTimeout(() => {
+      clearError();
+      setEmail('');
+      setPassword('');
+      setShowPassword(false);
+      setIsExiting(false);
+      onClose();
+    }, 300); // Durée de l'animation
+  };
+
+  const handleSwitchToSignUp = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      if (onSwitchToSignUp) {
+        onSwitchToSignUp();
+      }
+    }, 300); // Durée de l'animation
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -70,14 +92,18 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen && !isExiting) return null;
 
   return (
     <div 
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+      className={`fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 transition-opacity duration-300 ${
+        isExiting ? 'opacity-0' : 'opacity-100'
+      }`}
       onClick={handleOverlayClick}
     >
-      <div className="bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto">
+      <div className={`bg-white rounded-2xl p-8 max-w-md w-full max-h-[90vh] overflow-y-auto transform transition-all duration-300 ease-in-out ${
+        isExiting ? '-translate-x-full opacity-0 scale-95' : 'translate-x-0 opacity-100 scale-100'
+      }`}>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Sign in</h2>
           <button 
@@ -177,7 +203,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
           Starting with us?{' '}
           <button 
             className="text-blue-600 hover:underline font-medium"
-            onClick={() => console.log('Créer un compte')}
+            onClick={handleSwitchToSignUp}
             disabled={isLoading}
           >
             Create an account

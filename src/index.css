@@ -2,6 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Styles pour les scrollbars dans FileViewer */
+.fileviewer-content::-webkit-scrollbar,
+.pdf-scroll-container::-webkit-scrollbar {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.fileviewer-content::-webkit-scrollbar-track,
+.pdf-scroll-container::-webkit-scrollbar-track {
+  background: #f7fafc !important;
+  border-radius: 7px;
+  margin: 4px;
+}
+
+.fileviewer-content::-webkit-scrollbar-thumb,
+.pdf-scroll-container::-webkit-scrollbar-thumb {
+  background: #94a3b8 !important;
+  border-radius: 7px;
+  border: 2px solid #f7fafc;
+  min-height: 30px;
+}
+
+.fileviewer-content::-webkit-scrollbar-thumb:hover,
+.pdf-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: #64748b !important;
+}
+
+/* Forcer la visibilité de la scrollbar */
+.fileviewer-content,
+.pdf-scroll-container {
+  scrollbar-width: thin !important;
+  scrollbar-color: #94a3b8 #f7fafc !important;
+}
+
+/* Animation pour les alertes temporaires */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+/* Animations pour les modals de connexion/inscription */
+@keyframes slide-in-from-left {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-to-left {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+
+@keyframes slide-out-to-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+.modal-slide-in-left {
+  animation: slide-in-from-left 0.3s ease-out;
+}
+
+.modal-slide-in-right {
+  animation: slide-in-from-right 0.3s ease-out;
+}
+
+.modal-slide-out-left {
+  animation: slide-out-to-left 0.3s ease-in;
+}
+
+.modal-slide-out-right {
+  animation: slide-out-to-right 0.3s ease-in;
+}
+
 /* Reset et configuration de base */
 * {
   box-sizing: border-box;
@@ -87,6 +198,113 @@ html, body {
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
+}
+
+/* Styles pour les thèmes personnalisés */
+.theme-white {
+  background: linear-gradient(to bottom right, #ffffff, #f8fafc);
+  color: #1f2937;
+}
+
+.theme-white * {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.theme-dark {
+  background: linear-gradient(to bottom right, #111827, #1f2937, #111827);
+  color: #f3f4f6;
+}
+
+.theme-dark * {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.theme-dark-blue {
+  background: linear-gradient(to bottom right, #0c1226, #1e3a8a, #0c1226);
+  color: #e0e7ff;
+}
+
+.theme-dark-blue * {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* Classes utilitaires pour les thèmes - White */
+.theme-white .bg-white,
+.theme-white .bg-gray-50 {
+  background-color: #ffffff !important;
+}
+
+.theme-white .bg-gray-50 {
+  background-color: #f9fafb !important;
+}
+
+.theme-white .text-gray-800,
+.theme-white .text-gray-700 {
+  color: #1f2937 !important;
+}
+
+.theme-white .border-gray-200 {
+  border-color: #e5e7eb !important;
+}
+
+/* Classes utilitaires pour les thèmes - Dark */
+.theme-dark .bg-white {
+  background: linear-gradient(to bottom right, #1f2937, #111827) !important;
+}
+
+.theme-dark .bg-gray-50 {
+  background: linear-gradient(to bottom right, #374151, #1f2937) !important;
+}
+
+.theme-dark .text-gray-800,
+.theme-dark .text-gray-700 {
+  color: #f3f4f6 !important;
+}
+
+.theme-dark .text-gray-600 {
+  color: #d1d5db !important;
+}
+
+.theme-dark .border-gray-200 {
+  border-color: #4b5563 !important;
+}
+
+.theme-dark .bg-gray-100 {
+  background-color: #374151 !important;
+}
+
+.theme-dark .bg-gray-200 {
+  background-color: #4b5563 !important;
+}
+
+/* Classes utilitaires pour les thèmes - Dark Blue */
+.theme-dark-blue .bg-white {
+  background: linear-gradient(to bottom right, #1e3a8a, #0c1226) !important;
+}
+
+.theme-dark-blue .bg-gray-50 {
+  background: linear-gradient(to bottom right, #1e40af, #1e3a8a) !important;
+}
+
+.theme-dark-blue .text-gray-800,
+.theme-dark-blue .text-gray-700 {
+  color: #e0e7ff !important;
+}
+
+.theme-dark-blue .text-gray-600 {
+  color: #c7d2fe !important;
+}
+
+.theme-dark-blue .border-gray-200 {
+  border-color: #3b82f6 !important;
+}
+
+.theme-dark-blue .bg-gray-100 {
+  background-color: #1e40af !important;
+}
+
+.theme-dark-blue .bg-gray-200 {
+  background-color: #2563eb !important;
 }
 
 @layer base {
@@ -339,4 +557,21 @@ html, body {
 
 .insert-button-container {
   animation: insertButtonAppear 0.2s ease-out;
+}
+
+/* Styles pour le sélecteur de langue selon le thème */
+.theme-dark select,
+.theme-dark-blue select {
+  background-color: transparent;
+}
+
+.theme-dark select option,
+.theme-dark-blue select option {
+  background-color: #1f2937;
+  color: #f3f4f6;
+}
+
+.theme-dark-blue select option {
+  background-color: #1e3a8a;
+  color: #e0e7ff;
 }

@@ -1422,7 +1422,33 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
         logger.info(f"👤 Noms de personnes détectés (requête + historique): {person_names}")
         
         # Recherche sémantique
-        search_results_with_scores = vector_store.similarity_search_with_score(user_query, k=20)
+        # AMÉLIORATION: Recherche avec plus de résultats et recherche multiple pour meilleure précision
+        # Recherche principale avec la requête complète
+        search_results_with_scores = vector_store.similarity_search_with_score(user_query, k=50)
+        
+        # Recherche supplémentaire avec les mots-clés individuels pour capturer les noms de fonctions/méthodes
+        query_words = [word.strip('.,!?;:()[]{}"\'').lower() for word in user_query.split() if len(word.strip('.,!?;:()[]{}"\'')) > 2]
+        additional_results = []
+        for word in query_words[:5]:  # Limiter à 5 mots pour éviter trop de résultats
+            try:
+                word_results = vector_store.similarity_search_with_score(word, k=10)
+                additional_results.extend(word_results)
+            except:
+                pass
+        
+        # Combiner et dédupliquer les résultats
+        all_search_results = {}
+        for doc, score in search_results_with_scores:
+            doc_id = id(doc)
+            if doc_id not in all_search_results or score < all_search_results[doc_id][1]:
+                all_search_results[doc_id] = (doc, score)
+        
+        for doc, score in additional_results:
+            doc_id = id(doc)
+            if doc_id not in all_search_results or score < all_search_results[doc_id][1]:
+                all_search_results[doc_id] = (doc, score)
+        
+        search_results_with_scores = list(all_search_results.values())
         
         # Extraire les mots-clés (y compris noms propres courts)
         query_keywords = set()
@@ -1460,18 +1486,55 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
         
         logger.info(f"📂 {len(filename_matches)} fichiers trouvés par correspondance de nom")
         
-        # Combiner les résultats
-        all_candidate_docs = {}
-        for doc, score in search_results_with_scores:
-            all_candidate_docs[id(doc)] = (doc, 1 - score)
+        # AMÉLIORATION: Recherche explicite par nom de fonction/méthode dans le contenu
+        function_name_matches = []
+        # Extraire les noms potentiels de fonctions/méthodes de la requête (mots avec underscore ou camelCase)
+        potential_function_names = []
+        query_words_for_func = user_query.split()
+        for word in query_words_for_func:
+            clean_word = word.strip('.,!?;:()[]{}"\'').strip()
+            # Détecter les noms de fonctions (avec underscore ou camelCase)
+            if '_' in clean_word or (clean_word and clean_word[0].islower() and any(c.isupper() for c in clean_word[1:])):
+                potential_function_names.append(clean_word.lower())
+                potential_function_names.append(clean_word)  # Garder aussi la version originale
         
+        # Rechercher explicitement ces noms dans le contenu
+        if potential_function_names:
+            try:
+                all_docs_for_function_search = vector_store.similarity_search("function method def class", k=500)
+                for doc in all_docs_for_function_search:
+                    content_lower = doc.page_content.lower()
+                    for func_name in potential_function_names:
+                        if func_name.lower() in content_lower:
+                            function_name_matches.append(doc)
+                            logger.info(f"🔧 Fonction/méthode trouvée par nom: '{func_name}' dans {doc.metadata.get('fileName', 'N/A')}")
+                            break
+            except Exception as e:
+                logger.warning(f"Erreur lors de la recherche par nom de fonction: {str(e)}")
+        
+        logger.info(f"🔧 {len(function_name_matches)} documents trouvés par correspondance de nom de fonction/méthode")
+        
+        # Combiner les résultats avec priorité aux correspondances exactes
+        all_candidate_docs = {}
+        # Priorité 1: Correspondances de noms de fonctions (score très élevé)
+        for doc in function_name_matches:
+            all_candidate_docs[id(doc)] = (doc, 0.95)  # Score très élevé pour correspondances exactes
+        
+        # Priorité 2: Correspondances de noms de fichiers (score élevé)
         for doc in filename_matches:
             doc_id = id(doc)
             if doc_id not in all_candidate_docs:
-                all_candidate_docs[doc_id] = (doc, 0.95)
-            else:
-                doc_obj, current_score = all_candidate_docs[doc_id]
-                all_candidate_docs[doc_id] = (doc_obj, min(current_score + 0.3, 1.0))
+                all_candidate_docs[doc_id] = (doc, 0.85)
+        
+        # Priorité 3: Résultats de recherche sémantique (score normalisé)
+        for doc, score in search_results_with_scores:
+            doc_id = id(doc)
+            # Si déjà présent avec un meilleur score, garder le meilleur
+            if doc_id not in all_candidate_docs:
+                all_candidate_docs[doc_id] = (doc, 1 - score)
+            elif all_candidate_docs[doc_id][1] < (1 - score):
+                # Si le nouveau score est meilleur, le remplacer
+                all_candidate_docs[doc_id] = (doc, 1 - score)
         
         # FILTRAGE STRICT PAR NOM DE PERSONNE (CRITIQUE)
         # Si un nom de personne est détecté, ne garder QUE les fichiers correspondant à ce nom
@@ -1547,13 +1610,15 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
                 filtered_docs.append((doc, similarity_score))
         
         filtered_docs.sort(key=lambda x: x[1], reverse=True)
-        # Si un nom de personne est détecté, limiter aux top 15 fichiers les plus pertinents
-        max_docs = 15 if person_names else 20
+        # AMÉLIORATION: Augmenter le nombre de documents récupérés pour améliorer la précision
+        # Si un nom de personne est détecté, limiter aux top 20 fichiers les plus pertinents
+        # Sinon, prendre jusqu'à 30 documents pour avoir plus de contexte
+        max_docs = 20 if person_names else 30
         top_docs = [doc for doc, score in filtered_docs[:max_docs]]
         
         logger.info(f"📊 {len(top_docs)} documents finaux sélectionnés après filtrage strict par nom")
         
-        # Construire la liste de résultats
+        # Construire la liste de résultats avec amélioration du contenu
         seen_docs = set()
         results = []
         for doc in top_docs:
@@ -1563,9 +1628,29 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
             
             if doc_key not in seen_docs:
                 seen_docs.add(doc_key)
+                # AMÉLIORATION: Augmenter la taille du contenu et chercher le contexte autour des mots-clés
+                content = doc.page_content
+                query_lower = user_query.lower()
+                query_words = [w.strip('.,!?;:()[]{}"\'').lower() for w in user_query.split() if len(w.strip('.,!?;:()[]{}"\'')) > 2]
+                
+                # Si on trouve un mot-clé dans le contenu, essayer d'inclure plus de contexte autour
+                content_lower = content.lower()
+                for word in query_words:
+                    if word in content_lower:
+                        # Trouver la position du mot et inclure plus de contexte
+                        idx = content_lower.find(word)
+                        if idx > 0:
+                            # Inclure 500 caractères avant et après pour capturer toute la fonction
+                            start = max(0, idx - 500)
+                            end = min(len(content), idx + len(word) + 500)
+                            # Si le contenu extrait est plus pertinent, l'utiliser
+                            if end - start > len(content[:3000]):
+                                content = content[start:end]
+                                break
+                
                 results.append({
                     "fileName": file_name_from_meta,
-                    "content": doc.page_content[:2500]
+                    "content": content[:3000]  # Augmenté de 2500 à 3000 pour plus de contexte
                 })
         
         logger.info(f"📚 {len(results)} documents uniques récupérés pour la requête")
@@ -2671,6 +2756,7 @@ async def index_directory():
         data = request.get_json()
         files = data.get('files', [])
         session_id = request.headers.get('Session-ID', 'default')
+        language = data.get('language', 'en')
 
         if not files:
             return jsonify({
@@ -2749,7 +2835,8 @@ async def index_directory():
         
         # Inférer des actions suggérées pour ce corpus
         logger.info("🧠 Inférence des actions suggérées pour le corpus...")
-        inferred_actions = await infer_corpus_actions(split_docs)
+        language = data.get('language', 'en')
+        inferred_actions = await infer_corpus_actions(split_docs, language=language)
         
         # Créer le vector store
         logger.info("🗃️ Création du vector store...")
@@ -3065,8 +3152,10 @@ async def handle_query():
                     # Trier par score décroissant
                     filtered_docs.sort(key=lambda x: x[1], reverse=True)
                     
-                    # Si un nom de personne est détecté, limiter aux top 15 fichiers les plus pertinents
-                    max_docs = 15 if person_names else 20
+                    # AMÉLIORATION: Augmenter le nombre de documents récupérés pour améliorer la précision
+                    # Si un nom de personne est détecté, limiter aux top 20 fichiers les plus pertinents
+                    # Sinon, prendre jusqu'à 30 documents pour avoir plus de contexte
+                    max_docs = 20 if person_names else 30
                     top_docs = [doc for doc, score in filtered_docs[:max_docs]]
                     
                     logger.info(f"📊 {len(top_docs)} documents finaux sélectionnés après filtrage strict par nom")
@@ -3436,6 +3525,156 @@ async def extract_structured():
             "success": False,
             "error": f"Erreur lors de l'extraction: {str(e)}"
         }), 500
+
+@app.route('/summarize_file_stream', methods=['POST'])
+def summarize_file_stream():
+    """Génère un résumé d'un fichier avec streaming (4 lignes max)"""
+    try:
+        data = request.get_json()
+        file_name = data.get('file_name', '')
+        file_content = data.get('file_content', '')
+        language = data.get('language', 'fr')
+        
+        if not file_content:
+            return jsonify({"error": "Aucun contenu fourni"}), 400
+        
+        # Utiliser Mistral pour générer le résumé
+        client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=os.getenv("MISTRAL_API_KEY"))
+        
+        prompt = f"""Génère un résumé concis du document suivant en exactement 4 lignes maximum. 
+Le résumé doit être en {language} et mettre en évidence les informations clés.
+
+Document: {file_name}
+Contenu:
+{file_content[:2000]}
+
+Résumé (4 lignes max):"""
+        
+        def generate():
+            try:
+                stream = client.chat.completions.create(
+                    model="mistral-small",
+                    messages=[
+                        {"role": "system", "content": f"Tu es un assistant expert en analyse de documents. Génère des résumés clairs et concis en exactement 4 lignes maximum en {language}."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=200,
+                    temperature=0.3,
+                    stream=True
+                )
+                
+                accumulated_text = ""
+                line_count = 0
+                
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        accumulated_text += content
+                        
+                        # Compter les lignes
+                        current_lines = accumulated_text.split('\n')
+                        if len(current_lines) > 4:
+                            # Limiter à 4 lignes
+                            accumulated_text = '\n'.join(current_lines[:4])
+                            yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+                            yield f"data: {json.dumps({'done': True})}\n\n"
+                            return
+                        
+                        yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+                
+                # Limiter à 4 lignes à la fin
+                final_lines = accumulated_text.split('\n')
+                if len(final_lines) > 4:
+                    accumulated_text = '\n'.join(final_lines[:4])
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Erreur lors du streaming du résumé: {str(e)}")
+                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+        
+        return Response(generate(), mimetype='text/event-stream')
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de la génération du résumé: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/summarize_repository_stream', methods=['POST'])
+def summarize_repository_stream():
+    """Génère un résumé d'un répertoire avec streaming"""
+    try:
+        data = request.get_json()
+        files_info = data.get('files', [])
+        language = data.get('language', 'fr')
+        
+        if not files_info or len(files_info) == 0:
+            return jsonify({"error": "Aucun fichier fourni"}), 400
+        
+        # Compter les sous-répertoires et fichiers
+        file_count = len(files_info)
+        subdirectories = set()
+        for file_info in files_info:
+            name = file_info.get('name', '')
+            if '/' in name:
+                parts = name.split('/')
+                if len(parts) > 1:
+                    subdirectories.add(parts[0])
+        
+        subdirectory_count = len(subdirectories)
+        
+        def generate():
+            try:
+                # Utiliser Mistral pour générer le résumé
+                client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=os.getenv("MISTRAL_API_KEY"))
+                
+                # Construire le prompt avec les informations du répertoire
+                file_names_text = '\n'.join([f"- {f.get('display_name', f.get('name', ''))}" for f in files_info[:10]])
+                
+                prompt = f"""Génère un résumé concis d'un répertoire contenant {file_count} fichier{'s' if file_count > 1 else ''} et {subdirectory_count} sous-répertoire{'s' if subdirectory_count > 1 else ''}.
+
+Fichiers dans le répertoire:
+{file_names_text}
+
+Génère un résumé en {language} qui inclut:
+1. Le nombre total de fichiers et sous-répertoires
+2. Pour chacun des 3 premiers fichiers listés, génère un résumé de 2 lignes maximum avec le format: **[nom_fichier]**: [résumé 2 lignes]
+
+Format attendu:
+📁 Répertoire: {file_count} fichier{'s' if file_count > 1 else ''}, {subdirectory_count} sous-répertoire{'s' if subdirectory_count > 1 else ''}
+
+**[nom_fichier_1]**: [résumé 2 lignes]
+**[nom_fichier_2]**: [résumé 2 lignes]
+**[nom_fichier_3]**: [résumé 2 lignes]
+
+Résumé:"""
+                
+                stream = client.chat.completions.create(
+                    model="mistral-small",
+                    messages=[
+                        {"role": "system", "content": f"Tu es un assistant expert en analyse de répertoires. Génère des résumés clairs et structurés en {language}. Pour chaque fichier, génère un résumé basé sur son nom et son extension."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=400,
+                    temperature=0.3,
+                    stream=True
+                )
+                
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
+                
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                
+            except Exception as e:
+                logger.error(f"❌ Erreur lors du streaming du résumé de répertoire: {str(e)}")
+                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+        
+        return Response(generate(), mimetype='text/event-stream')
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de la génération du résumé de répertoire: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():

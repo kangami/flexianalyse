@@ -1,5 +1,10 @@
 import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
-import { FolderOpen, Folder } from 'lucide-react';
+import { FolderOpen, Folder, ChevronRight, Search, User, FileText } from 'lucide-react';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../auth/AuthProvider';
+import LoginModal from '../auth/LoginModal';
+import SignUpModal from '../auth/SignUpModal';
 
 interface FileDescription {
   file_name: string;
@@ -35,6 +40,8 @@ interface SidebarProps {
   setSelectedModel: (model: string) => void;
   isSidebarOpen: boolean;
   toggleSidebar: () => void;
+  addFileToSidebar?: (file: File) => void;
+  onDirectorySelect?: (files: File[]) => void;
 }
 
 // Cache configuration
@@ -234,8 +241,8 @@ class AIBackendService {
       cacheUtils.set(CACHE_CONFIG.MODEL_STATUS_KEY, statusCache);
       
       return result;
-    } catch (error) {
-      const result = { model_id: modelId, status: 'unavailable', error: error.message };
+    } catch (error: unknown) {
+      const result = { model_id: modelId, status: 'unavailable', error: error instanceof Error ? error.message : 'Unknown error' };
       
       // Cache negative result
       const statusCache = cached || {};
@@ -248,13 +255,18 @@ class AIBackendService {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  onFileSelect, 
+  onFileSelect,
+  onDirectorySelect,
   getRepoStructure, 
   selectedModel, 
-  setSelectedModel, 
+  setSelectedModel,
   isSidebarOpen, 
-  toggleSidebar 
+  toggleSidebar,
+  addFileToSidebar
 }) => {
+  const { t } = useLanguage();
+  const { theme } = useTheme();
+  const { user, isAuthenticated } = useAuth();
   const [files, setFiles] = useState<FileNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isMobileFileDropdownOpen, setIsMobileFileDropdownOpen] = useState<boolean>(false);
@@ -266,6 +278,24 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [modelStatus, setModelStatus] = useState<{ [key: string]: boolean }>({});
   const [isLoadingModels, setIsLoadingModels] = useState<boolean>(true);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  
+  // États pour les sections expandables
+  const [isExplorerExpanded, setIsExplorerExpanded] = useState<boolean>(true);
+  const [isSearchExpanded, setIsSearchExpanded] = useState<boolean>(true);
+  const [isUserInfoExpanded, setIsUserInfoExpanded] = useState<boolean>(true);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [isSignUpModalOpen, setIsSignUpModalOpen] = useState<boolean>(false);
+  
+  // Faire disparaître automatiquement les erreurs après 5 secondes
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => {
+        setError(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -297,6 +327,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     }, 2000),
     [apiService]
   );
+
+  // Load search history from localStorage
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('search_history');
+    if (savedHistory) {
+      try {
+        const history = JSON.parse(savedHistory);
+        setSearchHistory(Array.isArray(history) ? history.slice(0, 20) : []); // Limiter à 20 recherches
+      } catch (e) {
+        console.error('Error loading search history:', e);
+      }
+    }
+  }, []);
 
   // Load available models on component mount
   useEffect(() => {
@@ -334,6 +377,24 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     loadModels();
   }, [apiService, setSelectedModel]); // Add apiService and setSelectedModel as dependencies
+
+  // Fonction pour ajouter une recherche à l'historique
+  const addToSearchHistory = useCallback((query: string) => {
+    if (!query.trim()) return;
+    setSearchHistory(prev => {
+      const newHistory = [query, ...prev.filter(q => q !== query)].slice(0, 20);
+      localStorage.setItem('search_history', JSON.stringify(newHistory));
+      return newHistory;
+    });
+  }, []);
+
+  // Exposer la fonction pour que FlexiAnalyseApp puisse l'utiliser
+  useEffect(() => {
+    (window as any).__addToSearchHistory = addToSearchHistory;
+    return () => {
+      delete (window as any).__addToSearchHistory;
+    };
+  }, [addToSearchHistory]);
 
   // Test model when dropdown opens (lazy loading)
   const testModelOnDemand = useCallback(async (modelId: string) => {
@@ -402,18 +463,44 @@ const Sidebar: React.FC<SidebarProps> = ({
     });
   }, [allowedExtensions]);
 
+  const extractAllFiles = useCallback((nodes: FileNode[]): File[] => {
+    const allFiles: File[] = [];
+    nodes.forEach((node) => {
+      if (node.file) {
+        allFiles.push(node.file);
+      }
+      if (node.children) {
+        allFiles.push(...extractAllFiles(node.children));
+      }
+    });
+    return allFiles;
+  }, []);
+
   const buildFileTree = useCallback((fileList: File[]): FileNode[] => {
     const tree: FileNode[] = [];
     const pathMap: { [key: string]: FileNode } = {};
 
-    fileList.forEach((file) => {
-      const path = (file as any).webkitRelativePath || file.name;
+    // Séparer les fichiers avec et sans webkitRelativePath
+    const filesWithPath: File[] = [];
+    const filesWithoutPath: File[] = [];
+    
+    fileList.forEach(file => {
+      if ((file as any).webkitRelativePath) {
+        filesWithPath.push(file);
+      } else {
+        filesWithoutPath.push(file);
+      }
+    });
+
+    // Traitement des fichiers avec chemins relatifs (structure de dossiers)
+    filesWithPath.forEach((file) => {
+      const path = (file as any).webkitRelativePath;
       const parts = path.split('/');
 
       let currentPath = '';
       let parentNode: FileNode | null = null;
 
-      parts.forEach((part, index) => {
+      parts.forEach((part: string, index: number) => {
         currentPath = currentPath ? `${currentPath}/${part}` : part;
         if (!pathMap[currentPath]) {
           const node: FileNode = { name: part };
@@ -430,13 +517,110 @@ const Sidebar: React.FC<SidebarProps> = ({
           } else {
             tree.push(node);
           }
+        } else {
+          // Si le nœud existe déjà et c'est le dernier élément (fichier),
+          // mettre à jour le fichier si nécessaire
+          if (index === parts.length - 1 && !pathMap[currentPath].file) {
+            pathMap[currentPath].file = file;
+          }
         }
         parentNode = pathMap[currentPath];
       });
     });
 
+    // Traitement des fichiers sans chemins relatifs
+    // Si on a des fichiers avec chemins ET sans chemins, créer un nœud "Other Files"
+    // Sinon, si on a seulement des fichiers sans chemins et qu'il y en a plusieurs, créer un nœud "Imported Files"
+    if (filesWithoutPath.length > 0) {
+      let containerNode: FileNode | null = null;
+      
+      if (filesWithPath.length > 0) {
+        // Mélange : créer un nœud "Other Files"
+        containerNode = {
+          name: 'Other Files',
+          children: [],
+          isOpen: true
+        };
+        tree.push(containerNode);
+      } else if (filesWithoutPath.length > 1) {
+        // Seulement des fichiers sans chemins et plusieurs fichiers : créer un nœud "Imported Files"
+        containerNode = {
+          name: 'Imported Files',
+          children: [],
+          isOpen: true
+        };
+        tree.push(containerNode);
+      }
+      
+      // Ajouter les fichiers sans chemins
+      filesWithoutPath.forEach((file) => {
+        const fileNode: FileNode = {
+          name: file.name,
+          file: file
+        };
+        
+        if (containerNode) {
+          containerNode.children!.push(fileNode);
+        } else {
+          // Un seul fichier sans chemin : l'ajouter directement à la racine
+          tree.push(fileNode);
+        }
+      });
+    }
+
     return tree;
   }, []);
+
+  // Fonction pour ajouter un fichier à la sidebar depuis l'extérieur
+  const addFileToSidebarInternal = useCallback((file: File) => {
+    setFiles(prevFiles => {
+      // Vérifier si le fichier existe déjà
+      const fileExists = (nodes: FileNode[]): boolean => {
+        for (const node of nodes) {
+          if (node.file && node.file.name === file.name && node.file.size === file.size) {
+            return true;
+          }
+          if (node.children && fileExists(node.children)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      if (fileExists(prevFiles)) {
+        return prevFiles; // Le fichier existe déjà
+      }
+
+      // Ajouter le fichier à l'arbre
+      const allCurrentFiles = extractAllFiles(prevFiles);
+      const newTree = buildFileTree([...allCurrentFiles, file]);
+      
+      // Ajouter le fichier aux fichiers en attente pour l'upload
+      setPendingFiles(prev => {
+        if (!prev.includes(file)) {
+          return [...prev, file];
+        }
+        return prev;
+      });
+
+      // Uploader le fichier
+      const effectiveModelForUploads = selectedModel === 'auto' ? 'gpt-3.5-turbo' : selectedModel;
+      debouncedUpload([file], effectiveModelForUploads);
+
+      return newTree;
+    });
+  }, [buildFileTree, extractAllFiles, selectedModel, debouncedUpload]);
+
+  // Exposer la fonction via useEffect si addFileToSidebar est fourni
+  useEffect(() => {
+    if (addFileToSidebar) {
+      // Créer une fonction qui peut être appelée depuis l'extérieur
+      (window as any).__addFileToSidebar = addFileToSidebarInternal;
+    }
+    return () => {
+      delete (window as any).__addFileToSidebar;
+    };
+  }, [addFileToSidebar, addFileToSidebarInternal]);
 
   const generateRepoStructure = useCallback((nodes: FileNode[], indent: number = 0): string => {
     let structure = '';
@@ -450,19 +634,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
     });
     return structure;
-  }, []);
-
-  const extractAllFiles = useCallback((nodes: FileNode[]): File[] => {
-    const allFiles: File[] = [];
-    nodes.forEach((node) => {
-      if (node.file) {
-        allFiles.push(node.file);
-      }
-      if (node.children) {
-        allFiles.push(...extractAllFiles(node.children));
-      }
-    });
-    return allFiles;
   }, []);
 
   // Clear previous state before processing new files
@@ -484,6 +655,41 @@ const Sidebar: React.FC<SidebarProps> = ({
       try {
         const acceptedFiles = filterFiles(event.target.files);
         
+        // Vérifier les limitations pour les utilisateurs non connectés
+        if (!isAuthenticated) {
+          // Bloquer l'upload de plusieurs fichiers (répertoire)
+          if (acceptedFiles.length > 1) {
+            setError('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
+            setIsLoading(false);
+            if (event.target) {
+              event.target.value = '';
+            }
+            return;
+          }
+          
+          // Vérifier la limite d'un seul fichier
+          const uploadedFilesKey = 'uploaded_files';
+          const stored = localStorage.getItem(uploadedFilesKey);
+          let uploadedCount = 0;
+          if (stored) {
+            try {
+              const data = JSON.parse(stored);
+              uploadedCount = data.count || 0;
+            } catch (e) {
+              console.error('Error reading uploaded files:', e);
+            }
+          }
+          
+          if (uploadedCount >= 1) {
+            setError('You have reached the limit of 1 file upload. Please sign in to upload more files.');
+            setIsLoading(false);
+            if (event.target) {
+              event.target.value = '';
+            }
+            return;
+          }
+        }
+        
         // Immediately display files in interface
         const fileTree = buildFileTree(acceptedFiles);
         setFiles(fileTree);
@@ -493,6 +699,50 @@ const Sidebar: React.FC<SidebarProps> = ({
         
         // Schedule debounced upload
         debouncedUpload(acceptedFiles, selectedModel);
+        
+        // Incrémenter le compteur pour les non connectés
+        if (!isAuthenticated && acceptedFiles.length === 1) {
+          const uploadedFilesKey = 'uploaded_files';
+          const stored = localStorage.getItem(uploadedFilesKey);
+          let uploadedCount = 0;
+          if (stored) {
+            try {
+              const data = JSON.parse(stored);
+              uploadedCount = data.count || 0;
+            } catch (e) {
+              console.error('Error reading uploaded files:', e);
+            }
+          }
+          localStorage.setItem(uploadedFilesKey, JSON.stringify({
+            count: uploadedCount + 1
+          }));
+        }
+        
+        // Si c'est un seul fichier, l'afficher automatiquement dans le FileViewer
+        if (acceptedFiles.length === 1 && onFileSelect) {
+          const file = acceptedFiles[0];
+          const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+          const isBinaryFile = ['.docx', '.pdf'].includes(extension);
+          
+          try {
+            let content: string | ArrayBuffer;
+            if (isBinaryFile) {
+              content = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as ArrayBuffer);
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsArrayBuffer(file);
+              });
+            } else {
+              content = await file.text();
+            }
+            
+            const description = 'No description available';
+            onFileSelect(file, { content, description });
+          } catch (error) {
+            console.error('Error reading file for display:', error);
+          }
+        }
         
       } catch (error) {
         console.error('Error processing files:', error);
@@ -505,7 +755,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     }
-  }, [filterFiles, buildFileTree, debouncedUpload, selectedModel, clearPreviousState]);
+  }, [filterFiles, buildFileTree, debouncedUpload, selectedModel, clearPreviousState, onFileSelect, isAuthenticated]);
 
   const handleFolderChange = useCallback(async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     if (event.target.files) {
@@ -516,15 +766,54 @@ const Sidebar: React.FC<SidebarProps> = ({
       try {
         const acceptedFiles = filterFiles(event.target.files);
         
-        // Immediately display files in interface
+        // Bloquer l'upload de répertoires pour les utilisateurs non connectés
+        if (!isAuthenticated && acceptedFiles.length > 1) {
+          setError('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
+          setIsLoading(false);
+          if (event.target) {
+            event.target.value = '';
+          }
+          return;
+        }
+        
+        // Toujours afficher les fichiers dans la sidebar
         const fileTree = buildFileTree(acceptedFiles);
         setFiles(fileTree);
-
+        
         // Add to pending uploads
         setPendingFiles(prev => [...prev, ...acceptedFiles]);
         
-        // Schedule debounced upload
-        debouncedUpload(acceptedFiles, selectedModel);
+        // Si c'est un répertoire (plusieurs fichiers), utiliser handleDirectorySelect
+        if (acceptedFiles.length > 1 && onDirectorySelect) {
+          await onDirectorySelect(acceptedFiles);
+        } else if (acceptedFiles.length === 1 && onFileSelect) {
+          // Si c'est un seul fichier, l'afficher automatiquement dans le FileViewer
+          const file = acceptedFiles[0];
+          const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+          const isBinaryFile = ['.docx', '.pdf'].includes(extension);
+          
+          try {
+            let content: string | ArrayBuffer;
+            if (isBinaryFile) {
+              content = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as ArrayBuffer);
+                reader.onerror = () => reject(new Error('Failed to read file'));
+                reader.readAsArrayBuffer(file);
+              });
+            } else {
+              content = await file.text();
+            }
+            
+            const description = 'No description available';
+            onFileSelect(file, { content, description });
+          } catch (error) {
+            console.error('Error reading file for display:', error);
+          }
+        } else {
+          // Sinon, traitement normal (upload seulement)
+          debouncedUpload(acceptedFiles, selectedModel);
+        }
         
       } catch (error) {
         console.error('Error processing folder:', error);
@@ -538,7 +827,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     }
-  }, [filterFiles, buildFileTree, debouncedUpload, selectedModel, clearPreviousState]);
+  }, [filterFiles, buildFileTree, debouncedUpload, selectedModel, clearPreviousState, onDirectorySelect, onFileSelect, isAuthenticated]);
 
   const toggleFolder = useCallback((node: FileNode, nodes: FileNode[]): FileNode[] => {
     return nodes.map((n) => {
@@ -594,7 +883,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [onFileSelect, pendingFiles, apiService, selectedModel]);
 
-  const renderFileTree = useCallback((nodes: FileNode[]): JSX.Element[] => {
+  const renderFileTree = useCallback((nodes: FileNode[]): React.ReactElement[] => {
     return nodes.map((node, index) => (
       <li key={index}>
         {node.children ? (
@@ -677,6 +966,95 @@ const Sidebar: React.FC<SidebarProps> = ({
     getRepoStructure(() => fileStructure.structure, fileStructure.allFiles);
   }, [fileStructure, getRepoStructure]);
 
+  // Helper function pour obtenir les classes CSS selon le thème
+  const getThemeClasses = useCallback(() => {
+    switch (theme) {
+      case 'dark':
+        return {
+          sidebar: 'bg-gray-800',
+          text: 'text-gray-200',
+          textSecondary: 'text-gray-400',
+          bg: 'bg-gray-700',
+          border: 'border-gray-600',
+          hover: 'hover:bg-gray-700'
+        };
+      case 'dark-blue':
+        return {
+          sidebar: 'bg-blue-950',
+          text: 'text-blue-100',
+          textSecondary: 'text-blue-300',
+          bg: 'bg-blue-900',
+          border: 'border-blue-800',
+          hover: 'hover:bg-blue-900'
+        };
+      default: // white
+        return {
+          sidebar: 'bg-gray-100',
+          text: 'text-gray-800',
+          textSecondary: 'text-gray-600',
+          bg: 'bg-white',
+          border: 'border-gray-300',
+          hover: 'hover:bg-gray-50'
+        };
+    }
+  }, [theme]);
+
+  // Composant de section expandable réutilisable
+  const ExpandableSection: React.FC<{
+    title: string;
+    icon: React.ReactNode;
+    isExpanded: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+  }> = ({ title, icon, isExpanded, onToggle, children }) => {
+    const themeClasses = getThemeClasses();
+    
+    return (
+      <div className="mb-1 overflow-hidden">
+        {/* Header */}
+        <button
+          onClick={onToggle}
+          className={`w-full flex items-center justify-between px-2 py-1.5 ${themeClasses.hover} transition-colors duration-200 rounded-sm`}
+        >
+          <div className="flex items-center gap-2">
+            <div 
+              className={`transition-transform duration-500 ease-in-out transform origin-center ${
+                isExpanded ? 'rotate-90' : 'rotate-0'
+              }`}
+              style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
+            >
+              <ChevronRight size={16} className={themeClasses.textSecondary} />
+            </div>
+            {icon}
+            <span className={`text-sm font-semibold ${themeClasses.text} transition-opacity duration-300`}>
+              {title}
+            </span>
+          </div>
+        </button>
+        
+        {/* Content avec animation fluide */}
+        <div
+          className="grid transition-all duration-500 ease-in-out"
+          style={{
+            gridTemplateRows: isExpanded ? '1fr' : '0fr',
+            transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        >
+          <div className="overflow-hidden">
+            <div 
+              className={`px-2 pb-1 transition-opacity duration-500 ${
+                isExpanded ? 'opacity-100 delay-100' : 'opacity-0 delay-0'
+              }`}
+              style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
+            >
+              {children}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
   <>
     {/* Mobile Hamburger Menu */}
@@ -729,8 +1107,23 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             {/* Error display */}
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                <p className="text-sm text-red-800">{error}</p>
+              <div className="mb-4 p-3 bg-yellow-500 text-white rounded-lg shadow-lg animate-slide-in-right">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2 flex-1">
+                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <p className="text-sm font-medium">{error}</p>
+                  </div>
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+                  >
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -799,33 +1192,33 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span className="font-medium text-gray-700">Export</span>
+                <span className="font-medium text-gray-700">{t('sidebar.export')}</span>
               </button>
 
               {/* Model dropdown */}
               <div className="relative" ref={modelDropdownRef}>
                 <button
                   onClick={() => handleMobileModelDropdownOpen()}
-                  className="w-full flex items-center justify-between p-3 text-left bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                  className={`w-full flex items-center justify-between p-3 text-left ${theme === 'white' ? 'bg-gray-50 hover:bg-gray-100' : theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-blue-900 hover:bg-blue-800'} rounded-lg transition-colors`}
                 >
                   <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`w-5 h-5 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                     </svg>
-                    <span className="font-medium text-gray-700">Model</span>
+                    <span className={`font-medium ${getThemeClasses().text}`}>{t('sidebar.model')}</span>
                   </div>
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className={`w-4 h-4 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 
                 {isMobileModelDropdownOpen  && (
-                  <div className="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+                  <div className={`mt-2 ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} ${getThemeClasses().border} rounded-lg shadow-lg max-h-80 overflow-y-auto`}>
                     {isLoadingModels ? (
                       <div className="px-4 py-6 text-center">
                         <div className="flex items-center justify-center space-x-2">
-                          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                          <span className="text-sm text-gray-600">Loading models...</span>
+                          <div className={`w-4 h-4 border-2 ${theme === 'white' ? 'border-blue-500' : 'border-blue-300'} border-t-transparent rounded-full animate-spin`}></div>
+                          <span className={`text-sm ${getThemeClasses().textSecondary}`}>Loading models...</span>
                         </div>
                       </div>
                     ) : (
@@ -836,28 +1229,32 @@ const Sidebar: React.FC<SidebarProps> = ({
                             setSelectedModel(model.id);
                             setIsMobileModelDropdownOpen(false);
                           }}
-                          className={`w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                            selectedModel === model.id ? 'bg-blue-50 border-blue-200' : ''
+                          className={`w-full text-left px-4 py-3 ${theme === 'white' ? 'hover:bg-gray-50' : theme === 'dark' ? 'hover:bg-gray-600' : 'hover:bg-blue-800'} ${getThemeClasses().border} border-b last:border-b-0 ${
+                            selectedModel === model.id ? (theme === 'white' ? 'bg-blue-50 border-blue-200' : theme === 'dark' ? 'bg-gray-600 border-gray-500' : 'bg-blue-800 border-blue-700') : ''
                           }`}
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center space-x-2">
                                 <p className={`text-sm font-medium truncate ${
-                                  selectedModel === model.id ? 'text-blue-900' : 'text-gray-900'
+                                  selectedModel === model.id 
+                                    ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')
+                                    : getThemeClasses().text
                                 }`}>
                                   {model.name}
                                 </p>
                                 {getModelStatusIcon(model.id)}
                               </div>
                               <p className={`text-xs truncate ${
-                                selectedModel === model.id ? 'text-blue-600' : 'text-gray-500'
+                                selectedModel === model.id 
+                                  ? (theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300')
+                                  : getThemeClasses().textSecondary
                               }`}>
                                 {model.provider}
                               </p>
                             </div>
                             {selectedModel === model.id && (
-                              <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                              <svg className={`w-5 h-5 ${theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300'}`} fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                               </svg>
                             )}
@@ -912,7 +1309,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </ul>
                 ) : (
                   <p className="text-gray-500 text-sm">
-                    No files imported yet.
+                    {t('sidebar.noFiles')}
                   </p>
                 )}
               </div>
@@ -938,12 +1335,27 @@ const Sidebar: React.FC<SidebarProps> = ({
       directory="true"
     />
 
-    {/* Desktop Sidebar - Comportement original */}
-    <div className="hidden lg:block h-screen bg-gray-100 p-4 flex flex-col">
+    {/* Desktop Sidebar - Nouvelle structure avec 3 sections */}
+    <div className={`hidden lg:block h-screen p-4 flex flex-col ${getThemeClasses().sidebar}`}>
       {/* Error display */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-          <p className="text-sm text-red-800">{error}</p>
+        <div className="mb-4 p-3 bg-yellow-500 text-white rounded-lg shadow-lg animate-slide-in-right">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2 flex-1">
+              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <p className="text-sm font-medium">{error}</p>
+            </div>
+            <button
+              onClick={() => setError(null)}
+              className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1010,12 +1422,12 @@ const Sidebar: React.FC<SidebarProps> = ({
           href="#" 
           className={`text-gray-700 hover:text-blue-500 ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : ''}`}
         >
-          {isSidebarOpen ? 'Export' : (
+          {isSidebarOpen ? t('sidebar.export') : (
             <div className="flex items-center space-x-1">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              <span className="text-xs">Export</span>
+              <span className="text-xs">{t('sidebar.export')}</span>
             </div>
           )}
         </a>
@@ -1028,14 +1440,14 @@ const Sidebar: React.FC<SidebarProps> = ({
               e.preventDefault();
               handleDesktopModelDropdownOpen();
             }}
-            className={`text-gray-700 hover:text-blue-500 ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : 'flex items-center space-x-2'}`}
+            className={`${getThemeClasses().text} ${theme !== 'white' ? 'hover:text-blue-300' : 'hover:text-blue-500'} ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : 'flex items-center space-x-2'}`}
           >
             {isSidebarOpen ? (
               <div className="flex items-center space-x-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
-                <span className="text-sm font-medium truncate max-w-40">Model</span>
+                <span className="text-sm font-medium truncate max-w-40">{t('sidebar.model')}</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                 </svg>
@@ -1045,18 +1457,18 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                 </svg>
-                <span className="text-xs">Model</span>
+                <span className="text-xs">{t('sidebar.model')}</span>
               </div>
             )}
           </a>
           
           {isDesktopModelDropdownOpen  && (
-            <div className={`absolute bg-white shadow-lg border border-gray-200 rounded-md z-50 max-h-80 overflow-y-auto ${isSidebarOpen ? 'right-0 top-full w-56 mt-2' : 'left-full top-0 w-64 ml-2'}`}>
+            <div className={`absolute ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} shadow-lg ${getThemeClasses().border} rounded-md z-50 max-h-80 overflow-y-auto ${isSidebarOpen ? 'right-0 top-full w-56 mt-2' : 'left-full top-0 w-64 ml-2'}`}>
               {isLoadingModels ? (
                 <div className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center space-x-2">
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-sm text-gray-600">Loading models...</span>
+                    <div className={`w-4 h-4 border-2 ${theme === 'white' ? 'border-blue-500' : 'border-blue-300'} border-t-transparent rounded-full animate-spin`}></div>
+                    <span className={`text-sm ${getThemeClasses().textSecondary}`}>Loading models...</span>
                   </div>
                 </div>
               ) : (
@@ -1069,28 +1481,32 @@ const Sidebar: React.FC<SidebarProps> = ({
                       setSelectedModel(model.id);
                       setIsDesktopModelDropdownOpen(false);
                     }}
-                    className={`block w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 ${
-                      selectedModel === model.id ? 'bg-blue-50 border-blue-200' : ''
+                    className={`block w-full text-left px-4 py-3 ${theme === 'white' ? 'hover:bg-gray-50' : theme === 'dark' ? 'hover:bg-gray-600' : 'hover:bg-blue-800'} ${getThemeClasses().border} border-b last:border-b-0 ${
+                      selectedModel === model.id ? (theme === 'white' ? 'bg-blue-50 border-blue-200' : theme === 'dark' ? 'bg-gray-600 border-gray-500' : 'bg-blue-800 border-blue-700') : ''
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
                           <p className={`text-sm font-medium truncate ${
-                            selectedModel === model.id ? 'text-blue-900' : 'text-gray-900'
+                            selectedModel === model.id 
+                              ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')
+                              : getThemeClasses().text
                           }`}>
                             {model.name}
                           </p>
                           {getModelStatusIcon(model.id)}
                         </div>
                         <p className={`text-xs truncate ${
-                          selectedModel === model.id ? 'text-blue-600' : 'text-gray-500'
+                          selectedModel === model.id 
+                            ? (theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300')
+                            : getThemeClasses().textSecondary
                         }`}>
                           {model.provider}
                         </p>
                       </div>
                       {selectedModel === model.id && (
-                        <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                        <svg className={`w-5 h-5 ${theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300'}`} fill="currentColor" viewBox="0 0 20 20">
                           <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                         </svg>
                       )}
@@ -1110,50 +1526,181 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
+      {/* Sections expandables avec hauteurs ajustables */}
       <div className="flex-1 overflow-y-auto">
+        {/* Section 1: EXPLORER - Fichiers/Répertoires */}
         {isSidebarOpen && (
-          <h3 className="text-sm font-semibold mb-3">EXPLORER</h3>
+          <ExpandableSection
+            title="EXPLORER"
+            icon={<FileText size={16} className={getThemeClasses().textSecondary} />}
+            isExpanded={isExplorerExpanded}
+            onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
+          >
+            {isLoading ? (
+              <div className={`flex items-center ${getThemeClasses().textSecondary} text-sm py-2`}>
+                <svg
+                  className="animate-spin h-4 w-4 mr-2"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                Loading files...
+              </div>
+            ) : files.length > 0 ? (
+              <ul className={`text-sm ${getThemeClasses().textSecondary}`}>
+                {renderFileTree(files)}
+              </ul>
+            ) : (
+              <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                {t('sidebar.noFiles')}
+              </p>
+            )}
+          </ExpandableSection>
         )}
-        
-        {isLoading ? (
-          <div className="flex items-center text-blue-600 text-sm">
-            <svg
-              className="animate-spin h-5 w-5 mr-2 text-blue-600"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            Loading files...
-          </div>
-        ) : files.length > 0 ? (
-          <ul className="text-sm text-gray-600">
-            {isSidebarOpen && renderFileTree(files)}
-          </ul>
-        ) : (
-          <p className={`text-gray-600 ${isSidebarOpen ? 'text-sm' : 'text-xs text-center'}`}>
-            {isSidebarOpen ? 'No files imported yet.' : 'No files'}
-          </p>
+
+        {/* Section 2: SEARCH - Historique de recherche */}
+        {isSidebarOpen && (
+          <ExpandableSection
+            title="SEARCH"
+            icon={<Search size={16} className={getThemeClasses().textSecondary} />}
+            isExpanded={isSearchExpanded}
+            onToggle={() => setIsSearchExpanded(!isSearchExpanded)}
+          >
+            {searchHistory.length > 0 ? (
+              <div className="space-y-1">
+                {searchHistory.map((query, index) => (
+                  <button
+                    key={index}
+                    onClick={() => {
+                      // Permettre de cliquer sur une recherche pour la réutiliser
+                      // Cette fonctionnalité peut être ajoutée plus tard
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded text-xs ${getThemeClasses().textSecondary} ${getThemeClasses().hover} transition-colors truncate`}
+                    title={query}
+                  >
+                    {query}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                No search history
+              </p>
+            )}
+          </ExpandableSection>
+        )}
+
+        {/* Section 3: USER INFO - Informations utilisateur */}
+        {isSidebarOpen && (
+          <ExpandableSection
+            title="USER INFO"
+            icon={<User size={16} className={getThemeClasses().textSecondary} />}
+            isExpanded={isUserInfoExpanded}
+            onToggle={() => setIsUserInfoExpanded(!isUserInfoExpanded)}
+          >
+            {isAuthenticated && user ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  {(user.picture_url || user.avatar) && (
+                    <img
+                      src={user.picture_url || user.avatar}
+                      alt={user.name || user.email}
+                      className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className={`${getThemeClasses().text} text-sm font-medium truncate`}>
+                      {user.name || user.email}
+                    </div>
+                    {user.name && (
+                      <div className={`${getThemeClasses().textSecondary} text-xs truncate`}>
+                        {user.email}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {user.plan && (
+                  <div className={`${getThemeClasses().textSecondary} text-xs`}>
+                    Plan: <span className="font-medium capitalize">{user.plan}</span>
+                  </div>
+                )}
+                {user.provider && (
+                  <div className={`${getThemeClasses().textSecondary} text-xs`}>
+                    Provider: {user.provider}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                  Not authenticated
+                </p>
+                <button
+                  onClick={() => setIsLoginModalOpen(true)}
+                  className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    theme === 'white' 
+                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                      : theme === 'dark'
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-blue-500 text-white hover:bg-blue-600'
+                  }`}
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
+          </ExpandableSection>
         )}
       </div>
+      
+      {/* Login Modal - Rendu seulement si le modal d'inscription n'est pas ouvert */}
+      {!isSignUpModalOpen && (
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          onSwitchToSignUp={() => {
+            setIsLoginModalOpen(false);
+            // Délai pour permettre l'animation de sortie avant d'ouvrir l'autre modal
+            setTimeout(() => {
+              setIsSignUpModalOpen(true);
+            }, 300);
+          }}
+        />
+      )}
+      
+      {/* Sign Up Modal - Rendu seulement si le modal de connexion n'est pas ouvert */}
+      {!isLoginModalOpen && (
+        <SignUpModal
+          isOpen={isSignUpModalOpen}
+          onClose={() => setIsSignUpModalOpen(false)}
+          onSwitchToLogin={() => {
+            setIsSignUpModalOpen(false);
+            // Délai pour permettre l'animation de sortie avant d'ouvrir l'autre modal
+            setTimeout(() => {
+              setIsLoginModalOpen(true);
+            }, 300);
+          }}
+        />
+      )}
       
       {/* Toggle button */}
       <div
         onClick={toggleSidebar}
-        className="bg-gray-100 text-gray-700 p-2 h-10 flex items-center justify-center transition-all duration-300 absolute bottom-0 right-0 cursor-pointer"
+        className={`${getThemeClasses().sidebar} ${getThemeClasses().text} p-2 h-10 flex items-center justify-center transition-all duration-300 absolute bottom-0 right-0 cursor-pointer ${getThemeClasses().hover}`}
       >
         <svg
           className="h-5 w-5"

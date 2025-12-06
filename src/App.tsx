@@ -2,6 +2,8 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './components/auth/AuthProvider';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { LanguageProvider } from './contexts/LanguageContext';
 import LandingPage from './components/landing/LandingPage';
 import FlexiAnalyseApp from './FlexiAnalyseApp';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -32,8 +34,15 @@ const AppContent: React.FC = () => {
   return (
     <Routes>
       
-      {/* Catch-all (optionnel) */}
-      <Route path="*" element={<FlexiAnalyseApp />} />
+      {/* Page publique */}
+      <Route path="/" element={isAuthenticated ? <Navigate to="/app" replace /> : <LandingPage />} />
+      
+      {/* App principale (accessible sans authentification mais avec limitations) */}
+      <Route path="/app" element={<FlexiAnalyseApp />} />
+      
+      {/* Pages légales */}
+      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+      <Route path="/terms-of-use" element={<TermsOfUse />} />
     </Routes>
   );
 };
@@ -42,13 +51,15 @@ const AppContent: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ErrorBoundary>
-      <div className="min-h-screen w-full">
-        <AuthProvider>
-
-          <AppContent />
-          
-        </AuthProvider>
-      </div>
+      <ThemeProvider>
+        <LanguageProvider>
+          <div className="min-h-screen w-full">
+            <AuthProvider>
+              <AppContent />
+            </AuthProvider>
+          </div>
+        </LanguageProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 };

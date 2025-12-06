@@ -32,10 +32,24 @@ def init_database():
             google_id TEXT,
             password_hash TEXT,
             picture_url TEXT,
+            plan TEXT DEFAULT 'free',
+            phone TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_login TIMESTAMP
         )
     ''')
+    
+    # Ajouter la colonne plan si elle n'existe pas (pour les bases existantes)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN plan TEXT DEFAULT "free"')
+    except sqlite3.OperationalError:
+        pass  # La colonne existe déjà
+    
+    # Ajouter la colonne phone si elle n'existe pas
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN phone TEXT')
+    except sqlite3.OperationalError:
+        pass  # La colonne existe déjà
     
     # Table pour les emails marketing
     cursor.execute('''
@@ -109,13 +123,27 @@ def auth_login():
     if user and user[5] and check_password_hash(user[5], password):
         cursor.execute('UPDATE users SET last_login = ? WHERE id = ?', 
                       (datetime.utcnow(), user[0]))
+        
+        # S'assurer que l'utilisateur a un plan
+        cursor.execute('UPDATE users SET plan = ? WHERE id = ? AND (plan IS NULL OR plan = "")', ('free', user[0]))
+        
         conn.commit()
+        
+        # Récupérer le plan, le téléphone et la photo de l'utilisateur
+        cursor.execute('SELECT plan, phone, picture_url FROM users WHERE id = ?', (user[0],))
+        plan_result = cursor.fetchone()
+        user_plan = plan_result[0] if plan_result and plan_result[0] else 'free'
+        user_phone = plan_result[1] if plan_result and len(plan_result) > 1 else None
+        user_picture = plan_result[2] if plan_result and len(plan_result) > 2 else None
         
         user_data = {
             'id': user[0],
             'email': user[1],
             'name': user[2] or email.split('@')[0],
-            'provider': 'email'
+            'provider': 'email',
+            'plan': user_plan,
+            'phone': user_phone,
+            'picture_url': user_picture
         }
         
         token = create_jwt_token(user_data)
@@ -150,10 +178,11 @@ def auth_register():
         return jsonify({'error': 'Un compte existe déjà avec cet email'}), 409
     
     password_hash = generate_password_hash(password)
+    phone = data.get('phone')
     cursor.execute('''
-        INSERT INTO users (email, name, provider, password_hash, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (email, name, 'email', password_hash, datetime.utcnow()))
+        INSERT INTO users (email, name, provider, password_hash, plan, phone, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (email, name, 'email', password_hash, 'free', phone, datetime.utcnow()))
     
     user_id = cursor.lastrowid
     conn.commit()
@@ -163,7 +192,9 @@ def auth_register():
         'id': user_id,
         'email': email,
         'name': name,
-        'provider': 'email'
+        'provider': 'email',
+        'plan': 'free',
+        'phone': phone
     }
     
     token = create_jwt_token(user_data)
@@ -235,13 +266,22 @@ def auth_google():
         else:
             # Nouvel utilisateur
             cursor.execute('''
-                INSERT INTO users (email, name, provider, google_id, picture_url, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (email, name, 'google', google_id, picture_url, datetime.utcnow(), datetime.utcnow()))
+                INSERT INTO users (email, name, provider, google_id, picture_url, plan, created_at, last_login)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (email, name, 'google', google_id, picture_url, 'free', datetime.utcnow(), datetime.utcnow()))
             user_id = cursor.lastrowid
             final_name = name
         
+        # S'assurer que tous les utilisateurs ont un plan
+        cursor.execute('UPDATE users SET plan = ? WHERE id = ? AND (plan IS NULL OR plan = "")', ('free', user_id))
+        
         conn.commit()
+        
+        # Récupérer le plan de l'utilisateur
+        cursor.execute('SELECT plan FROM users WHERE id = ?', (user_id,))
+        plan_result = cursor.fetchone()
+        user_plan = plan_result[0] if plan_result and plan_result[0] else 'free'
+        
         conn.close()
         
         user_data = {
@@ -249,7 +289,8 @@ def auth_google():
             'email': email,
             'name': final_name,
             'provider': 'google',
-            'picture_url': picture_url
+            'picture_url': picture_url,
+            'plan': user_plan
         }
         
         token = create_jwt_token(user_data)
@@ -291,10 +332,28 @@ def auth_verify():
     if not payload:
         return jsonify({'error': 'Token invalide'}), 401
     
+    # Récupérer les informations complètes de l'utilisateur depuis la base de données
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT id, email, name, provider, picture_url, plan, phone FROM users WHERE id = ?', (payload['user_id'],))
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user:
+        return jsonify({'error': 'Utilisateur non trouvé'}), 404
+    
+    # S'assurer que l'utilisateur a un plan
+    user_plan = user[5] if user[5] else 'free'
+    
     return jsonify({'user': {
-        'id': payload['user_id'],
-        'email': payload['email'],
-        'name': payload['name']
+        'id': user[0],
+        'email': user[1],
+        'name': user[2] or user[1].split('@')[0],
+        'provider': user[3] or 'email',
+        'picture_url': user[4],
+        'plan': user_plan,
+        'phone': user[6]
     }}), 200
 
 def marketing_subscribe():

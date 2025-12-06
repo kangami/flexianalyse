@@ -121,9 +121,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (response.ok) {
         const data = await response.json();
         console.log('Token valide, utilisateur authentifié:', data.user);
+        
+        // Assigner un plan gratuit si l'utilisateur n'en a pas
+        const userWithPlan = {
+          ...data.user,
+          plan: data.user.plan || 'free'
+        };
+        
         setAuthState({
           isAuthenticated: true,
-          user: data.user,
+          user: userWithPlan,
           isLoading: false,
           error: null,
         });
@@ -167,9 +174,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (response.ok) {
         console.log('Connexion réussie:', data.user);
         localStorage.setItem('auth_token', data.token);
+        
+        // Assigner un plan gratuit si l'utilisateur n'en a pas
+        const userWithPlan = {
+          ...data.user,
+          plan: data.user.plan || 'free'
+        };
+        
         setAuthState({
           isAuthenticated: true,
-          user: data.user,
+          user: userWithPlan,
           isLoading: false,
           error: null,
         });
@@ -317,9 +331,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (backendResponse.ok && data.success) {
         console.log('Authentification Google réussie:', data.user);
         localStorage.setItem('auth_token', data.token);
+        
+        // Assigner un plan gratuit si l'utilisateur n'en a pas
+        const userWithPlan = {
+          ...data.user,
+          plan: data.user.plan || 'free'
+        };
+        
         setAuthState({
           isAuthenticated: true,
-          user: data.user,
+          user: userWithPlan,
           isLoading: false,
           error: null,
         });

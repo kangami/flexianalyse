@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import QueryForm from './QueryForm';
 import AceEditor from 'react-ace';
 import mammoth from 'mammoth';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -104,6 +103,9 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   // State for .pdf pages
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [scale, setScale] = useState<number>(1.0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageInput, setPageInput] = useState<string>('1');
 
   // State for animated chat messages
   const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
@@ -321,6 +323,8 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
     setPdfError(null);
+    setCurrentPage(1);
+    setPageInput('1');
   };
 
   // Handle PDF load error
@@ -560,21 +564,143 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
                   {pdfError}
                 </div>
               ) : (
-                <div ref={containerRef} style={{ width: '100%', overflow: 'auto' }}>
-                  <Document
-                    file={pdfFileData}
-                    onLoadSuccess={onDocumentLoadSuccess}
-                    onLoadError={onDocumentLoadError}
-                  >
-                    {numPages &&
-                      Array.from(new Array(numPages), (el, index) => (
-                        <Page
-                          key={`page_${index + 1}`}
-                          pageNumber={index + 1}
-                          width={containerWidth}
-                        />
-                      ))}
-                  </Document>
+                <div className="h-full flex flex-col">
+                  <div className="flex-1 overflow-y-auto" ref={containerRef} style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e0 #f7fafc' }}>
+                    <div className="flex flex-col items-center p-4">
+                      <Document
+                        file={pdfFileData}
+                        onLoadSuccess={onDocumentLoadSuccess}
+                        onLoadError={onDocumentLoadError}
+                      >
+                        {numPages && numPages > 0 && (
+                          <>
+                            {Array.from(new Array(numPages), (el, index) => (
+                              <div key={`page_${index + 1}`} className="mb-4 shadow-sm bg-white">
+                                <Page
+                                  pageNumber={index + 1}
+                                  width={Math.min((containerWidth > 0 ? containerWidth - 64 : 800) * scale, 1200)}
+                                  scale={scale}
+                                  renderTextLayer={true}
+                                  renderAnnotationLayer={true}
+                                />
+                              </div>
+                            ))}
+                          </>
+                        )}
+                      </Document>
+                    </div>
+                  </div>
+                  
+                  {/* Contrôles de zoom et navigation */}
+                  {numPages && numPages > 0 && (
+                    <div className="border-t border-gray-200 bg-white px-4 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setScale(prev => Math.max(0.5, prev - 0.1))}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800 transition-colors"
+                          title="Zoom arrière"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+                          </svg>
+                        </button>
+                        <span className="text-xs text-gray-600 min-w-[3rem] text-center">
+                          {Math.round(scale * 100)}%
+                        </span>
+                        <button
+                          onClick={() => setScale(prev => Math.min(2.0, prev + 0.1))}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800 transition-colors"
+                          title="Zoom avant"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+                          </svg>
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const newPage = Math.max(1, currentPage - 1);
+                            setCurrentPage(newPage);
+                            setPageInput(newPage.toString());
+                            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          disabled={currentPage <= 1}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Page précédente"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="1"
+                            max={numPages}
+                            value={pageInput}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPageInput(value);
+                              const pageNum = parseInt(value);
+                              if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= numPages) {
+                                setCurrentPage(pageNum);
+                                containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                              }
+                            }}
+                            onBlur={() => {
+                              const pageNum = parseInt(pageInput);
+                              if (isNaN(pageNum) || pageNum < 1) {
+                                setPageInput('1');
+                                setCurrentPage(1);
+                              } else if (pageNum > numPages) {
+                                setPageInput(numPages.toString());
+                                setCurrentPage(numPages);
+                              } else {
+                                setPageInput(pageNum.toString());
+                                setCurrentPage(pageNum);
+                              }
+                            }}
+                            className="w-12 px-2 py-1 text-xs text-center border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                          <span className="text-xs text-gray-600">sur {numPages}</span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const newPage = Math.min(numPages, currentPage + 1);
+                            setCurrentPage(newPage);
+                            setPageInput(newPage.toString());
+                            containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                          }}
+                          disabled={currentPage >= numPages}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Page suivante"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const searchQuery = prompt('Rechercher dans le document:');
+                            if (searchQuery) {
+                              containerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                          }}
+                          className="p-1.5 hover:bg-gray-100 rounded text-gray-600 hover:text-gray-800 transition-colors"
+                          title="Rechercher"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )
             ) : (
@@ -586,22 +712,6 @@ const FileSelectedComponent: React.FC<FileSelectedComponentProps> = ({ file, det
         </div>
       )}
 
-      {/* Zone du formulaire (fixée en bas, alignée avec QueryForm) */}
-      <div className="border-t bg-white">
-        <div className="w-full max-w-3xl mx-auto">
-          <QueryForm
-            isFileContentVisible={isFileContentVisible}
-            setIsFileContentVisible={setIsFileContentVisible}
-            onQuerySubmit={handleQuerySubmit}
-            loading={loading}
-            selectedModel={selectedModel}
-            researchMode={researchMode}
-            setResearchMode={setResearchMode}
-            suggestedActions={suggestedActions}
-            onSuggestedActionClick={onSuggestedActionClick}
-          />
-        </div>
-      </div>
 
       {/* Dialog pour choisir où insérer le texte */}
       {showInsertDialog && selectedTextToInsert && (
