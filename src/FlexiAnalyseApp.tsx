@@ -315,7 +315,21 @@ const FlexiAnalyseApp: React.FC = () => {
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text().catch(() => 'Unable to read error message');
+        console.error('❌ Erreur résumé fichier:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          url: `${apiUrl}/summarize_file_stream`,
+          method: 'POST'
+        });
+        
+        // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
+        if (response.status === 405) {
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /summarize_file_stream déployé et que la méthode POST est autorisée.`);
+        }
+        
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
       
       // Lire le stream
@@ -380,10 +394,22 @@ const FlexiAnalyseApp: React.FC = () => {
       
       setLoading(false);
     } catch (error) {
-      console.error('Error generating file summary:', error);
+      console.error('❌ Error generating file summary:', error);
+      // Afficher un message d'erreur dans le chat si le résumé échoue
+      setChatHistory((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.userQuery === `📄 ${file.name}`) {
+          return prev.map(msg => 
+            msg.id === lastMessage.id 
+              ? { ...msg, aiResponse: `⚠️ Impossible de générer le résumé automatique. Erreur: ${error instanceof Error ? error.message : 'Erreur inconnue'}` }
+              : msg
+          );
+        }
+        return prev;
+      });
       setLoading(false);
     }
-  }, [apiUrl, extractTextFromPdf, extractTextFromDocx]);
+  }, [apiUrl, extractTextFromPdf, extractTextFromDocx, language]);
 
   // Fonction pour générer un résumé d'un fichier (ancienne version, gardée pour compatibilité)
   const generateFileSummary = useCallback(async (file: File, content: string | ArrayBuffer) => {
@@ -420,7 +446,21 @@ const FlexiAnalyseApp: React.FC = () => {
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text().catch(() => 'Unable to read error message');
+        console.error('❌ Erreur résumé répertoire:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          url: `${apiUrl}/summarize_repository_stream`,
+          method: 'POST'
+        });
+        
+        // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
+        if (response.status === 405) {
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /summarize_repository_stream déployé et que la méthode POST est autorisée.`);
+        }
+        
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
       
       // Lire le stream
@@ -481,10 +521,22 @@ const FlexiAnalyseApp: React.FC = () => {
       
       setLoading(false);
     } catch (error) {
-      console.error('Error generating repository summary:', error);
+      console.error('❌ Error generating repository summary:', error);
+      // Afficher un message d'erreur dans le chat si le résumé échoue
+      setChatHistory((prev) => {
+        const lastMessage = prev[prev.length - 1];
+        if (lastMessage && lastMessage.userQuery.includes('Répertoire')) {
+          return prev.map(msg => 
+            msg.id === lastMessage.id 
+              ? { ...msg, aiResponse: `⚠️ Impossible de générer le résumé automatique du répertoire. Erreur: ${error instanceof Error ? error.message : 'Erreur inconnue'}` }
+              : msg
+          );
+        }
+        return prev;
+      });
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, [apiUrl, language]);
   
   // Fonction pour régénérer les suggested actions pour un fichier spécifique
   const regenerateSuggestedActionsForFile = useCallback(async (file: File) => {
@@ -1241,6 +1293,21 @@ const FlexiAnalyseApp: React.FC = () => {
       return;
     }
 
+    // Vérifier d'abord si l'endpoint est accessible
+    try {
+      const healthCheck = await fetch(`${apiUrl}/test-endpoints`);
+      if (healthCheck.ok) {
+        const healthData = await healthCheck.json();
+        console.log('📊 Endpoints disponibles:', healthData);
+        if (healthData.endpoints && healthData.endpoints['/extract-structured'] && !healthData.endpoints['/extract-structured'].exists) {
+          alert(`⚠️ L'endpoint /extract-structured n'est pas disponible sur le serveur de production.\n\nVérifiez que le backend a bien été déployé avec tous les endpoints nécessaires.`);
+          return;
+        }
+      }
+    } catch (healthError) {
+      console.warn('⚠️ Impossible de vérifier les endpoints:', healthError);
+    }
+
     setExtracting(true);
     try {
       // Extraire le texte du fichier
@@ -1268,7 +1335,21 @@ const FlexiAnalyseApp: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`Erreur HTTP: ${response.status}`);
+        const errorText = await response.text().catch(() => 'Unable to read error message');
+        console.error('❌ Erreur extraction structurée:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText,
+          url: `${apiUrl}/extract-structured`,
+          method: 'POST'
+        });
+        
+        // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
+        if (response.status === 405) {
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /extract-structured déployé et que la méthode POST est autorisée.`);
+        }
+        
+        throw new Error(`Erreur HTTP: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();

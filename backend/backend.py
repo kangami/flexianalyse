@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
+from flask.helpers import make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 from docx import Document as DocxDocument
@@ -132,7 +133,21 @@ if not OPENAI_API_KEY:
 
 # Flask setup
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["http://flexianalyse.com", "http://localhost:5173", "https://flexianalyse.com"]}})
+CORS(app, resources={r"/*": {
+    "origins": ["http://flexianalyse.com", "http://localhost:5173", "https://flexianalyse.com"],
+    "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Session-ID"]
+}})
+
+# Ajouter un handler pour les requêtes OPTIONS (CORS preflight)
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,Session-ID")
+        response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+        return response
 
 # Initialize clients and components
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -3688,7 +3703,49 @@ def health_check():
             "mistral": bool(os.getenv("MISTRAL_API_KEY")),
             "google_oauth": AuthConfig.is_google_configured(),
             "database": os.path.exists(AuthConfig.DATABASE_PATH)
+        },
+        "endpoints": {
+            "extract_structured": "/extract-structured",
+            "summarize_file_stream": "/summarize_file_stream",
+            "summarize_repository_stream": "/summarize_repository_stream"
         }
+    }), 200
+
+@app.route('/test-endpoints', methods=['GET'])
+def test_endpoints():
+    """Endpoint pour tester la disponibilité des endpoints"""
+    endpoints_status = {}
+    
+    # Liste des endpoints à tester
+    endpoints_to_test = [
+        '/extract-structured',
+        '/summarize_file_stream',
+        '/summarize_repository_stream',
+        '/query',
+        '/upload'
+    ]
+    
+    # Vérifier si les routes existent dans l'application Flask
+    for endpoint in endpoints_to_test:
+        rule = None
+        for rule in app.url_map.iter_rules():
+            if rule.rule == endpoint:
+                endpoints_status[endpoint] = {
+                    "exists": True,
+                    "methods": list(rule.methods - {'HEAD', 'OPTIONS'}),
+                    "rule": rule.rule
+                }
+                break
+        else:
+            endpoints_status[endpoint] = {
+                "exists": False,
+                "error": "Route not found"
+            }
+    
+    return jsonify({
+        "status": "ok",
+        "endpoints": endpoints_status,
+        "total_routes": len(list(app.url_map.iter_rules()))
     }), 200
 
 @app.route('/users/me', methods=['GET'])
