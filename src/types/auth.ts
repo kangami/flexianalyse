@@ -5,7 +5,6 @@ export interface User {
   name: string;
   provider: 'email' | 'google';
   avatar?: string;
-  picture_url?: string;
   plan?: 'free' | 'premium' | 'enterprise';
   phone?: string;
   createdAt?: string;

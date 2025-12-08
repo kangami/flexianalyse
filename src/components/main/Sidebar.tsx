@@ -1615,9 +1615,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             {isAuthenticated && user ? (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  {(user.picture_url || user.avatar) && (
+                  {user.avatar && (
                     <img
-                      src={user.picture_url || user.avatar}
+                      src={user.avatar}
                       alt={user.name || user.email}
                       className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
                     />

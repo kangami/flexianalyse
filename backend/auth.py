@@ -31,7 +31,6 @@ def init_database():
             provider TEXT DEFAULT 'email',
             google_id TEXT,
             password_hash TEXT,
-            picture_url TEXT,
             plan TEXT DEFAULT 'free',
             phone TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -129,12 +128,11 @@ def auth_login():
         
         conn.commit()
         
-        # Récupérer le plan, le téléphone et la photo de l'utilisateur
-        cursor.execute('SELECT plan, phone, picture_url FROM users WHERE id = ?', (user[0],))
+        # Récupérer le plan et le téléphone de l'utilisateur
+        cursor.execute('SELECT plan, phone FROM users WHERE id = ?', (user[0],))
         plan_result = cursor.fetchone()
         user_plan = plan_result[0] if plan_result and plan_result[0] else 'free'
         user_phone = plan_result[1] if plan_result and len(plan_result) > 1 else None
-        user_picture = plan_result[2] if plan_result and len(plan_result) > 2 else None
         
         user_data = {
             'id': user[0],
@@ -142,8 +140,7 @@ def auth_login():
             'name': user[2] or email.split('@')[0],
             'provider': 'email',
             'plan': user_plan,
-            'phone': user_phone,
-            'picture_url': user_picture
+            'phone': user_phone
         }
         
         token = create_jwt_token(user_data)
@@ -237,7 +234,6 @@ def auth_google():
         google_id = idinfo["sub"]
         email = idinfo["email"]
         name = idinfo.get("name", email.split('@')[0])
-        picture_url = idinfo.get("picture", "")
         
         logger.info(f"Token Google valide pour: {email}")
         
@@ -257,18 +253,17 @@ def auth_google():
                 UPDATE users SET 
                     last_login = ?, 
                     google_id = ?, 
-                    name = COALESCE(NULLIF(?, ''), name),
-                    picture_url = COALESCE(NULLIF(?, ''), picture_url)
+                    name = COALESCE(NULLIF(?, ''), name)
                 WHERE id = ?
-            ''', (datetime.utcnow(), google_id, name, picture_url, user[0]))
+            ''', (datetime.utcnow(), google_id, name, user[0]))
             user_id = user[0]
             final_name = user[2] or name
         else:
             # Nouvel utilisateur
             cursor.execute('''
-                INSERT INTO users (email, name, provider, google_id, picture_url, plan, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (email, name, 'google', google_id, picture_url, 'free', datetime.utcnow(), datetime.utcnow()))
+                INSERT INTO users (email, name, provider, google_id, plan, created_at, last_login)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (email, name, 'google', google_id, 'free', datetime.utcnow(), datetime.utcnow()))
             user_id = cursor.lastrowid
             final_name = name
         
@@ -289,7 +284,6 @@ def auth_google():
             'email': email,
             'name': final_name,
             'provider': 'google',
-            'picture_url': picture_url,
             'plan': user_plan
         }
         
@@ -336,7 +330,7 @@ def auth_verify():
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     
-    cursor.execute('SELECT id, email, name, provider, picture_url, plan, phone FROM users WHERE id = ?', (payload['user_id'],))
+    cursor.execute('SELECT id, email, name, provider, plan, phone FROM users WHERE id = ?', (payload['user_id'],))
     user = cursor.fetchone()
     conn.close()
     
@@ -344,16 +338,15 @@ def auth_verify():
         return jsonify({'error': 'Utilisateur non trouvé'}), 404
     
     # S'assurer que l'utilisateur a un plan
-    user_plan = user[5] if user[5] else 'free'
+    user_plan = user[4] if user[4] else 'free'
     
     return jsonify({'user': {
         'id': user[0],
         'email': user[1],
         'name': user[2] or user[1].split('@')[0],
         'provider': user[3] or 'email',
-        'picture_url': user[4],
         'plan': user_plan,
-        'phone': user[6]
+        'phone': user[5]
     }}), 200
 
 def marketing_subscribe():
