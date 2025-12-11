@@ -37,6 +37,7 @@ interface ChatPanelProps {
   onTextSelect?: (text: string) => void;
   getEditableFiles?: () => Promise<EditableFile[]>;
   isSearchingOnline?: boolean;
+  currentStatus?: string;
   isFileContentVisible?: boolean;
   setIsFileContentVisible?: (visible: boolean) => void;
   isProcessingDrop?: boolean;
@@ -55,6 +56,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   onTextSelect,
   getEditableFiles,
   isSearchingOnline = false,
+  currentStatus = '',
   isFileContentVisible = false,
   setIsFileContentVisible,
   isProcessingDrop = false
@@ -181,6 +183,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           onTextSelect={onTextSelect}
           getEditableFiles={getEditableFiles}
           isSearchingOnline={isSearchingOnline}
+          currentStatus={currentStatus}
           onQuerySubmit={handleQuerySubmitWithLanguage}
           selectedModel={selectedModel}
           researchMode={researchMode}

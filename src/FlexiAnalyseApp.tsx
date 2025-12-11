@@ -71,6 +71,7 @@ const FlexiAnalyseApp: React.FC = () => {
   const [directoryFiles, setDirectoryFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [isSearchingOnline, setIsSearchingOnline] = useState<boolean>(false);
+  const [currentStatus, setCurrentStatus] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<string>(AUTO_MODEL_ID);
   const [researchMode, setResearchMode] = useState<'online' | 'local'>('online');
   const [isMobile, setIsMobile] = useState(false);
@@ -221,6 +222,9 @@ const FlexiAnalyseApp: React.FC = () => {
       await regenerateSuggestedActionsForFile(file);
     }
     
+    // Afficher le statut initial avant de commencer l'analyse
+    setLoading(true);
+    
     // Générer automatiquement un résumé avec animation de typing
     await generateFileSummaryWithStreaming(file, clonedContent);
   };
@@ -280,11 +284,15 @@ const FlexiAnalyseApp: React.FC = () => {
       let fileContent: string;
       const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
       
+      // Afficher le statut d'extraction selon le type de fichier
       if (extension === '.pdf') {
+        setCurrentStatus(`Extraction du texte du PDF ${file.name}...`);
         fileContent = await extractTextFromPdf(content as ArrayBuffer);
       } else if (extension === '.docx') {
+        setCurrentStatus(`Extraction du texte du document ${file.name}...`);
         fileContent = await extractTextFromDocx(content as ArrayBuffer);
       } else {
+        setCurrentStatus(`Lecture du fichier ${file.name}...`);
         fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
       }
       
@@ -303,7 +311,11 @@ const FlexiAnalyseApp: React.FC = () => {
       setChatHistory((prev) => [...prev, summaryMessage]);
       setLoading(true);
       
+      // Mettre à jour le statut pour l'analyse
+      setCurrentStatus(`Analyse du document ${file.name}...`);
+      
       // Utiliser le streaming pour le résumé
+      setCurrentStatus(`Envoi au serveur pour analyse...`);
       const response = await fetch(`${apiUrl}/summarize_file_stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -332,6 +344,9 @@ const FlexiAnalyseApp: React.FC = () => {
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
       
+      // Mettre à jour le statut pendant l'attente de la réponse
+      setCurrentStatus(`Analyse en cours par l'IA...`);
+      
       // Lire le stream
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -352,9 +367,19 @@ const FlexiAnalyseApp: React.FC = () => {
               try {
                 const jsonData = JSON.parse(line.slice(6));
                 
+                // Mettre à jour le statut si fourni par le backend
+                if (jsonData.status) {
+                  setCurrentStatus(jsonData.status);
+                }
+                
                 if (jsonData.content) {
                   // Ajouter le contenu à la réponse accumulée
                   accumulatedResponse += jsonData.content;
+                  
+                  // Mettre à jour le statut si on commence à recevoir du contenu
+                  if (accumulatedResponse.length > 0 && !jsonData.status) {
+                    setCurrentStatus('Génération du résumé...');
+                  }
                   
                   // Limiter à 4 lignes maximum
                   const lines = accumulatedResponse.split('\n').filter(l => l.trim());
@@ -373,6 +398,7 @@ const FlexiAnalyseApp: React.FC = () => {
                 if (jsonData.done) {
                   console.log('✅ Résumé terminé');
                   setLoading(false);
+                  setCurrentStatus('');
                 }
                 
                 if (jsonData.error) {
@@ -393,8 +419,10 @@ const FlexiAnalyseApp: React.FC = () => {
       }
       
       setLoading(false);
+      setCurrentStatus('');
     } catch (error) {
       console.error('❌ Error generating file summary:', error);
+      setCurrentStatus('');
       // Afficher un message d'erreur dans le chat si le résumé échoue
       setChatHistory((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -419,6 +447,9 @@ const FlexiAnalyseApp: React.FC = () => {
   // Fonction pour générer un résumé de répertoire avec streaming
   const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
     try {
+      // Afficher le statut d'extraction
+      setCurrentStatus(`Extraction du contenu de ${files.length} fichier${files.length > 1 ? 's' : ''}...`);
+      
       // Créer un message dans le chat history pour le résumé
       const messageId = Math.random().toString(36).substr(2, 9);
       const repoMessage: ChatMessage = {
@@ -430,6 +461,9 @@ const FlexiAnalyseApp: React.FC = () => {
       // Ajouter le message à l'historique
       setChatHistory((prev) => [...prev, repoMessage]);
       setLoading(true);
+      
+      // Mettre à jour le statut pour l'analyse
+      setCurrentStatus(`Analyse du répertoire (${files.length} fichier${files.length > 1 ? 's' : ''})...`);
       
       // Utiliser le streaming pour le résumé du répertoire
       const response = await fetch(`${apiUrl}/summarize_repository_stream`, {
@@ -483,9 +517,19 @@ const FlexiAnalyseApp: React.FC = () => {
               try {
                 const jsonData = JSON.parse(line.slice(6));
                 
+                // Mettre à jour le statut si fourni par le backend
+                if (jsonData.status) {
+                  setCurrentStatus(jsonData.status);
+                }
+                
                 if (jsonData.content) {
                   // Ajouter le contenu à la réponse accumulée
                   accumulatedResponse += jsonData.content;
+                  
+                  // Mettre à jour le statut si on commence à recevoir du contenu
+                  if (accumulatedResponse.length > 0 && !jsonData.status) {
+                    setCurrentStatus('Génération du résumé du répertoire...');
+                  }
                   
                   // Mettre à jour l'interface en temps réel
                   setChatHistory((prev) => 
@@ -500,6 +544,7 @@ const FlexiAnalyseApp: React.FC = () => {
                 if (jsonData.done) {
                   console.log('✅ Résumé du répertoire terminé');
                   setLoading(false);
+                  setCurrentStatus('');
                 }
                 
                 if (jsonData.error) {
@@ -520,8 +565,10 @@ const FlexiAnalyseApp: React.FC = () => {
       }
       
       setLoading(false);
+      setCurrentStatus('');
     } catch (error) {
       console.error('❌ Error generating repository summary:', error);
+      setCurrentStatus('');
       // Afficher un message d'erreur dans le chat si le résumé échoue
       setChatHistory((prev) => {
         const lastMessage = prev[prev.length - 1];
@@ -666,6 +713,7 @@ const FlexiAnalyseApp: React.FC = () => {
     e.stopPropagation();
     
     setIsProcessingDrop(true);
+    setCurrentStatus('Extraction des fichiers...');
     
     try {
       const items = Array.from(e.dataTransfer.items);
@@ -688,6 +736,7 @@ const FlexiAnalyseApp: React.FC = () => {
       
       if (allFiles.length === 0) {
         setIsProcessingDrop(false);
+        setCurrentStatus('');
         return;
       }
       
@@ -706,6 +755,7 @@ const FlexiAnalyseApp: React.FC = () => {
       if (supportedFiles.length === 0) {
         alert('Aucun fichier supporté trouvé');
         setIsProcessingDrop(false);
+        setCurrentStatus('');
         return;
       }
       
@@ -715,6 +765,7 @@ const FlexiAnalyseApp: React.FC = () => {
         if (supportedFiles.length > 1) {
           showLimitInfoBubble('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
           setIsProcessingDrop(false);
+          setCurrentStatus('');
           return;
         }
         
@@ -722,6 +773,7 @@ const FlexiAnalyseApp: React.FC = () => {
         if (!checkFileUploadLimit()) {
           showLimitInfoBubble('You have reached the limit of 1 file upload. Please sign in to upload more files.');
           setIsProcessingDrop(false);
+          setCurrentStatus('');
           return;
         }
       }
@@ -730,6 +782,8 @@ const FlexiAnalyseApp: React.FC = () => {
       if (supportedFiles.length === 1) {
         const file = supportedFiles[0];
         const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        
+        setCurrentStatus(`Traitement de ${file.name}...`);
         
         let content: string | ArrayBuffer;
         if (extension === '.pdf' || extension === '.docx') {
@@ -751,22 +805,26 @@ const FlexiAnalyseApp: React.FC = () => {
         // Ne pas attendre pour éviter de bloquer si le streaming échoue
         handleFileSelect(file, { content, description: file.name }).catch(error => {
           console.error('Error in handleFileSelect:', error);
+          setCurrentStatus('');
         });
       } else {
         // C'est un répertoire avec plusieurs fichiers
         // Réinitialiser isProcessingDrop avant d'appeler handleDirectorySelect
         setIsProcessingDrop(false);
+        setCurrentStatus(`Traitement de ${supportedFiles.length} fichiers...`);
         
         // Gérer l'import du répertoire
         // Ne pas attendre pour éviter de bloquer si le streaming échoue
         handleDirectorySelect(supportedFiles).catch(error => {
           console.error('Error in handleDirectorySelect:', error);
+          setCurrentStatus('');
         });
       }
     } catch (error) {
       console.error('Error handling drop:', error);
       alert('Erreur lors du traitement des fichiers: ' + (error instanceof Error ? error.message : 'Erreur inconnue'));
       setIsProcessingDrop(false);
+      setCurrentStatus('');
     }
   }, [handleFileSelect, handleDirectorySelect, isAuthenticated, checkFileUploadLimit, incrementUploadedFiles, showLimitInfoBubble]);
 
@@ -933,6 +991,7 @@ const FlexiAnalyseApp: React.FC = () => {
     };
     setChatHistory((prev) => [...prev, newMessage]);
     setLoading(true);
+    setCurrentStatus(mode === 'local' ? 'Analyse de votre question...' : 'Traitement de votre requête...');
 
     try {
       // Détermination automatique du mode si aucun fichier n'est sélectionné
@@ -978,6 +1037,9 @@ const FlexiAnalyseApp: React.FC = () => {
         if (!selectedFile || !fileDetails) {
           throw new Error('Mode local nécessite un fichier sélectionné');
         }
+
+        // Mettre à jour le statut pour l'analyse du fichier
+        setCurrentStatus(`Analyse du fichier ${selectedFile.name}...`);
 
         // Traitement du fichier actuel
         const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
@@ -1052,6 +1114,13 @@ const FlexiAnalyseApp: React.FC = () => {
         researchMode: effectiveMode,
       });
 
+      // Mettre à jour le statut selon le mode
+      if (effectiveMode === 'local') {
+        setCurrentStatus('Recherche dans les documents...');
+      } else {
+        setCurrentStatus('Recherche d\'informations en ligne...');
+      }
+
       const response = await fetch(`${apiUrl}/query`, {
         method: 'POST',
         headers: { 
@@ -1073,6 +1142,7 @@ const FlexiAnalyseApp: React.FC = () => {
       // Arrêter l'indicateur de recherche
       if (searchTimeout) clearTimeout(searchTimeout);
       setIsSearchingOnline(false);
+      setCurrentStatus('Génération de la réponse...');
       const aiResponse = data.response;
 
       console.log('📨 Réponse reçue du backend:', {
@@ -1146,6 +1216,7 @@ const FlexiAnalyseApp: React.FC = () => {
       });
     } finally {
       setLoading(false);
+      setCurrentStatus('');
     }
   };
 
@@ -1182,8 +1253,16 @@ const FlexiAnalyseApp: React.FC = () => {
     // Ajouter le message à l'historique
     setChatHistory((prev) => [...prev, newMessage]);
     setLoading(true);
+    setCurrentStatus(mode === 'local' ? 'Analyse de votre question...' : 'Traitement de votre requête...');
 
     try {
+      // Mettre à jour le statut selon le mode
+      if (mode === 'local' && selectedFile) {
+        setCurrentStatus(`Analyse du fichier ${selectedFile.name}...`);
+      } else {
+        setCurrentStatus('Recherche d\'informations en ligne...');
+      }
+
       const response = await fetch(`${apiUrl}/query-stream`, {
         method: 'POST',
         headers: { 
@@ -1228,9 +1307,19 @@ const FlexiAnalyseApp: React.FC = () => {
               try {
                 const jsonData = JSON.parse(line.slice(6));
                 
+                // Mettre à jour le statut si fourni par le backend
+                if (jsonData.status) {
+                  setCurrentStatus(jsonData.status);
+                }
+                
                 if (jsonData.content) {
                   // Ajouter le contenu à la réponse accumulée
                   accumulatedResponse += jsonData.content;
+                  
+                  // Mettre à jour le statut si on commence à recevoir du contenu
+                  if (accumulatedResponse.length > 0 && !jsonData.status) {
+                    setCurrentStatus('Génération de la réponse...');
+                  }
                   
                   // Mettre à jour l'interface en temps réel
                   setChatHistory((prev) => 
@@ -1275,6 +1364,7 @@ const FlexiAnalyseApp: React.FC = () => {
       });
     } finally {
       setLoading(false);
+      setCurrentStatus('');
     }
   };
 
@@ -1734,6 +1824,7 @@ const FlexiAnalyseApp: React.FC = () => {
             isProcessingDrop={isProcessingDrop}
             onTextSelect={handleTextSelect}
             isSearchingOnline={isSearchingOnline}
+            currentStatus={currentStatus}
             isFileContentVisible={isFileContentVisible}
             setIsFileContentVisible={setIsFileContentVisible}
           />

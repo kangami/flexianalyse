@@ -98,8 +98,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
             if (!isAuthenticated && !checkQueryLimit()) {
                 setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
                 return;
-            }
-            
+            }           
             onQuerySubmit(query, researchMode);
             setQuery('');
         }

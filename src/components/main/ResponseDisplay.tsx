@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import MarkdownResponse from "./MarkdownResponse";
 import QueryForm from "./QueryForm";
+import StatusIndicator from "./StatusIndicator";
 import { useLanguage } from '../../contexts/LanguageContext';
 
 interface ChatMessage {
@@ -30,6 +31,7 @@ interface ResponseDisplayProps {
   editableFiles?: EditableFile[];
   getEditableFiles?: () => Promise<EditableFile[]>;
   isSearchingOnline?: boolean;
+  currentStatus?: string;
   // Props pour QueryForm
   onQuerySubmit?: (query: string, mode: 'online' | 'local') => void;
   selectedModel?: string;
@@ -42,14 +44,15 @@ interface ResponseDisplayProps {
   language?: 'en' | 'fr' | 'es';
 }
 
-const ResponseDisplay: React.FC<ResponseDisplayProps> = ({ 
+const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
   loading = false, 
   chatHistory, 
-  onTextSelect, 
+  onTextSelect,
   enableTextSelection = false, 
   editableFiles = [], 
   getEditableFiles, 
   isSearchingOnline = false,
+  currentStatus = '',
   onQuerySubmit,
   selectedModel,
   researchMode,
@@ -256,6 +259,11 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto px-3 py-1 pb-2 smooth-scroll pr-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e0 #f7fafc' }}>
         <div className="mx-auto w-full max-w-4xl">
+        {/* Afficher le statut même s'il n'y a pas encore de message dans le chat */}
+        {loading && currentStatus && chatHistory.length === 0 && (
+          <StatusIndicator status={currentStatus} isVisible={true} />
+        )}
+        
         {chatHistory.length > 0 ? (
           <div className="space-y-3">
             {chatHistory.map((message, index) => {
@@ -293,8 +301,13 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
                     </div>
                   )}
                   
+                  {/* Indicateur de statut en temps réel */}
+                  {isLastMessage && loading && currentStatus && (
+                    <StatusIndicator status={currentStatus} isVisible={true} />
+                  )}
+                  
                   {/* Indicateur de chargement initial */}
-                  {!message.aiResponse && isLastMessage && loading && !isSearchingOnline && (
+                  {!message.aiResponse && isLastMessage && loading && !isSearchingOnline && !currentStatus && (
                     <div className="flex justify-start">
                       <div className="bg-gray-50 px-3 py-2 rounded-lg message-appear">
                         <div className="streaming-indicator">
@@ -307,7 +320,7 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
                   )}
                   
                   {/* Indicateur de recherche en ligne animé */}
-                  {isSearchingOnline && isLastMessage && (
+                  {isSearchingOnline && isLastMessage && !currentStatus && (
                     <div className="flex justify-start mt-2">
                       <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 shadow-sm pulse-border">
                         <div className="flex items-center gap-2">
