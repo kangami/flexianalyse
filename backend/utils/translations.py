@@ -85,7 +85,18 @@ translations = {
         'enriching_current_data': '🌐 Enriching with current data...',
         'no_search_necessary': '✅ No search necessary, response based on model knowledge',
         'error_online_mode': 'Error during online mode: {error}',
-        'separator': '---'
+        'separator': '---',
+        'summarize_file_prompt': 'Generate a concise summary of the following document in exactly 4 lines maximum. The summary must be in {language} and highlight key information.',
+        'summarize_file_system': 'You are an expert document analysis assistant. Generate clear and concise summaries in exactly 4 lines maximum in {language}.',
+        'summarize_file_summary_label': 'Summary (4 lines max):',
+        'summarize_repo_prompt_start': 'Generate a concise summary of a directory containing {file_count} file{s_files} and {subdir_count} subdirector{s_dirs}.',
+        'summarize_repo_files_label': 'Files in directory:',
+        'summarize_repo_instructions': 'Generate a summary in {language} that includes:\n1. The total number of files and subdirectories\n2. For each of the first 3 files listed, generate a 2-line maximum summary with the format: **[file_name]**: [2-line summary]',
+        'summarize_repo_expected_format': 'Expected format:\n📁 Directory: {file_count} file{s_files}, {subdir_count} subdirector{s_dirs}\n\n**[file_name_1]**: [2-line summary]\n**[file_name_2]**: [2-line summary]\n**[file_name_3]**: [2-line summary]',
+        'summarize_repo_summary_label': 'Summary:',
+        'summarize_repo_system': 'You are an expert directory analysis assistant. Generate clear and structured summaries in {language}. For each file, generate a summary based on its name and extension.',
+        'no_content_provided': 'No content provided',
+        'no_files_provided': 'No files provided'
     },
     'fr': {
         'analyze': 'Analysez',
@@ -170,7 +181,18 @@ translations = {
         'enriching_current_data': '🌐 Enrichissement avec des données actuelles...',
         'no_search_necessary': '✅ Pas de recherche nécessaire, réponse basée sur les connaissances du modèle',
         'error_online_mode': 'Erreur lors du mode online : {error}',
-        'separator': '---'
+        'separator': '---',
+        'summarize_file_prompt': 'Génère un résumé concis du document suivant en exactement 4 lignes maximum. Le résumé doit être en {language} et mettre en évidence les informations clés.',
+        'summarize_file_system': 'Tu es un assistant expert en analyse de documents. Génère des résumés clairs et concis en exactement 4 lignes maximum en {language}.',
+        'summarize_file_summary_label': 'Résumé (4 lignes max):',
+        'summarize_repo_prompt_start': 'Génère un résumé concis d\'un répertoire contenant {file_count} fichier{s_files} et {subdir_count} sous-répertoire{s_dirs}.',
+        'summarize_repo_files_label': 'Fichiers dans le répertoire:',
+        'summarize_repo_instructions': 'Génère un résumé en {language} qui inclut:\n1. Le nombre total de fichiers et sous-répertoires\n2. Pour chacun des 3 premiers fichiers listés, génère un résumé de 2 lignes maximum avec le format: **[nom_fichier]**: [résumé 2 lignes]',
+        'summarize_repo_expected_format': 'Format attendu:\n📁 Répertoire: {file_count} fichier{s_files}, {subdir_count} sous-répertoire{s_dirs}\n\n**[nom_fichier_1]**: [résumé 2 lignes]\n**[nom_fichier_2]**: [résumé 2 lignes]\n**[nom_fichier_3]**: [résumé 2 lignes]',
+        'summarize_repo_summary_label': 'Résumé:',
+        'summarize_repo_system': 'Tu es un assistant expert en analyse de répertoires. Génère des résumés clairs et structurés en {language}. Pour chaque fichier, génère un résumé basé sur son nom et son extension.',
+        'no_content_provided': 'Aucun contenu fourni',
+        'no_files_provided': 'Aucun fichier fourni'
     },
     'es': {
         'analyze': 'Analiza',
@@ -255,7 +277,18 @@ translations = {
         'enriching_current_data': '🌐 Enriqueciendo con datos actuales...',
         'no_search_necessary': '✅ No es necesaria búsqueda, respuesta basada en conocimientos del modelo',
         'error_online_mode': 'Error durante modo online: {error}',
-        'separator': '---'
+        'separator': '---',
+        'summarize_file_prompt': 'Genera un resumen conciso del siguiente documento en exactamente 4 líneas máximo. El resumen debe estar en {language} y destacar información clave.',
+        'summarize_file_system': 'Eres un asistente experto en análisis de documentos. Genera resúmenes claros y concisos en exactamente 4 líneas máximo en {language}.',
+        'summarize_file_summary_label': 'Resumen (4 líneas máx):',
+        'summarize_repo_prompt_start': 'Genera un resumen conciso de un directorio que contiene {file_count} archivo{s_files} y {subdir_count} subdirectorio{s_dirs}.',
+        'summarize_repo_files_label': 'Archivos en el directorio:',
+        'summarize_repo_instructions': 'Genera un resumen en {language} que incluya:\n1. El número total de archivos y subdirectorios\n2. Para cada uno de los primeros 3 archivos listados, genera un resumen de máximo 2 líneas con el formato: **[nombre_archivo]**: [resumen de 2 líneas]',
+        'summarize_repo_expected_format': 'Formato esperado:\n📁 Directorio: {file_count} archivo{s_files}, {subdir_count} subdirectorio{s_dirs}\n\n**[nombre_archivo_1]**: [resumen de 2 líneas]\n**[nombre_archivo_2]**: [resumen de 2 líneas]\n**[nombre_archivo_3]**: [resumen de 2 líneas]',
+        'summarize_repo_summary_label': 'Resumen:',
+        'summarize_repo_system': 'Eres un asistente experto en análisis de directorios. Genera resúmenes claros y estructurados en {language}. Para cada archivo, genera un resumen basado en su nombre y extensión.',
+        'no_content_provided': 'No se proporcionó contenido',
+        'no_files_provided': 'No se proporcionaron archivos'
     }
 }
 

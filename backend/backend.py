@@ -766,9 +766,10 @@ async def infer_corpus_actions(documents: List[Document], language: str = 'en') 
             sample_texts.append(f"- {meta_name}: {snippet}")
         corpus_preview = "\n".join(sample_texts)
 
-        # Actions spécifiques selon le type de document
+        # Actions spécifiques selon le type de document et la langue
         specific_actions_prompts = {
-            'contrat_location': """
+            'fr': {
+                'contrat_location': """
 Actions spécifiques pour un contrat de location (bail) :
 1. "Vérifier les parties" - Identifie et liste toutes les parties (locataire, bailleur) avec leurs coordonnées complètes
 2. "Vérifier les dates" - Extrait toutes les dates importantes : signature, début, fin, durée, préavis
@@ -777,8 +778,7 @@ Actions spécifiques pour un contrat de location (bail) :
 5. "Vérifier les obligations" - Liste les obligations du locataire et du bailleur
 6. "Vérifier le bien loué" - Détaille les caractéristiques du bien (adresse, superficie, type)
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'contrat_travail': """
+                'contrat_travail': """
 Actions spécifiques pour un contrat de travail :
 1. "Vérifier les parties" - Identifie l'employeur et l'employé avec leurs coordonnées
 2. "Vérifier les dates" - Extrait les dates : signature, début, période d'essai, fin
@@ -787,8 +787,7 @@ Actions spécifiques pour un contrat de travail :
 5. "Analyser les clauses à risque" - Identifie les clauses restrictives ou problématiques
 6. "Vérifier les conditions" - Détaille les conditions de travail, horaires, lieu
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'contrat_vente': """
+                'contrat_vente': """
 Actions spécifiques pour un contrat de vente :
 1. "Vérifier les parties" - Identifie l'acheteur et le vendeur avec leurs coordonnées
 2. "Vérifier les dates" - Extrait les dates : signature, livraison, paiement
@@ -797,8 +796,7 @@ Actions spécifiques pour un contrat de vente :
 5. "Analyser les garanties" - Liste les garanties et conditions de garantie
 6. "Vérifier les conditions" - Détaille les conditions de vente, délais, pénalités
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'contrat_generique': """
+                'contrat_generique': """
 Actions spécifiques pour un contrat :
 1. "Vérifier les parties" - Identifie toutes les parties avec leurs coordonnées
 2. "Vérifier les dates importantes" - Extrait toutes les dates clés du contrat
@@ -807,8 +805,7 @@ Actions spécifiques pour un contrat :
 5. "Vérifier les obligations" - Liste les obligations de chaque partie
 6. "Vérifier l'objet" - Décrit précisément l'objet du contrat
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'testament': """
+                'testament': """
 Actions spécifiques pour un testament :
 1. "Vérifier le testateur" - Identifie le testateur et ses coordonnées
 2. "Vérifier les bénéficiaires" - Liste tous les bénéficiaires et leurs parts
@@ -817,8 +814,7 @@ Actions spécifiques pour un testament :
 5. "Vérifier les conditions" - Liste les conditions et clauses particulières
 6. "Vérifier l'exécuteur" - Identifie l'exécuteur testamentaire
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'acte_notarie': """
+                'acte_notarie': """
 Actions spécifiques pour un acte notarié :
 1. "Vérifier les parties" - Identifie toutes les parties impliquées
 2. "Vérifier les dates" - Extrait toutes les dates importantes
@@ -827,8 +823,7 @@ Actions spécifiques pour un acte notarié :
 5. "Vérifier le notaire" - Identifie le notaire et son étude
 6. "Vérifier les conditions" - Détaille les conditions et clauses
 7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'lettre': """
+                'lettre': """
 Actions spécifiques pour une lettre :
 1. "Vérifier l'expéditeur" - Identifie l'expéditeur avec ses coordonnées
 2. "Vérifier le destinataire" - Identifie le destinataire avec ses coordonnées
@@ -836,21 +831,168 @@ Actions spécifiques pour une lettre :
 4. "Vérifier l'objet" - Décrit l'objet et le but de la lettre
 5. "Vérifier infos clés" - Extrait les informations importantes (montants, références, engagements)
 6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
-
-            'document_financier': """
+                'document_financier': """
 Actions spécifiques pour un document financier :
 1. "Vérifier les parties" - Identifie les parties concernées (employeur, employé, institution)
 2. "Vérifier la période" - Extrait la période couverte par le document
 3. "Vérifier les montants" - Liste tous les montants (revenus, déductions, impôts, totaux)
 4. "Vérifier déductions" - Détaille toutes les déductions (impôts, cotisations)
 5. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON"""
+            },
+            'en': {
+                'contrat_location': """
+Specific actions for a rental contract (lease):
+1. "Verify parties" - Identifies and lists all parties (tenant, landlord) with their full contact details
+2. "Verify dates" - Extracts all important dates: signature, start, end, duration, notice period
+3. "Verify amounts" - Lists all amounts: rent, deposit, charges, indexation
+4. "Analyze risky clauses" - Identifies potentially problematic or disadvantageous clauses
+5. "Verify obligations" - Lists the obligations of the tenant and landlord
+6. "Verify rented property" - Details the property characteristics (address, area, type)
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'contrat_travail': """
+Specific actions for an employment contract:
+1. "Verify parties" - Identifies the employer and employee with their contact details
+2. "Verify dates" - Extracts dates: signature, start, probation period, end
+3. "Verify remuneration" - Details salary, bonuses, benefits, revisions
+4. "Verify obligations" - Lists the obligations of the employee and employer
+5. "Analyze risky clauses" - Identifies restrictive or problematic clauses
+6. "Verify conditions" - Details working conditions, hours, location
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'contrat_vente': """
+Specific actions for a sale contract:
+1. "Verify parties" - Identifies the buyer and seller with their contact details
+2. "Verify dates" - Extracts dates: signature, delivery, payment
+3. "Verify amounts" - Details price, down payment, payment terms
+4. "Verify subject" - Precisely describes the subject of the sale
+5. "Analyze guarantees" - Lists guarantees and warranty conditions
+6. "Verify conditions" - Details sale conditions, deadlines, penalties
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'contrat_generique': """
+Specific actions for a contract:
+1. "Verify parties" - Identifies all parties with their contact details
+2. "Verify important dates" - Extracts all key dates in the contract
+3. "Verify amounts" - Lists all amounts and financial terms
+4. "Analyze risky clauses" - Identifies potentially problematic clauses
+5. "Verify obligations" - Lists the obligations of each party
+6. "Verify subject" - Precisely describes the subject of the contract
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'testament': """
+Specific actions for a will:
+1. "Verify testator" - Identifies the testator and their contact details
+2. "Verify beneficiaries" - Lists all beneficiaries and their shares
+3. "Verify dates" - Extracts dates: drafting, signature, modifications
+4. "Verify bequests" - Details all bequests and inheritances
+5. "Verify conditions" - Lists conditions and particular clauses
+6. "Verify executor" - Identifies the executor
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'acte_notarie': """
+Specific actions for a notarial act:
+1. "Verify parties" - Identifies all parties involved
+2. "Verify dates" - Extracts all important dates
+3. "Verify amounts" - Lists all amounts and transactions
+4. "Verify subject" - Precisely describes the subject of the act
+5. "Verify notary" - Identifies the notary and their office
+6. "Verify conditions" - Details conditions and clauses
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'lettre': """
+Specific actions for a letter:
+1. "Verify sender" - Identifies the sender with their contact details
+2. "Verify recipient" - Identifies the recipient with their contact details
+3. "Verify date" - Extracts the letter date
+4. "Verify subject" - Describes the subject and purpose of the letter
+5. "Verify key info" - Extracts important information (amounts, references, commitments)
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'document_financier': """
+Specific actions for a financial document:
+1. "Verify parties" - Identifies parties concerned (employer, employee, institution)
+2. "Verify period" - Extracts the period covered by the document
+3. "Verify amounts" - Lists all amounts (income, deductions, taxes, totals)
+4. "Verify deductions" - Details all deductions (taxes, contributions)
+5. "Extract structured data" - Extracts all data in a structured JSON format"""
+            },
+            'es': {
+                'contrat_location': """
+Acciones específicas para un contrato de alquiler (arrendamiento):
+1. "Verificar partes" - Identifica y enumera todas las partes (inquilino, arrendador) con sus datos de contacto completos
+2. "Verificar fechas" - Extrae todas las fechas importantes: firma, inicio, fin, duración, preaviso
+3. "Verificar montos" - Enumera todos los montos: alquiler, depósito, gastos, indexación
+4. "Analizar cláusulas de riesgo" - Identifica cláusulas potencialmente problemáticas o desventajosas
+5. "Verificar obligaciones" - Enumera las obligaciones del inquilino y del arrendador
+6. "Verificar propiedad alquilada" - Detalla las características de la propiedad (dirección, superficie, tipo)
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'contrat_travail': """
+Acciones específicas para un contrato de trabajo:
+1. "Verificar partes" - Identifica al empleador y al empleado con sus datos de contacto
+2. "Verificar fechas" - Extrae las fechas: firma, inicio, período de prueba, fin
+3. "Verificar remuneración" - Detalla salario, bonos, beneficios, revisiones
+4. "Verificar obligaciones" - Enumera las obligaciones del empleado y del empleador
+5. "Analizar cláusulas de riesgo" - Identifica cláusulas restrictivas o problemáticas
+6. "Verificar condiciones" - Detalla las condiciones de trabajo, horarios, lugar
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'contrat_vente': """
+Acciones específicas para un contrato de venta:
+1. "Verificar partes" - Identifica al comprador y al vendedor con sus datos de contacto
+2. "Verificar fechas" - Extrae las fechas: firma, entrega, pago
+3. "Verificar montos" - Detalla precio, anticipo, modalidades de pago
+4. "Verificar objeto" - Describe precisamente el objeto de la venta
+5. "Analizar garantías" - Enumera las garantías y condiciones de garantía
+6. "Verificar condiciones" - Detalla las condiciones de venta, plazos, penalizaciones
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'contrat_generique': """
+Acciones específicas para un contrato:
+1. "Verificar partes" - Identifica todas las partes con sus datos de contacto
+2. "Verificar fechas importantes" - Extrae todas las fechas clave del contrato
+3. "Verificar montos" - Enumera todos los montos y modalidades financieras
+4. "Analizar cláusulas de riesgo" - Identifica cláusulas potencialmente problemáticas
+5. "Verificar obligaciones" - Enumera las obligaciones de cada parte
+6. "Verificar objeto" - Describe precisamente el objeto del contrato
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'testament': """
+Acciones específicas para un testamento:
+1. "Verificar testador" - Identifica al testador y sus datos de contacto
+2. "Verificar beneficiarios" - Enumera todos los beneficiarios y sus partes
+3. "Verificar fechas" - Extrae las fechas: redacción, firma, modificaciones
+4. "Verificar legados" - Detalla todos los legados y herencias
+5. "Verificar condiciones" - Enumera las condiciones y cláusulas particulares
+6. "Verificar ejecutor" - Identifica al albacea
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'acte_notarie': """
+Acciones específicas para un acta notarial:
+1. "Verificar partes" - Identifica todas las partes involucradas
+2. "Verificar fechas" - Extrae todas las fechas importantes
+3. "Verificar montos" - Enumera todos los montos y transacciones
+4. "Verificar objeto" - Describe precisamente el objeto del acta
+5. "Verificar notario" - Identifica al notario y su estudio
+6. "Verificar condiciones" - Detalla las condiciones y cláusulas
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'lettre': """
+Acciones específicas para una carta:
+1. "Verificar remitente" - Identifica al remitente con sus datos de contacto
+2. "Verificar destinatario" - Identifica al destinatario con sus datos de contacto
+3. "Verificar fecha" - Extrae la fecha de la carta
+4. "Verificar objeto" - Describe el objeto y el propósito de la carta
+5. "Verificar información clave" - Extrae información importante (montos, referencias, compromisos)
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'document_financier': """
+Acciones específicas para un documento financiero:
+1. "Verificar partes" - Identifica las partes concernidas (empleador, empleado, institución)
+2. "Verificar período" - Extrae el período cubierto por el documento
+3. "Verificar montos" - Enumera todos los montos (ingresos, deducciones, impuestos, totales)
+4. "Verificar deducciones" - Detalla todas las deducciones (impuestos, cotizaciones)
+5. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado"""
+            }
         }
 
-        base_prompt_fr = f"""
+        # Sélectionner les prompts spécifiques selon la langue
+        lang_prompts = specific_actions_prompts.get(language, specific_actions_prompts['en'])
+        specific_prompt = lang_prompts.get(dominant_type, '')
+        
+        base_prompts = {
+            'fr': f"""
 Tu reçois un aperçu de plusieurs documents importés par un utilisateur.
 Le type de document dominant détecté est : {dominant_type}
 
-{specific_actions_prompts.get(dominant_type, '')}
+{specific_prompt}
 
 À partir de ces textes UNIQUEMENT, propose jusqu'à 7 actions suggérées au format JSON (elles seront affichées comme des boutons dans l'interface).
 Les actions doivent être PRATIQUES et correspondre à ce que les utilisateurs vérifient habituellement pour ce type de document.
@@ -873,11 +1015,12 @@ IMPORTANT :
 - Les actions doivent être spécifiques au type de document détecté
 - Priorise les actions que les utilisateurs vérifient habituellement (parties, dates, montants, clauses, obligations)
 - Inclus toujours "Extraire données structurées" comme dernière action
-"""
-
-        base_prompt_en = f"""
+""",
+            'en': f"""
 You receive a small preview of many documents uploaded by a user.
 The dominant document type detected is: {dominant_type}
+
+{specific_prompt}
 
 Based ONLY on these texts, you must propose up to 7 suggested actions as JSON.
 Each action will appear as a button in a UI.
@@ -900,9 +1043,38 @@ IMPORTANT:
 - Actions must be specific to the detected document type
 - Prioritize actions that users typically check (parties, dates, amounts, clauses, obligations)
 - Always include "Extract structured data" as the last action
-"""
+""",
+            'es': f"""
+Recibes una vista previa de varios documentos cargados por un usuario.
+El tipo de documento dominante detectado es: {dominant_type}
 
-        prompt = (base_prompt_fr if language == 'fr' else base_prompt_en) + "\n\nCORPUS PREVIEW:\n" + corpus_preview
+{specific_prompt}
+
+Basándote ÚNICAMENTE en estos textos, debes proponer hasta 7 acciones sugeridas en formato JSON.
+Cada acción aparecerá como un botón en una interfaz.
+
+Retorna JSON ESTRICTO con exactamente esta forma:
+{{
+  "domain": "etiqueta_corta_del_dominio",
+  "suggested_actions": [
+    {{
+      "id": "identificador_legible_por_maquina",
+      "title": "Etiqueta corta del botón (máx 25 caracteres)",
+      "description": "Una oración que explica lo que hace esta acción para el usuario.",
+      "sample_prompt": "Un prompt completo en lenguaje natural que la app puede enviar al asistente cuando el usuario hace clic en este botón."
+    }}
+  ]
+}}
+
+IMPORTANTE:
+- Los títulos deben ser cortos y claros (máx 25 caracteres)
+- Las acciones deben ser específicas al tipo de documento detectado
+- Prioriza las acciones que los usuarios típicamente verifican (partes, fechas, montos, cláusulas, obligaciones)
+- Siempre incluye "Extraer datos estructurados" como última acción
+"""
+        }
+        
+        prompt = base_prompts.get(language, base_prompts['en']) + "\n\nCORPUS PREVIEW:\n" + corpus_preview
 
         # Use Mistral instead of OpenAI for suggested actions generation
         raw_response = call_mistral_api(prompt)
@@ -936,80 +1108,226 @@ IMPORTANT:
         except:
             doc_type = 'document_generique'
         
-        # Fallback avec actions spécifiques selon le type de document
+        # Fallback avec actions spécifiques selon le type de document et la langue
         fallback_actions = {
-            'contrat_location': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties (locataire, bailleur) avec leurs coordonnées", "sample_prompt": "Identifie toutes les parties de ce contrat de location : le locataire et le bailleur. Liste leurs noms complets, adresses, téléphones et emails si disponibles."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes du contrat", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de location : date de signature, date de début, date de fin, durée, préavis."},
-                {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants : loyer, caution, charges", "sample_prompt": "Liste tous les montants mentionnés dans ce contrat de location : le loyer mensuel, la caution, les charges, et toute indexation prévue."},
-                {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses potentiellement problématiques", "sample_prompt": "Analyse ce contrat de location et identifie les clauses potentiellement problématiques ou désavantageuses pour le locataire ou le bailleur."},
-                {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations du locataire et du bailleur", "sample_prompt": "Liste toutes les obligations du locataire et du bailleur mentionnées dans ce contrat de location."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de location : parties, dates, montants, bien loué, clauses importantes."}
-            ],
-            'contrat_travail': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie l'employeur et l'employé", "sample_prompt": "Identifie les parties de ce contrat de travail : l'employeur et l'employé. Liste leurs noms complets et coordonnées."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes du contrat", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de travail : date de signature, date de début, période d'essai, date de fin si applicable."},
-                {"id": "verify_remuneration", "title": "Vérifier rémunération", "description": "Détaille le salaire, primes et avantages", "sample_prompt": "Détaille la rémunération dans ce contrat de travail : salaire de base, primes, avantages, révisions salariales prévues."},
-                {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations de l'employé et de l'employeur", "sample_prompt": "Liste toutes les obligations de l'employé et de l'employeur mentionnées dans ce contrat de travail."},
-                {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses restrictives ou problématiques", "sample_prompt": "Analyse ce contrat de travail et identifie les clauses potentiellement restrictives ou problématiques (clause de non-concurrence, clause d'exclusivité, etc.)."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de travail : parties, dates, rémunération, obligations, conditions de travail."}
-            ],
-            'contrat_vente': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie l'acheteur et le vendeur", "sample_prompt": "Identifie les parties de ce contrat de vente : l'acheteur et le vendeur. Liste leurs noms complets et coordonnées."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de vente : date de signature, date de livraison, dates de paiement."},
-                {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Détaille le prix et modalités de paiement", "sample_prompt": "Détaille tous les montants de ce contrat de vente : prix total, acompte, modalités de paiement, échéances."},
-                {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet de la vente", "sample_prompt": "Décris précisément l'objet de cette vente : nature du bien, caractéristiques, quantité, état."},
-                {"id": "verify_guarantees", "title": "Vérifier garanties", "description": "Liste les garanties et conditions", "sample_prompt": "Liste toutes les garanties mentionnées dans ce contrat de vente et leurs conditions."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de vente : parties, dates, montants, objet, garanties, conditions."}
-            ],
-            'contrat_generique': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties", "sample_prompt": "Identifie toutes les parties de ce contrat avec leurs noms complets et coordonnées."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce contrat : signature, échéances, dates de paiement."},
-                {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et modalités", "sample_prompt": "Liste tous les montants mentionnés dans ce contrat et leurs modalités de paiement."},
-                {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet du contrat", "sample_prompt": "Décris précisément l'objet de ce contrat en une phrase claire."},
-                {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses problématiques", "sample_prompt": "Analyse ce contrat et identifie les clauses potentiellement problématiques ou désavantageuses."},
-                {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations de chaque partie", "sample_prompt": "Liste toutes les obligations de chaque partie mentionnées dans ce contrat."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat : parties, dates, montants, objet, obligations, clauses importantes."}
-            ],
-            'testament': [
-                {"id": "verify_testator", "title": "Vérifier le testateur", "description": "Identifie le testateur", "sample_prompt": "Identifie le testateur de ce testament avec ses coordonnées complètes."},
-                {"id": "verify_beneficiaries", "title": "Vérifier bénéficiaires", "description": "Liste tous les bénéficiaires et leurs parts", "sample_prompt": "Liste tous les bénéficiaires de ce testament et leurs parts respectives."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce testament : date de rédaction, signature, modifications éventuelles."},
-                {"id": "verify_legacies", "title": "Vérifier les legs", "description": "Détaille tous les legs et héritages", "sample_prompt": "Détaille tous les legs et héritages mentionnés dans ce testament."},
-                {"id": "verify_executor", "title": "Vérifier l'exécuteur", "description": "Identifie l'exécuteur testamentaire", "sample_prompt": "Identifie l'exécuteur testamentaire mentionné dans ce testament."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce testament : testateur, bénéficiaires, legs, dates, exécuteur."}
-            ],
-            'acte_notarie': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties", "sample_prompt": "Identifie toutes les parties impliquées dans cet acte notarié avec leurs coordonnées."},
-                {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de cet acte notarié."},
-                {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et transactions", "sample_prompt": "Liste tous les montants et transactions mentionnés dans cet acte notarié."},
-                {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet de l'acte", "sample_prompt": "Décris précisément l'objet de cet acte notarié."},
-                {"id": "verify_notary", "title": "Vérifier le notaire", "description": "Identifie le notaire et son étude", "sample_prompt": "Identifie le notaire qui a rédigé cet acte et son étude notariale."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de cet acte notarié : parties, dates, montants, objet, notaire."}
-            ],
-            'lettre': [
-                {"id": "verify_sender", "title": "Vérifier l'expéditeur", "description": "Identifie l'expéditeur de la lettre", "sample_prompt": "Identifie l'expéditeur de cette lettre : nom, fonction, organisation, coordonnées."},
-                {"id": "verify_recipient", "title": "Vérifier le destinataire", "description": "Identifie le destinataire de la lettre", "sample_prompt": "Identifie le destinataire de cette lettre : nom, fonction, organisation, coordonnées."},
-                {"id": "verify_date", "title": "Vérifier la date", "description": "Extrait la date de la lettre", "sample_prompt": "Extrais la date de cette lettre (date d'écriture, date d'envoi si mentionnée)."},
-                {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit l'objet et le but de la lettre", "sample_prompt": "Décris l'objet et le but principal de cette lettre en une phrase claire."},
-                {"id": "verify_key_information", "title": "Vérifier infos clés", "description": "Extrait les informations importantes mentionnées", "sample_prompt": "Extrais toutes les informations importantes mentionnées dans cette lettre : montants, dates, références, engagements."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de cette lettre : expéditeur, destinataire, date, objet, informations clés."}
-            ],
-            'document_financier': [
-                {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie les parties concernées", "sample_prompt": "Identifie toutes les parties concernées par ce document financier : employeur, employé, institution, etc."},
-                {"id": "verify_period", "title": "Vérifier la période", "description": "Extrait la période couverte", "sample_prompt": "Extrais la période couverte par ce document financier : dates de début et de fin."},
-                {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et totaux", "sample_prompt": "Liste tous les montants mentionnés dans ce document financier : revenus, déductions, impôts, totaux."},
-                {"id": "verify_deductions", "title": "Vérifier déductions", "description": "Détaille toutes les déductions", "sample_prompt": "Détaille toutes les déductions mentionnées dans ce document financier : impôts, cotisations, autres déductions."},
-                {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce document financier : parties, période, montants, déductions, totaux."}
-            ]
+            'fr': {
+                'contrat_location': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties (locataire, bailleur) avec leurs coordonnées", "sample_prompt": "Identifie toutes les parties de ce contrat de location : le locataire et le bailleur. Liste leurs noms complets, adresses, téléphones et emails si disponibles."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes du contrat", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de location : date de signature, date de début, date de fin, durée, préavis."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants : loyer, caution, charges", "sample_prompt": "Liste tous les montants mentionnés dans ce contrat de location : le loyer mensuel, la caution, les charges, et toute indexation prévue."},
+                    {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses potentiellement problématiques", "sample_prompt": "Analyse ce contrat de location et identifie les clauses potentiellement problématiques ou désavantageuses pour le locataire ou le bailleur."},
+                    {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations du locataire et du bailleur", "sample_prompt": "Liste toutes les obligations du locataire et du bailleur mentionnées dans ce contrat de location."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de location : parties, dates, montants, bien loué, clauses importantes."}
+                ],
+                'contrat_travail': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie l'employeur et l'employé", "sample_prompt": "Identifie les parties de ce contrat de travail : l'employeur et l'employé. Liste leurs noms complets et coordonnées."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes du contrat", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de travail : date de signature, date de début, période d'essai, date de fin si applicable."},
+                    {"id": "verify_remuneration", "title": "Vérifier rémunération", "description": "Détaille le salaire, primes et avantages", "sample_prompt": "Détaille la rémunération dans ce contrat de travail : salaire de base, primes, avantages, révisions salariales prévues."},
+                    {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations de l'employé et de l'employeur", "sample_prompt": "Liste toutes les obligations de l'employé et de l'employeur mentionnées dans ce contrat de travail."},
+                    {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses restrictives ou problématiques", "sample_prompt": "Analyse ce contrat de travail et identifie les clauses potentiellement restrictives ou problématiques (clause de non-concurrence, clause d'exclusivité, etc.)."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de travail : parties, dates, rémunération, obligations, conditions de travail."}
+                ],
+                'contrat_vente': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie l'acheteur et le vendeur", "sample_prompt": "Identifie les parties de ce contrat de vente : l'acheteur et le vendeur. Liste leurs noms complets et coordonnées."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce contrat de vente : date de signature, date de livraison, dates de paiement."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Détaille le prix et modalités de paiement", "sample_prompt": "Détaille tous les montants de ce contrat de vente : prix total, acompte, modalités de paiement, échéances."},
+                    {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet de la vente", "sample_prompt": "Décris précisément l'objet de cette vente : nature du bien, caractéristiques, quantité, état."},
+                    {"id": "verify_guarantees", "title": "Vérifier garanties", "description": "Liste les garanties et conditions", "sample_prompt": "Liste toutes les garanties mentionnées dans ce contrat de vente et leurs conditions."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de vente : parties, dates, montants, objet, garanties, conditions."}
+                ],
+                'contrat_generique': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties", "sample_prompt": "Identifie toutes les parties de ce contrat avec leurs noms complets et coordonnées."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce contrat : signature, échéances, dates de paiement."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et modalités", "sample_prompt": "Liste tous les montants mentionnés dans ce contrat et leurs modalités de paiement."},
+                    {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet du contrat", "sample_prompt": "Décris précisément l'objet de ce contrat en une phrase claire."},
+                    {"id": "analyze_risky_clauses", "title": "Analyser clauses à risque", "description": "Identifie les clauses problématiques", "sample_prompt": "Analyse ce contrat et identifie les clauses potentiellement problématiques ou désavantageuses."},
+                    {"id": "verify_obligations", "title": "Vérifier les obligations", "description": "Liste les obligations de chaque partie", "sample_prompt": "Liste toutes les obligations de chaque partie mentionnées dans ce contrat."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat : parties, dates, montants, objet, obligations, clauses importantes."}
+                ],
+                'testament': [
+                    {"id": "verify_testator", "title": "Vérifier le testateur", "description": "Identifie le testateur", "sample_prompt": "Identifie le testateur de ce testament avec ses coordonnées complètes."},
+                    {"id": "verify_beneficiaries", "title": "Vérifier bénéficiaires", "description": "Liste tous les bénéficiaires et leurs parts", "sample_prompt": "Liste tous les bénéficiaires de ce testament et leurs parts respectives."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de ce testament : date de rédaction, signature, modifications éventuelles."},
+                    {"id": "verify_legacies", "title": "Vérifier les legs", "description": "Détaille tous les legs et héritages", "sample_prompt": "Détaille tous les legs et héritages mentionnés dans ce testament."},
+                    {"id": "verify_executor", "title": "Vérifier l'exécuteur", "description": "Identifie l'exécuteur testamentaire", "sample_prompt": "Identifie l'exécuteur testamentaire mentionné dans ce testament."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce testament : testateur, bénéficiaires, legs, dates, exécuteur."}
+                ],
+                'acte_notarie': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie toutes les parties", "sample_prompt": "Identifie toutes les parties impliquées dans cet acte notarié avec leurs coordonnées."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait toutes les dates importantes", "sample_prompt": "Extrais toutes les dates importantes de cet acte notarié."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et transactions", "sample_prompt": "Liste tous les montants et transactions mentionnés dans cet acte notarié."},
+                    {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit précisément l'objet de l'acte", "sample_prompt": "Décris précisément l'objet de cet acte notarié."},
+                    {"id": "verify_notary", "title": "Vérifier le notaire", "description": "Identifie le notaire et son étude", "sample_prompt": "Identifie le notaire qui a rédigé cet acte et son étude notariale."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de cet acte notarié : parties, dates, montants, objet, notaire."}
+                ],
+                'lettre': [
+                    {"id": "verify_sender", "title": "Vérifier l'expéditeur", "description": "Identifie l'expéditeur de la lettre", "sample_prompt": "Identifie l'expéditeur de cette lettre : nom, fonction, organisation, coordonnées."},
+                    {"id": "verify_recipient", "title": "Vérifier le destinataire", "description": "Identifie le destinataire de la lettre", "sample_prompt": "Identifie le destinataire de cette lettre : nom, fonction, organisation, coordonnées."},
+                    {"id": "verify_date", "title": "Vérifier la date", "description": "Extrait la date de la lettre", "sample_prompt": "Extrais la date de cette lettre (date d'écriture, date d'envoi si mentionnée)."},
+                    {"id": "verify_object", "title": "Vérifier l'objet", "description": "Décrit l'objet et le but de la lettre", "sample_prompt": "Décris l'objet et le but principal de cette lettre en une phrase claire."},
+                    {"id": "verify_key_information", "title": "Vérifier infos clés", "description": "Extrait les informations importantes mentionnées", "sample_prompt": "Extrais toutes les informations importantes mentionnées dans cette lettre : montants, dates, références, engagements."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de cette lettre : expéditeur, destinataire, date, objet, informations clés."}
+                ],
+                'document_financier': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie les parties concernées", "sample_prompt": "Identifie toutes les parties concernées par ce document financier : employeur, employé, institution, etc."},
+                    {"id": "verify_period", "title": "Vérifier la période", "description": "Extrait la période couverte", "sample_prompt": "Extrais la période couverte par ce document financier : dates de début et de fin."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste tous les montants et totaux", "sample_prompt": "Liste tous les montants mentionnés dans ce document financier : revenus, déductions, impôts, totaux."},
+                    {"id": "verify_deductions", "title": "Vérifier déductions", "description": "Détaille toutes les déductions", "sample_prompt": "Détaille toutes les déductions mentionnées dans ce document financier : impôts, cotisations, autres déductions."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce document financier : parties, période, montants, déductions, totaux."}
+                ],
+                'default': [
+                    {"id": "summarize_all", "title": "Résumer documents", "description": "Génère un résumé global des documents", "sample_prompt": "Fournis un résumé clair et structuré de tous les documents uploadés, en mettant en évidence les thèmes principaux et les informations importantes. Adapte le résumé au type de document : pour un CV, concentre-toi sur l'expérience professionnelle, les compétences et les réalisations ; pour un document financier, mentionne les montants et chiffres pertinents ; pour un contrat, mentionne les parties et dates importantes. Ne mentionne PAS d'informations qui ne sont pas présentes dans les documents (par exemple, ne mentionne pas d'informations financières si le document est un CV)."},
+                    {"id": "extract_key_points", "title": "Extraire points clés", "description": "Liste les points clés et entités", "sample_prompt": "Extrais les points clés, décisions importantes et entités nommées (personnes, entreprises, lieux) de tous les documents uploadés et organise-les en puces."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce document : parties, dates, montants, informations clés."}
+                ]
+            },
+            'en': {
+                'contrat_location': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies all parties (tenant, landlord) with their contact details", "sample_prompt": "Identify all parties in this rental contract: the tenant and the landlord. List their full names, addresses, phone numbers and emails if available."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts all important dates from the contract", "sample_prompt": "Extract all important dates from this rental contract: signing date, start date, end date, duration, notice period."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists all amounts: rent, deposit, charges", "sample_prompt": "List all amounts mentioned in this rental contract: monthly rent, deposit, charges, and any planned indexation."},
+                    {"id": "analyze_risky_clauses", "title": "Analyze risky clauses", "description": "Identifies potentially problematic clauses", "sample_prompt": "Analyze this rental contract and identify potentially problematic or disadvantageous clauses for the tenant or landlord."},
+                    {"id": "verify_obligations", "title": "Verify obligations", "description": "Lists obligations of tenant and landlord", "sample_prompt": "List all obligations of the tenant and landlord mentioned in this rental contract."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this rental contract: parties, dates, amounts, rented property, important clauses."}
+                ],
+                'contrat_travail': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies employer and employee", "sample_prompt": "Identify the parties in this employment contract: the employer and the employee. List their full names and contact details."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts important dates from the contract", "sample_prompt": "Extract all important dates from this employment contract: signing date, start date, probation period, end date if applicable."},
+                    {"id": "verify_remuneration", "title": "Verify remuneration", "description": "Details salary, bonuses and benefits", "sample_prompt": "Detail the remuneration in this employment contract: base salary, bonuses, benefits, planned salary revisions."},
+                    {"id": "verify_obligations", "title": "Verify obligations", "description": "Lists obligations of employee and employer", "sample_prompt": "List all obligations of the employee and employer mentioned in this employment contract."},
+                    {"id": "analyze_risky_clauses", "title": "Analyze risky clauses", "description": "Identifies restrictive or problematic clauses", "sample_prompt": "Analyze this employment contract and identify potentially restrictive or problematic clauses (non-compete clause, exclusivity clause, etc.)."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this employment contract: parties, dates, remuneration, obligations, working conditions."}
+                ],
+                'contrat_vente': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies buyer and seller", "sample_prompt": "Identify the parties in this sale contract: the buyer and the seller. List their full names and contact details."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts important dates", "sample_prompt": "Extract all important dates from this sale contract: signing date, delivery date, payment dates."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Details price and payment terms", "sample_prompt": "Detail all amounts in this sale contract: total price, down payment, payment terms, deadlines."},
+                    {"id": "verify_object", "title": "Verify subject", "description": "Precisely describes the subject of the sale", "sample_prompt": "Precisely describe the subject of this sale: nature of the property, characteristics, quantity, condition."},
+                    {"id": "verify_guarantees", "title": "Verify guarantees", "description": "Lists guarantees and conditions", "sample_prompt": "List all guarantees mentioned in this sale contract and their conditions."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this sale contract: parties, dates, amounts, subject, guarantees, conditions."}
+                ],
+                'contrat_generique': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies all parties", "sample_prompt": "Identify all parties in this contract with their full names and contact details."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts all important dates", "sample_prompt": "Extract all important dates from this contract: signing, deadlines, payment dates."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists all amounts and terms", "sample_prompt": "List all amounts mentioned in this contract and their payment terms."},
+                    {"id": "verify_object", "title": "Verify subject", "description": "Precisely describes the subject of the contract", "sample_prompt": "Precisely describe the subject of this contract in a clear sentence."},
+                    {"id": "analyze_risky_clauses", "title": "Analyze risky clauses", "description": "Identifies problematic clauses", "sample_prompt": "Analyze this contract and identify potentially problematic or disadvantageous clauses."},
+                    {"id": "verify_obligations", "title": "Verify obligations", "description": "Lists obligations of each party", "sample_prompt": "List all obligations of each party mentioned in this contract."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this contract: parties, dates, amounts, subject, obligations, important clauses."}
+                ],
+                'testament': [
+                    {"id": "verify_testator", "title": "Verify testator", "description": "Identifies the testator", "sample_prompt": "Identify the testator of this will with their complete contact details."},
+                    {"id": "verify_beneficiaries", "title": "Verify beneficiaries", "description": "Lists all beneficiaries and their shares", "sample_prompt": "List all beneficiaries of this will and their respective shares."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts important dates", "sample_prompt": "Extract all important dates from this will: drafting date, signature, any modifications."},
+                    {"id": "verify_legacies", "title": "Verify bequests", "description": "Details all bequests and inheritances", "sample_prompt": "Detail all bequests and inheritances mentioned in this will."},
+                    {"id": "verify_executor", "title": "Verify executor", "description": "Identifies the executor", "sample_prompt": "Identify the executor mentioned in this will."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this will: testator, beneficiaries, bequests, dates, executor."}
+                ],
+                'acte_notarie': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies all parties", "sample_prompt": "Identify all parties involved in this notarial act with their contact details."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts all important dates", "sample_prompt": "Extract all important dates from this notarial act."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists all amounts and transactions", "sample_prompt": "List all amounts and transactions mentioned in this notarial act."},
+                    {"id": "verify_object", "title": "Verify subject", "description": "Precisely describes the subject of the act", "sample_prompt": "Precisely describe the subject of this notarial act."},
+                    {"id": "verify_notary", "title": "Verify notary", "description": "Identifies the notary and their office", "sample_prompt": "Identify the notary who drafted this act and their notarial office."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this notarial act: parties, dates, amounts, subject, notary."}
+                ],
+                'lettre': [
+                    {"id": "verify_sender", "title": "Verify sender", "description": "Identifies the letter sender", "sample_prompt": "Identify the sender of this letter: name, function, organization, contact details."},
+                    {"id": "verify_recipient", "title": "Verify recipient", "description": "Identifies the letter recipient", "sample_prompt": "Identify the recipient of this letter: name, function, organization, contact details."},
+                    {"id": "verify_date", "title": "Verify date", "description": "Extracts the letter date", "sample_prompt": "Extract the date of this letter (writing date, sending date if mentioned)."},
+                    {"id": "verify_object", "title": "Verify subject", "description": "Describes the subject and purpose of the letter", "sample_prompt": "Describe the subject and main purpose of this letter in a clear sentence."},
+                    {"id": "verify_key_information", "title": "Verify key info", "description": "Extracts important information mentioned", "sample_prompt": "Extract all important information mentioned in this letter: amounts, dates, references, commitments."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this letter: sender, recipient, date, subject, key information."}
+                ],
+                'document_financier': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies concerned parties", "sample_prompt": "Identify all parties concerned by this financial document: employer, employee, institution, etc."},
+                    {"id": "verify_period", "title": "Verify period", "description": "Extracts the covered period", "sample_prompt": "Extract the period covered by this financial document: start and end dates."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists all amounts and totals", "sample_prompt": "List all amounts mentioned in this financial document: income, deductions, taxes, totals."},
+                    {"id": "verify_deductions", "title": "Verify deductions", "description": "Details all deductions", "sample_prompt": "Detail all deductions mentioned in this financial document: taxes, contributions, other deductions."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this financial document: parties, period, amounts, deductions, totals."}
+                ],
+                'default': [
+                    {"id": "summarize_all", "title": "Summarize documents", "description": "Generates a global summary of documents", "sample_prompt": "Provide a clear and structured summary of all uploaded documents, highlighting the main themes and important information. Adapt the summary to the document type: for a CV, focus on professional experience, skills and achievements; for a financial document, mention relevant amounts and figures; for a contract, mention important parties and dates. Do NOT mention information that is not present in the documents (for example, do not mention financial information if the document is a CV)."},
+                    {"id": "extract_key_points", "title": "Extract key points", "description": "Lists key points and entities", "sample_prompt": "Extract key points, important decisions and named entities (people, companies, places) from all uploaded documents and organize them in bullet points."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this document: parties, dates, amounts, key information."}
+                ]
+            },
+            'es': {
+                'contrat_location': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica todas las partes (inquilino, arrendador) con sus datos de contacto", "sample_prompt": "Identifica todas las partes de este contrato de alquiler: el inquilino y el arrendador. Enumera sus nombres completos, direcciones, teléfonos y correos electrónicos si están disponibles."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae todas las fechas importantes del contrato", "sample_prompt": "Extrae todas las fechas importantes de este contrato de alquiler: fecha de firma, fecha de inicio, fecha de fin, duración, preaviso."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera todos los montos: alquiler, depósito, gastos", "sample_prompt": "Enumera todos los montos mencionados en este contrato de alquiler: el alquiler mensual, el depósito, los gastos y cualquier indexación prevista."},
+                    {"id": "analyze_risky_clauses", "title": "Analizar cláusulas de riesgo", "description": "Identifica cláusulas potencialmente problemáticas", "sample_prompt": "Analiza este contrato de alquiler e identifica las cláusulas potencialmente problemáticas o desventajosas para el inquilino o el arrendador."},
+                    {"id": "verify_obligations", "title": "Verificar obligaciones", "description": "Enumera las obligaciones del inquilino y del arrendador", "sample_prompt": "Enumera todas las obligaciones del inquilino y del arrendador mencionadas en este contrato de alquiler."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este contrato de alquiler: partes, fechas, montos, propiedad alquilada, cláusulas importantes."}
+                ],
+                'contrat_travail': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica al empleador y al empleado", "sample_prompt": "Identifica las partes de este contrato de trabajo: el empleador y el empleado. Enumera sus nombres completos y datos de contacto."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae las fechas importantes del contrato", "sample_prompt": "Extrae todas las fechas importantes de este contrato de trabajo: fecha de firma, fecha de inicio, período de prueba, fecha de fin si es aplicable."},
+                    {"id": "verify_remuneration", "title": "Verificar remuneración", "description": "Detalla el salario, bonos y beneficios", "sample_prompt": "Detalla la remuneración en este contrato de trabajo: salario base, bonos, beneficios, revisiones salariales previstas."},
+                    {"id": "verify_obligations", "title": "Verificar obligaciones", "description": "Enumera las obligaciones del empleado y del empleador", "sample_prompt": "Enumera todas las obligaciones del empleado y del empleador mencionadas en este contrato de trabajo."},
+                    {"id": "analyze_risky_clauses", "title": "Analizar cláusulas de riesgo", "description": "Identifica cláusulas restrictivas o problemáticas", "sample_prompt": "Analiza este contrato de trabajo e identifica las cláusulas potencialmente restrictivas o problemáticas (cláusula de no competencia, cláusula de exclusividad, etc.)."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este contrato de trabajo: partes, fechas, remuneración, obligaciones, condiciones de trabajo."}
+                ],
+                'contrat_vente': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica al comprador y al vendedor", "sample_prompt": "Identifica las partes de este contrato de venta: el comprador y el vendedor. Enumera sus nombres completos y datos de contacto."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae las fechas importantes", "sample_prompt": "Extrae todas las fechas importantes de este contrato de venta: fecha de firma, fecha de entrega, fechas de pago."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Detalla el precio y modalidades de pago", "sample_prompt": "Detalla todos los montos de este contrato de venta: precio total, anticipo, modalidades de pago, plazos."},
+                    {"id": "verify_object", "title": "Verificar objeto", "description": "Describe precisamente el objeto de la venta", "sample_prompt": "Describe precisamente el objeto de esta venta: naturaleza del bien, características, cantidad, estado."},
+                    {"id": "verify_guarantees", "title": "Verificar garantías", "description": "Enumera las garantías y condiciones", "sample_prompt": "Enumera todas las garantías mencionadas en este contrato de venta y sus condiciones."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este contrato de venta: partes, fechas, montos, objeto, garantías, condiciones."}
+                ],
+                'contrat_generique': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica todas las partes", "sample_prompt": "Identifica todas las partes de este contrato con sus nombres completos y datos de contacto."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae todas las fechas importantes", "sample_prompt": "Extrae todas las fechas importantes de este contrato: firma, plazos, fechas de pago."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera todos los montos y modalidades", "sample_prompt": "Enumera todos los montos mencionados en este contrato y sus modalidades de pago."},
+                    {"id": "verify_object", "title": "Verificar objeto", "description": "Describe precisamente el objeto del contrato", "sample_prompt": "Describe precisamente el objeto de este contrato en una oración clara."},
+                    {"id": "analyze_risky_clauses", "title": "Analizar cláusulas de riesgo", "description": "Identifica cláusulas problemáticas", "sample_prompt": "Analiza este contrato e identifica las cláusulas potencialmente problemáticas o desventajosas."},
+                    {"id": "verify_obligations", "title": "Verificar obligaciones", "description": "Enumera las obligaciones de cada parte", "sample_prompt": "Enumera todas las obligaciones de cada parte mencionadas en este contrato."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurudos de este contrato: partes, fechas, montos, objeto, obligaciones, cláusulas importantes."}
+                ],
+                'testament': [
+                    {"id": "verify_testator", "title": "Verificar testador", "description": "Identifica al testador", "sample_prompt": "Identifica al testador de este testamento con sus datos de contacto completos."},
+                    {"id": "verify_beneficiaries", "title": "Verificar beneficiarios", "description": "Enumera todos los beneficiarios y sus partes", "sample_prompt": "Enumera todos los beneficiarios de este testamento y sus partes respectivas."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae las fechas importantes", "sample_prompt": "Extrae todas las fechas importantes de este testamento: fecha de redacción, firma, modificaciones eventuales."},
+                    {"id": "verify_legacies", "title": "Verificar legados", "description": "Detalla todos los legados y herencias", "sample_prompt": "Detalla todos los legados y herencias mencionados en este testamento."},
+                    {"id": "verify_executor", "title": "Verificar ejecutor", "description": "Identifica al albacea", "sample_prompt": "Identifica al albacea mencionado en este testamento."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este testamento: testador, beneficiarios, legados, fechas, ejecutor."}
+                ],
+                'acte_notarie': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica todas las partes", "sample_prompt": "Identifica todas las partes involucradas en este acta notarial con sus datos de contacto."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae todas las fechas importantes", "sample_prompt": "Extrae todas las fechas importantes de este acta notarial."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera todos los montos y transacciones", "sample_prompt": "Enumera todos los montos y transacciones mencionados en este acta notarial."},
+                    {"id": "verify_object", "title": "Verificar objeto", "description": "Describe precisamente el objeto del acta", "sample_prompt": "Describe precisamente el objeto de este acta notarial."},
+                    {"id": "verify_notary", "title": "Verificar notario", "description": "Identifica al notario y su estudio", "sample_prompt": "Identifica al notario que redactó este acta y su estudio notarial."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este acta notarial: partes, fechas, montos, objeto, notario."}
+                ],
+                'lettre': [
+                    {"id": "verify_sender", "title": "Verificar remitente", "description": "Identifica al remitente de la carta", "sample_prompt": "Identifica al remitente de esta carta: nombre, función, organización, datos de contacto."},
+                    {"id": "verify_recipient", "title": "Verificar destinatario", "description": "Identifica al destinatario de la carta", "sample_prompt": "Identifica al destinatario de esta carta: nombre, función, organización, datos de contacto."},
+                    {"id": "verify_date", "title": "Verificar fecha", "description": "Extrae la fecha de la carta", "sample_prompt": "Extrae la fecha de esta carta (fecha de escritura, fecha de envío si se menciona)."},
+                    {"id": "verify_object", "title": "Verificar objeto", "description": "Describe el objeto y el propósito de la carta", "sample_prompt": "Describe el objeto y el propósito principal de esta carta en una oración clara."},
+                    {"id": "verify_key_information", "title": "Verificar info clave", "description": "Extrae información importante mencionada", "sample_prompt": "Extrae toda la información importante mencionada en esta carta: montos, fechas, referencias, compromisos."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de esta carta: remitente, destinatario, fecha, objeto, información clave."}
+                ],
+                'document_financier': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica las partes concernidas", "sample_prompt": "Identifica todas las partes concernidas por este documento financiero: empleador, empleado, institución, etc."},
+                    {"id": "verify_period", "title": "Verificar período", "description": "Extrae el período cubierto", "sample_prompt": "Extrae el período cubierto por este documento financiero: fechas de inicio y de fin."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera todos los montos y totales", "sample_prompt": "Enumera todos los montos mencionados en este documento financiero: ingresos, deducciones, impuestos, totales."},
+                    {"id": "verify_deductions", "title": "Verificar deducciones", "description": "Detalla todas las deducciones", "sample_prompt": "Detalla todas las deducciones mencionadas en este documento financiero: impuestos, cotizaciones, otras deducciones."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este documento financiero: partes, período, montos, deducciones, totales."}
+                ],
+                'default': [
+                    {"id": "summarize_all", "title": "Resumir documentos", "description": "Genera un resumen global de los documentos", "sample_prompt": "Proporciona un resumen claro y estructurado de todos los documentos cargados, destacando los temas principales y la información importante. Adapta el resumen al tipo de documento: para un CV, concéntrate en la experiencia profesional, habilidades y logros; para un documento financiero, menciona montos y cifras relevantes; para un contrato, menciona partes y fechas importantes. NO menciones información que no esté presente en los documentos (por ejemplo, no menciones información financiera si el documento es un CV)."},
+                    {"id": "extract_key_points", "title": "Extraer puntos clave", "description": "Enumera los puntos clave y entidades", "sample_prompt": "Extrae los puntos clave, decisiones importantes y entidades nombradas (personas, empresas, lugares) de todos los documentos cargados y organízalos en viñetas."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este documento: partes, fechas, montos, información clave."}
+                ]
+            }
         }
         
-        # Utiliser les actions spécifiques si disponible, sinon actions génériques
-        actions_list = fallback_actions.get(doc_type, [
-            {"id": "summarize_all", "title": "Résumer documents", "description": "Génère un résumé global des documents", "sample_prompt": "Fournis un résumé clair et structuré de tous les documents uploadés, en mettant en évidence les thèmes principaux et les informations importantes. Adapte le résumé au type de document : pour un CV, concentre-toi sur l'expérience professionnelle, les compétences et les réalisations ; pour un document financier, mentionne les montants et chiffres pertinents ; pour un contrat, mentionne les parties et dates importantes. Ne mentionne PAS d'informations qui ne sont pas présentes dans les documents (par exemple, ne mentionne pas d'informations financières si le document est un CV)."},
-            {"id": "extract_key_points", "title": "Extraire points clés", "description": "Liste les points clés et entités", "sample_prompt": "Extrais les points clés, décisions importantes et entités nommées (personnes, entreprises, lieux) de tous les documents uploadés et organise-les en puces."},
-            {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce document : parties, dates, montants, informations clés."}
-        ])
+        # Sélectionner les actions selon la langue et le type de document
+        lang_actions = fallback_actions.get(language, fallback_actions['en'])
+        actions_list = lang_actions.get(doc_type, lang_actions.get('default', []))
         
         return {
             "domain": doc_type,
@@ -2800,6 +3118,50 @@ async def index_directory():
         }), 500
 
 
+@app.route('/infer-corpus-actions', methods=['POST'])
+async def infer_corpus_actions_endpoint():
+    """
+    Endpoint pour inférer les actions suggérées à partir de documents
+    """
+    try:
+        data = request.get_json()
+        documents_data = data.get('documents', [])
+        language = data.get('language', 'en')
+        
+        if not documents_data:
+            return jsonify({
+                "error": "No documents provided",
+                'success': False
+            }), 400
+        
+        # Convertir les documents en format Document
+        documents = []
+        for doc_data in documents_data:
+            documents.append(Document(
+                page_content=doc_data.get('content', ''),
+                metadata={
+                    'fileName': doc_data.get('file_name', 'document'),
+                    'source': doc_data.get('file_name', 'document')
+                }
+            ))
+        
+        # Inférer les actions suggérées
+        inferred_actions = await infer_corpus_actions(documents, language=language)
+        
+        return jsonify({
+            'success': True,
+            'suggested_actions': inferred_actions.get('suggested_actions', []),
+            'domain': inferred_actions.get('domain', 'unknown')
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur lors de l'inférence des actions: {str(e)}")
+        return jsonify({
+            'error': f'Error inferring actions: {str(e)}',
+            'success': False
+        }), 500
+
+
 @app.route('/query', methods=['POST'])
 async def handle_query():
     """
@@ -3460,29 +3822,39 @@ def summarize_file_stream():
         data = request.get_json()
         file_name = data.get('file_name', '')
         file_content = data.get('file_content', '')
-        language = data.get('language', 'fr')
+        language = data.get('language', 'en')
+        
+        # Get translations for the selected language
+        t = translations.get(language, translations['en'])
         
         if not file_content:
-            return jsonify({"error": "Aucun contenu fourni"}), 400
+            error_msg = t.get('no_content_provided', 'No content provided')
+            return jsonify({"error": error_msg}), 400
         
         # Utiliser Mistral pour générer le résumé
         client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=os.getenv("MISTRAL_API_KEY"))
         
-        prompt = f"""Génère un résumé concis du document suivant en exactement 4 lignes maximum. 
-Le résumé doit être en {language} et mettre en évidence les informations clés.
+        # Build language-specific prompt
+        lang_names = {'en': 'English', 'fr': 'French', 'es': 'Spanish'}
+        lang_name = lang_names.get(language, language)
+        prompt_text = t['summarize_file_prompt'].format(language=lang_name)
+        summary_label = t['summarize_file_summary_label']
+        system_content = t['summarize_file_system'].format(language=lang_name)
+        
+        prompt = f"""{prompt_text}
 
 Document: {file_name}
-Contenu:
+Content:
 {file_content[:2000]}
 
-Résumé (4 lignes max):"""
+{summary_label}"""
         
         def generate():
             try:
                 stream = client.chat.completions.create(
                     model="mistral-small",
                     messages=[
-                        {"role": "system", "content": f"Tu es un assistant expert en analyse de documents. Génère des résumés clairs et concis en exactement 4 lignes maximum en {language}."},
+                        {"role": "system", "content": system_content},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=200,
@@ -3532,10 +3904,14 @@ def summarize_repository_stream():
     try:
         data = request.get_json()
         files_info = data.get('files', [])
-        language = data.get('language', 'fr')
+        language = data.get('language', 'en')
+        
+        # Get translations for the selected language
+        t = translations.get(language, translations['en'])
         
         if not files_info or len(files_info) == 0:
-            return jsonify({"error": "Aucun fichier fourni"}), 400
+            error_msg = t.get('no_files_provided', 'No files provided')
+            return jsonify({"error": error_msg}), 400
         
         # Compter les sous-répertoires et fichiers
         file_count = len(files_info)
@@ -3549,6 +3925,19 @@ def summarize_repository_stream():
         
         subdirectory_count = len(subdirectories)
         
+        # Handle pluralization for different languages
+        s_files = 's' if file_count > 1 else ''
+        s_dirs = 's' if subdirectory_count > 1 else ''
+        if language == 'fr':
+            s_files = 's' if file_count > 1 else ''
+            s_dirs = 's' if subdirectory_count > 1 else ''
+        elif language == 'es':
+            s_files = 's' if file_count > 1 else ''
+            s_dirs = 's' if subdirectory_count > 1 else ''
+        else:  # English
+            s_files = 's' if file_count > 1 else ''
+            s_dirs = 's' if subdirectory_count > 1 else ''
+        
         def generate():
             try:
                 # Utiliser Mistral pour générer le résumé
@@ -3557,28 +3946,42 @@ def summarize_repository_stream():
                 # Construire le prompt avec les informations du répertoire
                 file_names_text = '\n'.join([f"- {f.get('display_name', f.get('name', ''))}" for f in files_info[:10]])
                 
-                prompt = f"""Génère un résumé concis d'un répertoire contenant {file_count} fichier{'s' if file_count > 1 else ''} et {subdirectory_count} sous-répertoire{'s' if subdirectory_count > 1 else ''}.
+                # Get language-specific translations
+                lang_names = {'en': 'English', 'fr': 'French', 'es': 'Spanish'}
+                lang_name = lang_names.get(language, language)
+                
+                prompt_start = t['summarize_repo_prompt_start'].format(
+                    file_count=file_count,
+                    s_files=s_files,
+                    subdir_count=subdirectory_count,
+                    s_dirs=s_dirs
+                )
+                files_label = t['summarize_repo_files_label']
+                instructions = t['summarize_repo_instructions'].format(language=lang_name)
+                expected_format = t['summarize_repo_expected_format'].format(
+                    file_count=file_count,
+                    s_files=s_files,
+                    subdir_count=subdirectory_count,
+                    s_dirs=s_dirs
+                )
+                summary_label = t['summarize_repo_summary_label']
+                system_content = t['summarize_repo_system'].format(language=lang_name)
+                
+                prompt = f"""{prompt_start}
 
-Fichiers dans le répertoire:
+{files_label}
 {file_names_text}
 
-Génère un résumé en {language} qui inclut:
-1. Le nombre total de fichiers et sous-répertoires
-2. Pour chacun des 3 premiers fichiers listés, génère un résumé de 2 lignes maximum avec le format: **[nom_fichier]**: [résumé 2 lignes]
+{instructions}
 
-Format attendu:
-📁 Répertoire: {file_count} fichier{'s' if file_count > 1 else ''}, {subdirectory_count} sous-répertoire{'s' if subdirectory_count > 1 else ''}
+{expected_format}
 
-**[nom_fichier_1]**: [résumé 2 lignes]
-**[nom_fichier_2]**: [résumé 2 lignes]
-**[nom_fichier_3]**: [résumé 2 lignes]
-
-Résumé:"""
+{summary_label}"""
                 
                 stream = client.chat.completions.create(
                     model="mistral-small",
                     messages=[
-                        {"role": "system", "content": f"Tu es un assistant expert en analyse de répertoires. Génère des résumés clairs et structurés en {language}. Pour chaque fichier, génère un résumé basé sur son nom et son extension."},
+                        {"role": "system", "content": system_content},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=400,

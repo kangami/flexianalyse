@@ -5,7 +5,7 @@ export type Language = 'en' | 'fr' | 'es';
 interface LanguageContextType {
   language: Language;
   setLanguage: (language: Language) => void;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
@@ -74,6 +74,46 @@ const translations: Record<Language, Record<string, string>> = {
     'common.pages': 'pages',
     'common.page': 'page',
     'common.file': 'file',
+    
+    // Status messages
+    'status.extracting.pdf': 'Extracting text from PDF {fileName}...',
+    'status.extracting.docx': 'Extracting text from document {fileName}...',
+    'status.reading.file': 'Reading file {fileName}...',
+    'status.analyzing.document': 'Analyzing document {fileName}...',
+    'status.sending.server': 'Sending to server for analysis...',
+    'status.ai.analyzing': 'AI analyzing...',
+    'status.generating.summary': 'Generating summary...',
+    'status.extracting.content': 'Extracting content from {count} file{plural}...',
+    'status.analyzing.repository': 'Analyzing repository ({count} file{plural})...',
+    'status.generating.repo.summary': 'Generating repository summary...',
+    'status.processing.file': 'Processing {fileName}...',
+    'status.processing.files': 'Processing {count} files...',
+    'status.extracting.files': 'Extracting files...',
+    'status.analyzing.question': 'Analyzing your question...',
+    'status.processing.request': 'Processing your request...',
+    'status.analyzing.file': 'Analyzing file {fileName}...',
+    'status.searching.documents': 'Searching in documents...',
+    'status.searching.online': 'Searching for information online...',
+    'status.generating.response': 'Generating response...',
+    'status.extracting.structured': 'Extracting structured data...',
+    'status.indexing.extracting': 'Extracting content from {count} files...',
+    'status.indexing.processing': 'Processing {fileName} ({current}/{total})...',
+    'status.indexing.on.server': 'Indexing on server ({count} files)...',
+    'status.indexing.documents': 'Indexing documents...',
+    
+    // Reasoning animation
+    'reasoning.analyzing.question': '🧠 Analyzing your question...',
+    'reasoning.analyzing.description': 'Understanding the context and requirements',
+    'reasoning.gathering.info': '🔍 Gathering relevant information...',
+    'reasoning.gathering.description': 'Searching through file contents and structure',
+    'reasoning.processing': '⚡ Processing with advanced reasoning...',
+    'reasoning.processing.description': 'GPT-5 is thinking deeply about your request',
+    'reasoning.formulating': '🎯 Formulating comprehensive response...',
+    'reasoning.formulating.description': 'Crafting a detailed and accurate answer',
+    'reasoning.finalizing': '✨ Finalizing response...',
+    'reasoning.finalizing.description': 'Adding final touches and formatting',
+    'reasoning.step': 'Step {current} of {total}',
+    'reasoning.powered.by': 'Powered by',
   },
   fr: {
     // ChatPanel
@@ -124,6 +164,46 @@ const translations: Record<Language, Record<string, string>> = {
     'common.pages': 'pages',
     'common.page': 'page',
     'common.file': 'fichier',
+    
+    // Status messages
+    'status.extracting.pdf': 'Extraction du texte du PDF {fileName}...',
+    'status.extracting.docx': 'Extraction du texte du document {fileName}...',
+    'status.reading.file': 'Lecture du fichier {fileName}...',
+    'status.analyzing.document': 'Analyse du document {fileName}...',
+    'status.sending.server': 'Envoi au serveur pour analyse...',
+    'status.ai.analyzing': 'Analyse en cours par l\'IA...',
+    'status.generating.summary': 'Génération du résumé...',
+    'status.extracting.content': 'Extraction du contenu de {count} fichier{plural}...',
+    'status.analyzing.repository': 'Analyse du répertoire ({count} fichier{plural})...',
+    'status.generating.repo.summary': 'Génération du résumé du répertoire...',
+    'status.processing.file': 'Traitement de {fileName}...',
+    'status.processing.files': 'Traitement de {count} fichiers...',
+    'status.extracting.files': 'Extraction des fichiers...',
+    'status.analyzing.question': 'Analyse de votre question...',
+    'status.processing.request': 'Traitement de votre requête...',
+    'status.analyzing.file': 'Analyse du fichier {fileName}...',
+    'status.searching.documents': 'Recherche dans les documents...',
+    'status.searching.online': 'Recherche d\'informations en ligne...',
+    'status.generating.response': 'Génération de la réponse...',
+    'status.extracting.structured': 'Extraction des données structurées en cours...',
+    'status.indexing.extracting': 'Extraction du contenu de {count} fichiers...',
+    'status.indexing.processing': 'Traitement de {fileName} ({current}/{total})...',
+    'status.indexing.on.server': 'Indexation sur le serveur ({count} fichiers)...',
+    'status.indexing.documents': 'Indexation des documents en cours...',
+    
+    // Reasoning animation
+    'reasoning.analyzing.question': '🧠 Analyse de votre question...',
+    'reasoning.analyzing.description': 'Compréhension du contexte et des exigences',
+    'reasoning.gathering.info': '🔍 Collecte d\'informations pertinentes...',
+    'reasoning.gathering.description': 'Recherche dans le contenu et la structure des fichiers',
+    'reasoning.processing': '⚡ Traitement avec raisonnement avancé...',
+    'reasoning.processing.description': 'GPT-5 réfléchit profondément à votre demande',
+    'reasoning.formulating': '🎯 Formulation d\'une réponse complète...',
+    'reasoning.formulating.description': 'Création d\'une réponse détaillée et précise',
+    'reasoning.finalizing': '✨ Finalisation de la réponse...',
+    'reasoning.finalizing.description': 'Ajout des touches finales et formatage',
+    'reasoning.step': 'Étape {current} sur {total}',
+    'reasoning.powered.by': 'Propulsé par',
   },
   es: {
     // ChatPanel
@@ -175,6 +255,46 @@ const translations: Record<Language, Record<string, string>> = {
     'common.pages': 'páginas',
     'common.page': 'página',
     'common.file': 'archivo',
+    
+    // Status messages
+    'status.extracting.pdf': 'Extrayendo texto del PDF {fileName}...',
+    'status.extracting.docx': 'Extrayendo texto del documento {fileName}...',
+    'status.reading.file': 'Leyendo archivo {fileName}...',
+    'status.analyzing.document': 'Analizando documento {fileName}...',
+    'status.sending.server': 'Enviando al servidor para análisis...',
+    'status.ai.analyzing': 'IA analizando...',
+    'status.generating.summary': 'Generando resumen...',
+    'status.extracting.content': 'Extrayendo contenido de {count} archivo{plural}...',
+    'status.analyzing.repository': 'Analizando repositorio ({count} archivo{plural})...',
+    'status.generating.repo.summary': 'Generando resumen del repositorio...',
+    'status.processing.file': 'Procesando {fileName}...',
+    'status.processing.files': 'Procesando {count} archivos...',
+    'status.extracting.files': 'Extrayendo archivos...',
+    'status.analyzing.question': 'Analizando tu pregunta...',
+    'status.processing.request': 'Procesando tu solicitud...',
+    'status.analyzing.file': 'Analizando archivo {fileName}...',
+    'status.searching.documents': 'Buscando en documentos...',
+    'status.searching.online': 'Buscando información en línea...',
+    'status.generating.response': 'Generando respuesta...',
+    'status.extracting.structured': 'Extrayendo datos estructurados...',
+    'status.indexing.extracting': 'Extrayendo contenido de {count} archivos...',
+    'status.indexing.processing': 'Procesando {fileName} ({current}/{total})...',
+    'status.indexing.on.server': 'Indexando en el servidor ({count} archivos)...',
+    'status.indexing.documents': 'Indexando documentos...',
+    
+    // Reasoning animation
+    'reasoning.analyzing.question': '🧠 Analizando tu pregunta...',
+    'reasoning.analyzing.description': 'Comprendiendo el contexto y los requisitos',
+    'reasoning.gathering.info': '🔍 Reuniendo información relevante...',
+    'reasoning.gathering.description': 'Buscando en el contenido y la estructura de los archivos',
+    'reasoning.processing': '⚡ Procesando con razonamiento avanzado...',
+    'reasoning.processing.description': 'GPT-5 está pensando profundamente en tu solicitud',
+    'reasoning.formulating': '🎯 Formulando una respuesta completa...',
+    'reasoning.formulating.description': 'Creando una respuesta detallada y precisa',
+    'reasoning.finalizing': '✨ Finalizando respuesta...',
+    'reasoning.finalizing.description': 'Añadiendo los toques finales y formateo',
+    'reasoning.step': 'Paso {current} de {total}',
+    'reasoning.powered.by': 'Impulsado por',
   },
 };
 
@@ -189,8 +309,17 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
     localStorage.setItem('app-language', newLanguage);
   };
 
-  const t = (key: string): string => {
-    return translations[language][key] || key;
+  const t = (key: string, params?: Record<string, string | number>): string => {
+    let text = translations[language][key] || key;
+    
+    // Replace placeholders if params provided
+    if (params) {
+      Object.entries(params).forEach(([paramKey, value]) => {
+        text = text.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(value));
+      });
+    }
+    
+    return text;
   };
 
   return (

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface ReasoningAnimationProps {
   isVisible: boolean;
@@ -21,35 +22,37 @@ const ReasoningAnimation: React.FC<ReasoningAnimationProps> = ({
   onComplete,
   customSteps 
 }) => {
+  const { t } = useLanguage();
+  
   const defaultSteps: ReasoningStep[] = [
     { 
       id: 1, 
-      text: "🧠 Analyzing your question...", 
-      description: "Understanding the context and requirements",
+      text: t('reasoning.analyzing.question'), 
+      description: t('reasoning.analyzing.description'),
       duration: 2000 
     },
     { 
       id: 2, 
-      text: "🔍 Gathering relevant information...", 
-      description: "Searching through file contents and structure",
+      text: t('reasoning.gathering.info'), 
+      description: t('reasoning.gathering.description'),
       duration: 3000 
     },
     { 
       id: 3, 
-      text: "⚡ Processing with advanced reasoning...", 
-      description: "GPT-5 is thinking deeply about your request",
+      text: t('reasoning.processing'), 
+      description: t('reasoning.processing.description'),
       duration: 4000 
     },
     { 
       id: 4, 
-      text: "🎯 Formulating comprehensive response...", 
-      description: "Crafting a detailed and accurate answer",
+      text: t('reasoning.formulating'), 
+      description: t('reasoning.formulating.description'),
       duration: 2500 
     },
     { 
       id: 5, 
-      text: "✨ Finalizing response...", 
-      description: "Adding final touches and formatting",
+      text: t('reasoning.finalizing'), 
+      description: t('reasoning.finalizing.description'),
       duration: 1500 
     }
   ];
@@ -192,9 +195,9 @@ const ReasoningAnimation: React.FC<ReasoningAnimationProps> = ({
           </div>
           
           <div className="flex justify-between text-xs text-gray-500">
-            <span className="font-medium">Step {currentStep} of {steps.length}</span>
+            <span className="font-medium">{t('reasoning.step', { current: String(currentStep), total: String(steps.length) })}</span>
             <span className="flex items-center space-x-1">
-              <span>Powered by</span>
+              <span>{t('reasoning.powered.by')}</span>
               <span className={`font-bold bg-gradient-to-r ${colors.gradient} bg-clip-text text-transparent`}>
                 {selectedModel?.toUpperCase() || 'GPT-5'}
               </span>

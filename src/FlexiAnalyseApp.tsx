@@ -59,7 +59,7 @@ const chooseModelForQuery = (query: string): string => {
 const FlexiAnalyseApp: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
   const { theme } = useTheme();
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileDetails, setFileDetails] = useState<FileDetails | null>(null);
@@ -235,7 +235,7 @@ const FlexiAnalyseApp: React.FC = () => {
     e.preventDefault();
     e.stopPropagation();
   }, []);
-
+  
   const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
 
   // Fonctions d'extraction de texte (doivent être définies avant generateFileSummary)
@@ -286,13 +286,13 @@ const FlexiAnalyseApp: React.FC = () => {
       
       // Afficher le statut d'extraction selon le type de fichier
       if (extension === '.pdf') {
-        setCurrentStatus(`Extraction du texte du PDF ${file.name}...`);
+        setCurrentStatus(t('status.extracting.pdf', { fileName: file.name }));
         fileContent = await extractTextFromPdf(content as ArrayBuffer);
       } else if (extension === '.docx') {
-        setCurrentStatus(`Extraction du texte du document ${file.name}...`);
+        setCurrentStatus(t('status.extracting.docx', { fileName: file.name }));
         fileContent = await extractTextFromDocx(content as ArrayBuffer);
       } else {
-        setCurrentStatus(`Lecture du fichier ${file.name}...`);
+        setCurrentStatus(t('status.reading.file', { fileName: file.name }));
         fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
       }
       
@@ -312,10 +312,10 @@ const FlexiAnalyseApp: React.FC = () => {
       setLoading(true);
       
       // Mettre à jour le statut pour l'analyse
-      setCurrentStatus(`Analyse du document ${file.name}...`);
+      setCurrentStatus(t('status.analyzing.document', { fileName: file.name }));
       
       // Utiliser le streaming pour le résumé
-      setCurrentStatus(`Envoi au serveur pour analyse...`);
+      setCurrentStatus(t('status.sending.server'));
       const response = await fetch(`${apiUrl}/summarize_file_stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -345,7 +345,7 @@ const FlexiAnalyseApp: React.FC = () => {
       }
       
       // Mettre à jour le statut pendant l'attente de la réponse
-      setCurrentStatus(`Analyse en cours par l'IA...`);
+      setCurrentStatus(t('status.ai.analyzing'));
       
       // Lire le stream
       const reader = response.body?.getReader();
@@ -378,7 +378,7 @@ const FlexiAnalyseApp: React.FC = () => {
                   
                   // Mettre à jour le statut si on commence à recevoir du contenu
                   if (accumulatedResponse.length > 0 && !jsonData.status) {
-                    setCurrentStatus('Génération du résumé...');
+                    setCurrentStatus(t('status.generating.summary'));
                   }
                   
                   // Limiter à 4 lignes maximum
@@ -448,7 +448,8 @@ const FlexiAnalyseApp: React.FC = () => {
   const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
     try {
       // Afficher le statut d'extraction
-      setCurrentStatus(`Extraction du contenu de ${files.length} fichier${files.length > 1 ? 's' : ''}...`);
+      const filePlural = files.length > 1 ? 's' : '';
+      setCurrentStatus(t('status.extracting.content', { count: files.length, plural: filePlural }));
       
       // Créer un message dans le chat history pour le résumé
       const messageId = Math.random().toString(36).substr(2, 9);
@@ -463,7 +464,8 @@ const FlexiAnalyseApp: React.FC = () => {
       setLoading(true);
       
       // Mettre à jour le statut pour l'analyse
-      setCurrentStatus(`Analyse du répertoire (${files.length} fichier${files.length > 1 ? 's' : ''})...`);
+      const repoFilePlural = files.length > 1 ? 's' : '';
+      setCurrentStatus(t('status.analyzing.repository', { count: files.length, plural: repoFilePlural }));
       
       // Utiliser le streaming pour le résumé du répertoire
       const response = await fetch(`${apiUrl}/summarize_repository_stream`, {
@@ -528,7 +530,7 @@ const FlexiAnalyseApp: React.FC = () => {
                   
                   // Mettre à jour le statut si on commence à recevoir du contenu
                   if (accumulatedResponse.length > 0 && !jsonData.status) {
-                    setCurrentStatus('Génération du résumé du répertoire...');
+                    setCurrentStatus(t('status.generating.repo.summary'));
                   }
                   
                   // Mettre à jour l'interface en temps réel
@@ -624,7 +626,7 @@ const FlexiAnalyseApp: React.FC = () => {
     } catch (error) {
       console.error('Error regenerating suggested actions:', error);
     }
-  }, [apiUrl, extractTextFromPdf, extractTextFromDocx]);
+  }, [apiUrl, extractTextFromPdf, extractTextFromDocx, language]);
   
   // Fonction pour gérer l'import d'un répertoire
   const handleDirectorySelect = useCallback(async (files: File[]) => {
@@ -713,7 +715,7 @@ const FlexiAnalyseApp: React.FC = () => {
     e.stopPropagation();
     
     setIsProcessingDrop(true);
-    setCurrentStatus('Extraction des fichiers...');
+    setCurrentStatus(t('status.extracting.files'));
     
     try {
       const items = Array.from(e.dataTransfer.items);
@@ -783,7 +785,7 @@ const FlexiAnalyseApp: React.FC = () => {
         const file = supportedFiles[0];
         const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         
-        setCurrentStatus(`Traitement de ${file.name}...`);
+        setCurrentStatus(t('status.processing.file', { fileName: file.name }));
         
         let content: string | ArrayBuffer;
         if (extension === '.pdf' || extension === '.docx') {
@@ -811,7 +813,7 @@ const FlexiAnalyseApp: React.FC = () => {
         // C'est un répertoire avec plusieurs fichiers
         // Réinitialiser isProcessingDrop avant d'appeler handleDirectorySelect
         setIsProcessingDrop(false);
-        setCurrentStatus(`Traitement de ${supportedFiles.length} fichiers...`);
+        setCurrentStatus(t('status.processing.files', { count: supportedFiles.length }));
         
         // Gérer l'import du répertoire
         // Ne pas attendre pour éviter de bloquer si le streaming échoue
@@ -858,7 +860,7 @@ const FlexiAnalyseApp: React.FC = () => {
       console.log('=== ENVOI DES FICHIERS AU BACKEND POUR INDEXATION ===');
       console.log('Fichiers à indexer:', files.length);
       
-      setIndexingStatus(`Extraction du contenu de ${files.length} fichiers...`);
+      setIndexingStatus(t('status.indexing.extracting', { count: files.length }));
       
       // Extraire le contenu de tous les fichiers
       const fileContents: { fileName: string; content: string }[] = [];
@@ -866,7 +868,7 @@ const FlexiAnalyseApp: React.FC = () => {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         console.log(`Traitement du fichier ${i + 1}/${files.length}: ${file.name}`);
-        setIndexingStatus(`Traitement de ${file.name} (${i + 1}/${files.length})...`);
+        setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
         
         const text = await extractTextFromFile(file);
         if (text && text !== 'Unsupported file type') {
@@ -881,7 +883,7 @@ const FlexiAnalyseApp: React.FC = () => {
       }
 
       console.log(`📤 Envoi de ${fileContents.length} fichiers au backend...`);
-      setIndexingStatus(`Indexation sur le serveur (${fileContents.length} fichiers)...`);
+      setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
 
       // Envoyer au backend pour indexation
       const response = await fetch(`${apiUrl}/index-directory`, {
@@ -991,7 +993,7 @@ const FlexiAnalyseApp: React.FC = () => {
     };
     setChatHistory((prev) => [...prev, newMessage]);
     setLoading(true);
-    setCurrentStatus(mode === 'local' ? 'Analyse de votre question...' : 'Traitement de votre requête...');
+    setCurrentStatus(mode === 'local' ? t('status.analyzing.question') : t('status.processing.request'));
 
     try {
       // Détermination automatique du mode si aucun fichier n'est sélectionné
@@ -1024,7 +1026,7 @@ const FlexiAnalyseApp: React.FC = () => {
         // S'assurer que le vector store backend est prêt avant la première requête locale
         if (directoryFiles.length > 0 && !isDirectoryIndexed) {
           console.log('📚 Vector store non prêt, démarrage indexation avant la requête locale...');
-          setIndexingStatus('Indexation des documents en cours...');
+          setIndexingStatus(t('status.indexing.documents'));
           try {
             await indexDirectoryContentOnBackend(directoryFiles);
             lastIndexedFilesRef.current = directoryFiles;
@@ -1039,7 +1041,7 @@ const FlexiAnalyseApp: React.FC = () => {
         }
 
         // Mettre à jour le statut pour l'analyse du fichier
-        setCurrentStatus(`Analyse du fichier ${selectedFile.name}...`);
+        setCurrentStatus(t('status.analyzing.file', { fileName: selectedFile.name }));
 
         // Traitement du fichier actuel
         const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
@@ -1116,9 +1118,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
       // Mettre à jour le statut selon le mode
       if (effectiveMode === 'local') {
-        setCurrentStatus('Recherche dans les documents...');
+        setCurrentStatus(t('status.searching.documents'));
       } else {
-        setCurrentStatus('Recherche d\'informations en ligne...');
+        setCurrentStatus(t('status.searching.online'));
       }
 
       const response = await fetch(`${apiUrl}/query`, {
@@ -1142,7 +1144,7 @@ const FlexiAnalyseApp: React.FC = () => {
       // Arrêter l'indicateur de recherche
       if (searchTimeout) clearTimeout(searchTimeout);
       setIsSearchingOnline(false);
-      setCurrentStatus('Génération de la réponse...');
+      setCurrentStatus(t('status.generating.response'));
       const aiResponse = data.response;
 
       console.log('📨 Réponse reçue du backend:', {
@@ -1253,14 +1255,14 @@ const FlexiAnalyseApp: React.FC = () => {
     // Ajouter le message à l'historique
     setChatHistory((prev) => [...prev, newMessage]);
     setLoading(true);
-    setCurrentStatus(mode === 'local' ? 'Analyse de votre question...' : 'Traitement de votre requête...');
+    setCurrentStatus(mode === 'local' ? t('status.analyzing.question') : t('status.processing.request'));
 
     try {
       // Mettre à jour le statut selon le mode
       if (mode === 'local' && selectedFile) {
-        setCurrentStatus(`Analyse du fichier ${selectedFile.name}...`);
+        setCurrentStatus(t('status.analyzing.file', { fileName: selectedFile.name }));
       } else {
-        setCurrentStatus('Recherche d\'informations en ligne...');
+        setCurrentStatus(t('status.searching.online'));
       }
 
       const response = await fetch(`${apiUrl}/query-stream`, {
@@ -1318,7 +1320,7 @@ const FlexiAnalyseApp: React.FC = () => {
                   
                   // Mettre à jour le statut si on commence à recevoir du contenu
                   if (accumulatedResponse.length > 0 && !jsonData.status) {
-                    setCurrentStatus('Génération de la réponse...');
+                    setCurrentStatus(t('status.generating.response'));
                   }
                   
                   // Mettre à jour l'interface en temps réel
@@ -1862,7 +1864,7 @@ const FlexiAnalyseApp: React.FC = () => {
           <div className="bg-white rounded-lg p-6 shadow-xl">
             <div className="flex items-center space-x-3">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-              <span className="text-gray-700 font-medium">Extraction des données structurées en cours...</span>
+              <span className="text-gray-700 font-medium">{t('status.extracting.structured')}</span>
             </div>
           </div>
         </div>
