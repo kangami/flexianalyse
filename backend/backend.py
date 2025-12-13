@@ -21,7 +21,24 @@ import time
 import re
 from datetime import datetime
 from auth import register_auth_routes, init_database
-from config import AuthConfig, FlaskConfig
+
+# Imports des modules refactorisés
+from config import (
+    AuthConfig, FlaskConfig, AIConfig,
+    MODEL_CONFIG, DEFAULT_MODEL, MISTRAL_MODEL, OLLAMA_MODELS, OLLAMA_API_URL
+)
+from utils.file_utils import extract_text_from_docx, extract_text_from_pdf
+from utils.translations import translations
+from services.api_clients import (
+    call_openai_api, call_mistral_api, call_ollama_api, 
+    stream_response, openai_client, get_model_config
+)
+from services.analysis_service import analyze_file_content, save_file_description
+from services.search_service import perform_online_search, search_serpapi, rerank_documents_with_llm
+from services.vector_store_service import (
+    vector_stores, embeddings, get_vector_store, 
+    create_vector_store, add_documents_to_vector_store
+)
 
 # Load environment variables
 load_dotenv()
@@ -37,99 +54,8 @@ vector_stores = {}
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Enhanced model configuration
-MODEL_CONFIG = {
-    "gpt-3.5-turbo": {
-        "name": "GPT-3.5 Turbo",
-        "provider": "OpenAI",
-        "model_id": "gpt-3.5-turbo",
-        "max_tokens": 500,
-        "description": "Fast and efficient for most tasks",
-        "cost_tier": "low",
-        "api_type": "chat"
-    },
-    "gpt-4o": {
-        "name": "GPT-4o",
-        "provider": "OpenAI", 
-        "model_id": "gpt-4o",
-        "max_tokens": 500,
-        "description": "Advanced reasoning and analysis",
-        "cost_tier": "high",
-        "api_type": "chat"
-    },
-    "gpt-5": {
-        "name": "GPT-5",
-        "provider": "OpenAI",
-        "model_id": "gpt-5",
-        "max_tokens": 500,
-        "description": "Complex reasoning, broad world knowledge, and code-heavy tasks",
-        "cost_tier": "premium",
-        "api_type": "responses",
-        "reasoning_effort": "medium",  # minimal, low, medium, high
-        "verbosity": "medium"  # low, medium, high
-    },
-    "gpt-5-mini": {
-        "name": "GPT-5 Mini",
-        "provider": "OpenAI",
-        "model_id": "gpt-5-mini",
-        "max_tokens": 500,
-        "description": "Cost-optimized reasoning and chat; balances speed, cost, and capability",
-        "cost_tier": "medium",
-        "api_type": "responses",
-        "reasoning_effort": "low",
-        "verbosity": "low"
-    },
-    "gpt-5-nano": {
-        "name": "GPT-5 Nano",
-        "provider": "OpenAI",
-        "model_id": "gpt-5-nano",
-        "max_tokens": 500,
-        "description": "High-throughput tasks, simple instruction-following or classification",
-        "cost_tier": "low",
-        "api_type": "responses",
-        "reasoning_effort": "minimal",
-        "verbosity": "low"
-    },
-    "mistral": {
-        "name": "Mistral Medium",
-        "provider": "Mistral AI",
-        "model_id": "mistral-medium-latest",
-        "max_tokens": 500,
-        "description": "Efficient multilingual model",
-        "cost_tier": "medium",
-        "api_type": "chat"
-    },
-    "llama3": {
-        "name": "Llama 3.2",
-        "provider": "Local",
-        "model_id": "llama3.2",
-        "max_tokens": 500,
-        "description": "Open-source local model",
-        "cost_tier": "free",
-        "api_type": "ollama"
-    },
-    # Keep compatibility with your existing naming
-    "openai": {
-        "name": "OpenAI GPT",
-        "provider": "OpenAI",
-        "model_id": "gpt-4o",
-        "max_tokens": 500,
-        "description": "Legacy OpenAI model",
-        "cost_tier": "medium",
-        "api_type": "chat"
-    }
-}
-
-# Config constants
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODELS = ["llama3.2", "llama3"]
-DEFAULT_MODEL = "mistral"  # Set Mistral as default (switched from GPT-3.5-Turbo due to API credit limit)
-MISTRAL_MODEL = "mistral-medium-latest"
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable not set")
+# Configuration des modèles importée depuis config.models
+# MODEL_CONFIG, DEFAULT_MODEL, MISTRAL_MODEL, OLLAMA_MODELS, OLLAMA_API_URL sont maintenant importés
 
 # Flask setup
 app = Flask(__name__)
@@ -149,16 +75,9 @@ def handle_preflight():
         response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
         return response
 
-# Initialize clients and components
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-# Utiliser le modèle d'embedding le plus récent disponible
-try:
-    embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY, model="text-embedding-3-small")
-    logger.info("Embeddings: text-embedding-3-small (meilleure qualité sémantique)")
-except Exception as e:
-    embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-    logger.info("Embeddings: text-embedding-ada-002 (fallback)")
-vector_store = None
+# Clients et composants initialisés dans les modules
+# openai_client, embeddings sont maintenant importés depuis services.api_clients et services.vector_store_service
+vector_store = None  # Gardé pour compatibilité avec le code existant
 
 # Cache setup
 cache = aiocache.SimpleMemoryCache()
@@ -169,7 +88,9 @@ if not os.path.exists(DESCRIPTIONS_FILE):
     with open(DESCRIPTIONS_FILE, 'w') as f:
         json.dump([], f)
 
-translations = {
+# Traductions importées depuis utils.translations
+# translations est maintenant importé
+_OLD_translations = {
     'en': {
         # Existing keys
         'analyze': 'Analyze',
@@ -451,28 +372,12 @@ translations = {
 # Description template
 description_template = "Je veux une reponse du genre: Le Fichier text.js a pour Objectif : ....."
 
-# Utility functions
-def extract_text_from_docx(file):
-    try:
-        doc = DocxDocument(BytesIO(file.read()))
-        text = [para.text for para in doc.paragraphs if para.text.strip()]
-        return '\n'.join(text)
-    except Exception as e:
-        return f"Error extracting text from .docx: {str(e)}"
+# Fonctions utilitaires importées depuis les modules
+# extract_text_from_docx, extract_text_from_pdf sont maintenant importés depuis utils.file_utils
+# get_model_config est maintenant importé depuis services.api_clients
 
-def extract_text_from_pdf(file):
-    try:
-        pdf_reader = PyPDF2.PdfReader(BytesIO(file.read()))
-        text = [page.extract_text() for page in pdf_reader.pages if page.extract_text()]
-        return '\n'.join(text)
-    except Exception as e:
-        return f"Error extracting text from .pdf: {str(e)}"
-
-def get_model_config(selected_model):
-    """Get model configuration, fallback to default if not found"""
-    return MODEL_CONFIG.get(selected_model, MODEL_CONFIG[DEFAULT_MODEL])
-
-def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_tokens_override=None):
+# call_openai_api est maintenant importé depuis services.api_clients
+def _OLD_call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_tokens_override=None):
     """
     Enhanced OpenAI API call supporting both Chat Completions and Responses API
     max_tokens_override: override la limite de tokens de la config du modèle
@@ -602,7 +507,8 @@ def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_t
     
     raise RuntimeError("[OpenAI] Max retries exceeded")
 
-def stream_response(prompt, selected_model="gpt-3.5-turbo"):
+# stream_response est maintenant importé depuis services.api_clients
+def _OLD_stream_response(prompt, selected_model="gpt-3.5-turbo"):
     """
     Génère une réponse en streaming pour n'importe quel modèle
     """
@@ -722,7 +628,8 @@ def stream_response(prompt, selected_model="gpt-3.5-turbo"):
         logger.error(f"Erreur streaming: {str(e)}")
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-def call_mistral_api(prompt, max_retries=3):
+# call_mistral_api est maintenant importé depuis services.api_clients
+def _OLD_call_mistral_api(prompt, max_retries=3):
     mistral_api_key = os.getenv("MISTRAL_API_KEY")
     if not mistral_api_key:
         raise ValueError("MISTRAL_API_KEY environment variable not set")
@@ -768,7 +675,8 @@ def call_mistral_api(prompt, max_retries=3):
 
     raise RuntimeError("[Mistral] Max retries exceeded")
 
-def call_ollama_api(prompt, selected_model="llama3", max_retries=3):
+# call_ollama_api est maintenant importé depuis services.api_clients
+def _OLD_call_ollama_api(prompt, selected_model="llama3", max_retries=3):
     """Enhanced Ollama API call"""
     model_config = get_model_config(selected_model)
     model_id = model_config["model_id"]
@@ -797,7 +705,8 @@ def call_ollama_api(prompt, selected_model="llama3", max_retries=3):
     
     raise RuntimeError("[Ollama] Max retries exceeded")
 
-async def analyze_file_content(file_content, file_name, is_binary=False, extension='', selected_model=DEFAULT_MODEL, language='en'):
+# analyze_file_content est maintenant importé depuis services.analysis_service
+async def _OLD_analyze_file_content(file_content, file_name, is_binary=False, extension='', selected_model=DEFAULT_MODEL, language='en'):
     cache_key = f"desc_{file_name}_{selected_model}_{language}"
     cached = await cache.get(cache_key)
     if cached:
@@ -1107,7 +1016,8 @@ IMPORTANT:
             "suggested_actions": actions_list
         }
 
-async def save_file_description(file_name, description):
+# save_file_description est maintenant importé depuis services.analysis_service
+async def _OLD_save_file_description(file_name, description):
     with open(DESCRIPTIONS_FILE, 'r') as f:
         descriptions = json.load(f)
     descriptions.append({"file_name": file_name, "description": description})
@@ -1287,10 +1197,11 @@ async def upload_files():
         "model_config": MODEL_CONFIG.get(selected_model, {})
     }), 200
 
-def perform_online_search(query: str, language: str = 'en') -> str:
-    return search_serpapi(query, language)
+# perform_online_search et search_serpapi sont maintenant importés depuis services.search_service
+def _OLD_perform_online_search(query: str, language: str = 'en') -> str:
+    return _OLD_search_serpapi(query, language)
 
-def search_serpapi(query: str, language: str = 'en') -> str:
+def _OLD_search_serpapi(query: str, language: str = 'en') -> str:
     """
     SerpAPI - 100 recherches gratuites/mois
     Inscription: https://serpapi.com/
@@ -1339,7 +1250,8 @@ def search_serpapi(query: str, language: str = 'en') -> str:
     except Exception as e:
         raise Exception(f"Erreur SerpAPI: {str(e)}")
 
-async def rerank_documents_with_llm(query: str, documents: List[Document], model: str = DEFAULT_MODEL) -> List[Document]:
+# rerank_documents_with_llm est maintenant importé depuis services.search_service
+async def _OLD_rerank_documents_with_llm(query: str, documents: List[Document], model: str = DEFAULT_MODEL) -> List[Document]:
     """
     Re-rank les documents avec un LLM pour améliorer la pertinence sémantique.
     Le LLM évalue chaque document par rapport à la requête et les trie par pertinence.
