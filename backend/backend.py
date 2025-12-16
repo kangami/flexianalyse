@@ -35,6 +35,7 @@ from services.api_clients import (
 )
 from services.analysis_service import analyze_file_content, save_file_description
 from services.search_service import perform_online_search, search_serpapi, rerank_documents_with_llm
+from services.hybrid_retrieval import hybrid_retrieve_documents
 from services.vector_store_service import (
     vector_stores, embeddings, get_vector_store, 
     create_vector_store, add_documents_to_vector_store
@@ -1626,6 +1627,30 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
     Utilise l'historique de conversation pour détecter les pronoms (he, she, his, her).
     """
     try:
+        # Enterprise-style hybrid retrieval (deterministic): semantic + lexical reranking.
+        # This is more precise than raw similarity_search, and avoids LLM reranking drift.
+        docs, debug = hybrid_retrieve_documents(
+            vector_store=vector_store,
+            query=user_query,
+            k_candidates=70,
+            k_final=20,
+            semantic_weight=0.60,
+            bm25_weight=0.30,
+            exact_weight=0.10,
+        )
+        if docs:
+            logger.info(f"🔎 search_semantic_documents_sync hybrid selected {len(docs)} docs | top={debug.get('top', [])}")
+            out: List[Dict] = []
+            seen = set()
+            for d in docs:
+                fn = d.metadata.get("fileName") or d.metadata.get("file_name") or d.metadata.get("source") or "document_vectorstore"
+                key = (str(fn).lower(), (d.page_content or "")[:120])
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({"fileName": fn, "content": (d.page_content or "")[:2500]})
+            return out
+
         # DÉTECTION DES NOMS DE PERSONNES dans la requête ET l'historique
         person_names = set()
         words = user_query.split()
@@ -3220,252 +3245,18 @@ async def handle_query():
                     session_store = vector_stores[session_id]
                     session_vector_store = session_store['store']
                     
-                    logger.info(f"🔍 Recherche sémantique améliorée dans le vector store de la session {session_id}")
-                    
-                    # RECHERCHE 1: Sémantique pure (similarité vectorielle)
-                    search_results_with_scores = session_vector_store.similarity_search_with_score(
-                        user_query, 
-                        k=20  # Récupère 20 candidats pour avoir plus de contexte
+                    logger.info(f"🔍 Hybrid retrieval (semantic + lexical) dans le vector store session {session_id}")
+
+                    relevant_docs, retrieval_debug = hybrid_retrieve_documents(
+                        vector_store=session_vector_store,
+                        query=user_query,
+                        k_candidates=70,
+                        k_final=12,
+                        semantic_weight=0.60,
+                        bm25_weight=0.30,
+                        exact_weight=0.10,
                     )
-                    
-                    # RECHERCHE 2: Recherche par mots-clés ET par nom de fichier (CRITIQUE pour capturer les noms propres)
-                    # Extraire les mots-clés importants de la requête (y compris les noms propres courts)
-                    query_keywords = set()
-                    query_lower = user_query.lower()
-                    # Ajouter tous les mots significatifs (plus de 2 caractères pour capturer "karim", "live", etc.)
-                    for word in user_query.split():
-                        clean_word = word.strip('.,!?;:()[]{}"\'').lower()
-                        if len(clean_word) > 2:  # Réduit à 2 pour capturer "karim", "live", etc.
-                            query_keywords.add(clean_word)
-                    
-                    logger.info(f"🔑 Mots-clés extraits de la requête: {query_keywords}")
-                    
-                    # RECHERCHE 3: Recherche explicite par nom de fichier (TRÈS IMPORTANT)
-                    # Si la requête contient un nom (comme "karim"), forcer la récupération de tous les fichiers contenant ce nom
-                    filename_matches = []
-                    try:
-                        # Méthode 1: Recherche avec une requête très large pour récupérer beaucoup de documents
-                        all_docs_from_store = session_vector_store.similarity_search("document file content", k=1000)
-                        
-                        # Méthode 2: Si on peut accéder au docstore directement, l'utiliser (plus fiable)
-                        if hasattr(session_vector_store, 'docstore') and hasattr(session_vector_store.docstore, '_dict'):
-                            all_docs_dict = session_vector_store.docstore._dict
-                            logger.info(f"📦 Accès direct au docstore: {len(all_docs_dict)} documents disponibles")
-                            # Convertir les valeurs du dict en documents
-                            all_docs_from_store = list(all_docs_dict.values()) if all_docs_dict else all_docs_from_store
-                        
-                        logger.info(f"🔍 Recherche dans {len(all_docs_from_store)} documents pour correspondance de nom")
-                        
-                        # Filtrer par nom de fichier si la requête contient des mots-clés
-                        for doc in all_docs_from_store:
-                            file_name_from_meta = (doc.metadata.get("fileName") or doc.metadata.get("file_name") or "").lower()
-                            # Si le nom du fichier contient un mot-clé de la requête, l'inclure FORCÉMENT
-                            for keyword in query_keywords:
-                                if keyword in file_name_from_meta:
-                                    filename_matches.append(doc)
-                                    logger.info(f"📁 Fichier correspondant trouvé par nom: {doc.metadata.get('fileName', 'N/A')} (mot-clé: '{keyword}')")
-                                    break  # Ne pas ajouter plusieurs fois le même document
-                        
-                        logger.info(f"📂 {len(filename_matches)} fichiers trouvés par correspondance de nom de fichier")
-                    except Exception as e:
-                        logger.warning(f"Erreur lors de la recherche par nom de fichier: {str(e)}")
-                    
-                    # Recherche par mots-clés dans le contenu
-                    keyword_matches = []
-                    all_docs_in_store = session_vector_store.docstore._dict if hasattr(session_vector_store, 'docstore') else {}
-                    
-                    # Si on peut accéder aux documents, chercher par mots-clés dans le contenu
-                    try:
-                        # Utiliser similarity_search avec la requête originale pour récupérer plus de variété
-                        keyword_results = session_vector_store.similarity_search(
-                            user_query,
-                            k=15
-                        )
-                        # Combiner avec les résultats sémantiques
-                        all_candidate_docs = {}
-                        for doc, score in search_results_with_scores:
-                            doc_id = id(doc)  # Utiliser l'ID du document comme clé
-                            if doc_id not in all_candidate_docs:
-                                all_candidate_docs[doc_id] = (doc, 1 - score)  # Score de similarité
-                        
-                        for doc in keyword_results:
-                            doc_id = id(doc)
-                            if doc_id not in all_candidate_docs:
-                                all_candidate_docs[doc_id] = (doc, 0.5)  # Score moyen pour résultats mots-clés
-                            else:
-                                # Augmenter le score si trouvé par les deux méthodes
-                                doc_obj, current_score = all_candidate_docs[doc_id]
-                                all_candidate_docs[doc_id] = (doc_obj, min(current_score + 0.2, 1.0))
-                        
-                        # AJOUT CRITIQUE: Forcer l'inclusion des fichiers trouvés par nom (score élevé)
-                        for doc in filename_matches:
-                            doc_id = id(doc)
-                            if doc_id not in all_candidate_docs:
-                                # Score très élevé pour les fichiers trouvés par nom (priorité maximale)
-                                all_candidate_docs[doc_id] = (doc, 0.95)
-                                logger.info(f"⭐ Fichier ajouté avec priorité haute: {doc.metadata.get('fileName', 'N/A')}")
-                            else:
-                                # Augmenter encore plus le score si déjà présent
-                                doc_obj, current_score = all_candidate_docs[doc_id]
-                                all_candidate_docs[doc_id] = (doc_obj, min(current_score + 0.3, 1.0))
-                                logger.info(f"⬆️ Score augmenté pour fichier par nom: {doc.metadata.get('fileName', 'N/A')}")
-                        
-                        combined_docs = list(all_candidate_docs.values())
-                    except Exception as e:
-                        logger.warning(f"Recherche hybride partielle: {str(e)}")
-                        combined_docs = [(doc, 1 - distance) for doc, distance in search_results_with_scores]
-                        # Ajouter quand même les fichiers trouvés par nom
-                        for doc in filename_matches:
-                            combined_docs.append((doc, 0.95))
-                    
-                    # DÉTECTION DES NOMS DE PERSONNES dans la requête ET l'historique (pour les pronoms)
-                    person_names = set()
-                    words = user_query.split()
-                    
-                    # Détecter les pronoms et chercher le nom dans l'historique
-                    query_lower = user_query.lower()
-                    has_pronoun = any(pronoun in query_lower for pronoun in ['he', 'she', 'his', 'her', 'him', 'they', 'their'])
-                    
-                    if has_pronoun and conversation_history:
-                        # Chercher le dernier nom mentionné dans l'historique
-                        for turn in reversed(conversation_history):
-                            content = (turn.get("content") or "").lower()
-                            # Chercher les noms dans l'historique
-                            for name in ['karim', 'dominique', 'essome', 'ngami']:
-                                if name in content:
-                                    person_names.add(name)
-                                    logger.info(f"👤 Nom détecté depuis l'historique (pronoun détecté): {name}")
-                                    break
-                            if person_names:
-                                break
-                    
-                    # Détecter les noms dans la requête actuelle
-                    for i, word in enumerate(words):
-                        clean_word = word.strip('.,!?;:()[]{}"\'').strip()
-                        if clean_word and clean_word[0].isupper() and len(clean_word) > 2:
-                            person_names.add(clean_word.lower())
-                        if i > 0 and words[i-1].lower() in ['his', 'her', 'their', 'karim', 'dominique', 'about', 'for']:
-                            if len(clean_word) > 2:
-                                person_names.add(clean_word.lower())
-                    
-                    common_names = ['karim', 'dominique', 'essome', 'ngami']
-                    for name in common_names:
-                        if name in query_lower:
-                            person_names.add(name)
-                    
-                    logger.info(f"👤 Noms de personnes détectés (requête + historique): {person_names}")
-                    
-                    # Filtrer par score de similarité (seuil très réduit pour récupérer le maximum de documents)
-                    # ET rechercher par mots-clés pour capturer les documents contenant les termes de la requête
-                    filtered_docs = []
-                    query_words = [w.strip('.,!?;:()[]{}"\'').lower() for w in user_query.split() if len(w.strip('.,!?;:()[]{}"\'')) > 2]
-                    
-                    # Liste des noms de personnes connus pour exclusion
-                    known_person_names = {
-                        'karim': ['dominique', 'essome'],
-                        'dominique': ['karim', 'ngami'],
-                        'essome': ['karim', 'ngami'],
-                        'ngami': ['dominique', 'essome']
-                    }
-                    
-                    # Déterminer les noms à exclure
-                    names_to_exclude = set()
-                    for detected_name in person_names:
-                        if detected_name in known_person_names:
-                            names_to_exclude.update(known_person_names[detected_name])
-                    
-                    logger.info(f"🚫 Noms à exclure (autres personnes): {names_to_exclude}")
-                    
-                    # Créer un set des IDs des fichiers trouvés par nom pour vérification rapide
-                    filename_match_ids = {id(doc) for doc in filename_matches}
-                    
-                    for doc, similarity_score in combined_docs:
-                        doc_id = id(doc)
-                        doc_content_lower = doc.page_content[:500].lower()  # Vérifier dans le début du contenu
-                        file_name_lower = (doc.metadata.get("fileName") or doc.metadata.get("file_name") or "").lower()
-                        
-                        # EXCLUSION STRICTE: Si un nom de personne est détecté, exclure les fichiers d'autres personnes
-                        should_exclude = False
-                        if person_names:
-                            # RÈGLE 1: Exclure TOUJOURS les fichiers contenant un nom à exclure (même avec score élevé)
-                            for exclude_name in names_to_exclude:
-                                if exclude_name in file_name_lower:
-                                    should_exclude = True
-                                    logger.info(f"❌ Fichier EXCLU (nom de fichier contient '{exclude_name}'): {doc.metadata.get('fileName', 'N/A')}")
-                                    break
-                                # Vérifier aussi dans le contenu (premiers 200 caractères pour être plus strict)
-                                if exclude_name in doc_content_lower[:200]:
-                                    should_exclude = True
-                                    logger.info(f"❌ Fichier EXCLU (contenu contient '{exclude_name}'): {doc.metadata.get('fileName', 'N/A')}")
-                                    break
-                            
-                            # RÈGLE 2: Si un nom de personne est détecté, ne garder QUE les fichiers qui contiennent ce nom
-                            if not should_exclude:
-                                file_contains_person_name = any(name in file_name_lower for name in person_names)
-                                # Vérifier aussi dans le contenu si pas dans le nom
-                                if not file_contains_person_name:
-                                    file_contains_person_name = any(name in doc_content_lower[:300] for name in person_names)
-                                
-                                if not file_contains_person_name:
-                                    # Si aucun nom de personne n'est dans le fichier, EXCLURE TOUJOURS (même avec score élevé)
-                                    should_exclude = True
-                                    logger.info(f"⚠️ Fichier EXCLU (ne contient AUCUN nom de la personne recherchée): {doc.metadata.get('fileName', 'N/A')}")
-                        
-                        if should_exclude:
-                            continue  # Exclure ce document
-                        
-                        # Vérifier si le document contient des mots-clés de la requête dans le contenu
-                        keyword_matches = sum(1 for word in query_words if word in doc_content_lower)
-                        # Vérifier aussi dans le nom de fichier
-                        filename_keyword_matches = sum(1 for word in query_words if word in file_name_lower)
-                        
-                        keyword_bonus = min(keyword_matches * 0.15, 0.4)  # Bonus jusqu'à 0.4 pour correspondances de mots-clés
-                        filename_bonus = min(filename_keyword_matches * 0.25, 0.5)  # Bonus encore plus élevé pour correspondance dans le nom
-                        adjusted_score = similarity_score + keyword_bonus + filename_bonus
-                        
-                        # CRITIQUE: Toujours inclure les fichiers trouvés par nom, même avec score bas
-                        # OU si score ajusté >= 0.45 OU si contient au moins 2 mots-clés
-                        if doc_id in filename_match_ids:
-                            # Bonus supplémentaire si le fichier contient le nom de la personne détectée
-                            person_name_bonus = 0.0
-                            if person_names:
-                                for name in person_names:
-                                    if name in file_name_lower:
-                                        person_name_bonus = 0.15
-                                        break
-                            filtered_docs.append((doc, max(adjusted_score, 0.9) + person_name_bonus))
-                            logger.info(f"✅ Fichier inclus (correspond au nom): {doc.metadata.get('fileName', 'N/A')}")
-                        elif adjusted_score >= 0.45 or keyword_matches >= 2 or filename_keyword_matches >= 1:
-                            filtered_docs.append((doc, adjusted_score))
-                    
-                    # Trier par score décroissant
-                    filtered_docs.sort(key=lambda x: x[1], reverse=True)
-                    
-                    # AMÉLIORATION: Augmenter le nombre de documents récupérés pour améliorer la précision
-                    # Si un nom de personne est détecté, limiter aux top 20 fichiers les plus pertinents
-                    # Sinon, prendre jusqu'à 30 documents pour avoir plus de contexte
-                    max_docs = 20 if person_names else 30
-                    top_docs = [doc for doc, score in filtered_docs[:max_docs]]
-                    
-                    logger.info(f"📊 {len(top_docs)} documents finaux sélectionnés après filtrage strict par nom")
-                    
-                    logger.info(f"📊 Recherche hybride: {len(search_results_with_scores)} sémantiques + {len(keyword_results) if 'keyword_results' in locals() else 0} mots-clés → {len(filtered_docs)} pertinents (score≥0.55) → {len(top_docs)} sélectionnés")
-                    
-                    # Re-ranking avec le LLM pour affiner la pertinence
-                    if len(top_docs) > 5:
-                        try:
-                            reranked_docs = await rerank_documents_with_llm(
-                                user_query, 
-                                top_docs, 
-                                selected_model
-                            )
-                            relevant_docs = reranked_docs[:12]  # Top 12 après re-ranking (augmenté)
-                            logger.info(f"🎯 Re-ranking LLM: {len(relevant_docs)} documents finaux sélectionnés")
-                        except Exception as rerank_error:
-                            logger.warning(f"Re-ranking échoué, utilisation des résultats initiaux: {str(rerank_error)}")
-                            relevant_docs = top_docs[:12]
-                    else:
-                        relevant_docs = top_docs
+                    logger.info(f"🎯 Hybrid retrieval selected {len(relevant_docs)} docs | debug={retrieval_debug.get('top', [])}")
                     
                     # Ajout des documents pertinents au contexte avec métadonnées enrichies
                     # Éviter les doublons en utilisant un set de file_name + début du contenu
