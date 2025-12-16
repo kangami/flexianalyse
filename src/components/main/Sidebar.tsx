@@ -1187,14 +1187,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 
               </div>
 
-              {/* Export button */}
-              <button className="w-full flex items-center space-x-3 p-3 text-left bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span className="font-medium text-gray-700">{t('sidebar.export')}</span>
-              </button>
-
               {/* Model dropdown */}
               <div className="relative" ref={modelDropdownRef}>
                 <button
@@ -1274,48 +1266,169 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
 
-            {/* Explorer Section */}
-            <div className="flex-1 min-h-0">
-              <h3 className="text-sm font-semibold mb-3 text-gray-700">EXPLORER</h3>
-              
-              <div className="h-full overflow-y-auto">
-                {isLoading ? (
-                  <div className="flex items-center text-blue-600 text-sm">
-                    <svg
-                      className="animate-spin h-5 w-5 mr-2 text-blue-600"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Loading files...
-                  </div>
-                ) : files.length > 0 ? (
-                  <ul className="text-sm text-gray-600">
-                    {renderFileTree(files)}
-                  </ul>
-                ) : (
-                  <p className="text-gray-500 text-sm">
-                    {t('sidebar.noFiles')}
-                  </p>
-                )}
-              </div>
+            {/* Sections expandables comme dans le desktop */}
+            <div className="flex-1 min-h-0 overflow-y-auto mt-4">
+              {/* Section 1: EXPLORER - Fichiers/Répertoires */}
+              <ExpandableSection
+                title="EXPLORER"
+                icon={<FileText size={16} className="text-gray-600" />}
+                isExpanded={isExplorerExpanded}
+                onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
+              >
+                <div className="max-h-48 overflow-y-auto">
+                  {isLoading ? (
+                    <div className="flex items-center text-blue-600 text-sm py-2">
+                      <svg
+                        className="animate-spin h-4 w-4 mr-2"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      Loading files...
+                    </div>
+                  ) : files.length > 0 ? (
+                    <ul className="text-sm text-gray-600">
+                      {renderFileTree(files)}
+                    </ul>
+                  ) : (
+                    <p className="text-gray-500 text-sm py-2">
+                      {t('sidebar.noFiles')}
+                    </p>
+                  )}
+                </div>
+              </ExpandableSection>
+
+              {/* Section 2: SEARCH - Historique de recherche */}
+              <ExpandableSection
+                title="SEARCH"
+                icon={<Search size={16} className="text-gray-600" />}
+                isExpanded={isSearchExpanded}
+                onToggle={() => setIsSearchExpanded(!isSearchExpanded)}
+              >
+                <div className="max-h-48 overflow-y-auto">
+                  {searchHistory.length > 0 ? (
+                    <div className="space-y-1">
+                      {searchHistory.map((query, index) => (
+                        <button
+                          key={index}
+                          onClick={() => {
+                            // Permettre de cliquer sur une recherche pour la réutiliser
+                            // Cette fonctionnalité peut être ajoutée plus tard
+                          }}
+                          className="w-full text-left px-2 py-1.5 rounded text-xs text-gray-600 hover:bg-gray-50 transition-colors truncate"
+                          title={query}
+                        >
+                          {query}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm py-2">
+                      No search history
+                    </p>
+                  )}
+                </div>
+              </ExpandableSection>
+
+              {/* Section 3: USER INFO - Informations utilisateur */}
+              <ExpandableSection
+                title="USER INFO"
+                icon={<User size={16} className="text-gray-600" />}
+                isExpanded={isUserInfoExpanded}
+                onToggle={() => setIsUserInfoExpanded(!isUserInfoExpanded)}
+              >
+                <div className="max-h-40 overflow-y-auto">
+                  {isAuthenticated && user ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        {user.avatar && (
+                          <img
+                            src={user.avatar}
+                            alt={user.name || user.email}
+                            className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-gray-800 text-sm font-medium truncate">
+                            {user.name || user.email}
+                          </div>
+                          {user.name && (
+                            <div className="text-gray-600 text-xs truncate">
+                              {user.email}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {user.plan && (
+                        <div className="text-gray-600 text-xs">
+                          Plan: <span className="font-medium capitalize">{user.plan}</span>
+                        </div>
+                      )}
+                      {user.provider && (
+                        <div className="text-gray-600 text-xs">
+                          Provider: {user.provider}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-gray-500 text-sm py-2">
+                        Not authenticated
+                      </p>
+                      <button
+                        onClick={() => setIsLoginModalOpen(true)}
+                        className="w-full px-3 py-2 rounded-md text-sm font-medium transition-colors bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Sign in
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </ExpandableSection>
             </div>
           </div>
         </div>
+      )}
+      
+      {/* Login Modal et Sign Up Modal - également pour mobile */}
+      {!isSignUpModalOpen && (
+        <LoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          onSwitchToSignUp={() => {
+            setIsLoginModalOpen(false);
+            setTimeout(() => {
+              setIsSignUpModalOpen(true);
+            }, 300);
+          }}
+        />
+      )}
+      
+      {!isLoginModalOpen && (
+        <SignUpModal
+          isOpen={isSignUpModalOpen}
+          onClose={() => setIsSignUpModalOpen(false)}
+          onSwitchToLogin={() => {
+            setIsSignUpModalOpen(false);
+            setTimeout(() => {
+              setIsLoginModalOpen(true);
+            }, 300);
+          }}
+        />
       )}
     </div>
     <input
@@ -1536,39 +1649,41 @@ const Sidebar: React.FC<SidebarProps> = ({
             isExpanded={isExplorerExpanded}
             onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
           >
-            {isLoading ? (
-              <div className={`flex items-center ${getThemeClasses().textSecondary} text-sm py-2`}>
-                <svg
-                  className="animate-spin h-4 w-4 mr-2"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Loading files...
-              </div>
-            ) : files.length > 0 ? (
-              <ul className={`text-sm ${getThemeClasses().textSecondary}`}>
-                {renderFileTree(files)}
-              </ul>
-            ) : (
-              <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                {t('sidebar.noFiles')}
-              </p>
-            )}
+            <div className="max-h-48 overflow-y-auto">
+              {isLoading ? (
+                <div className={`flex items-center ${getThemeClasses().textSecondary} text-sm py-2`}>
+                  <svg
+                    className="animate-spin h-4 w-4 mr-2"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  Loading files...
+                </div>
+              ) : files.length > 0 ? (
+                <ul className={`text-sm ${getThemeClasses().textSecondary}`}>
+                  {renderFileTree(files)}
+                </ul>
+              ) : (
+                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                  {t('sidebar.noFiles')}
+                </p>
+              )}
+            </div>
           </ExpandableSection>
         )}
 
@@ -1580,27 +1695,29 @@ const Sidebar: React.FC<SidebarProps> = ({
             isExpanded={isSearchExpanded}
             onToggle={() => setIsSearchExpanded(!isSearchExpanded)}
           >
-            {searchHistory.length > 0 ? (
-              <div className="space-y-1">
-                {searchHistory.map((query, index) => (
-                  <button
-                    key={index}
-                    onClick={() => {
-                      // Permettre de cliquer sur une recherche pour la réutiliser
-                      // Cette fonctionnalité peut être ajoutée plus tard
-                    }}
-                    className={`w-full text-left px-2 py-1.5 rounded text-xs ${getThemeClasses().textSecondary} ${getThemeClasses().hover} transition-colors truncate`}
-                    title={query}
-                  >
-                    {query}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                No search history
-              </p>
-            )}
+            <div className="max-h-48 overflow-y-auto">
+              {searchHistory.length > 0 ? (
+                <div className="space-y-1">
+                  {searchHistory.map((query, index) => (
+                    <button
+                      key={index}
+                      onClick={() => {
+                        // Permettre de cliquer sur une recherche pour la réutiliser
+                        // Cette fonctionnalité peut être ajoutée plus tard
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded text-xs ${getThemeClasses().textSecondary} ${getThemeClasses().hover} transition-colors truncate`}
+                      title={query}
+                    >
+                      {query}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                  No search history
+                </p>
+              )}
+            </div>
           </ExpandableSection>
         )}
 
@@ -1612,57 +1729,59 @@ const Sidebar: React.FC<SidebarProps> = ({
             isExpanded={isUserInfoExpanded}
             onToggle={() => setIsUserInfoExpanded(!isUserInfoExpanded)}
           >
-            {isAuthenticated && user ? (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  {user.avatar && (
-                    <img
-                      src={user.avatar}
-                      alt={user.name || user.email}
-                      className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
-                    />
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className={`${getThemeClasses().text} text-sm font-medium truncate`}>
-                      {user.name || user.email}
-                    </div>
-                    {user.name && (
-                      <div className={`${getThemeClasses().textSecondary} text-xs truncate`}>
-                        {user.email}
-                      </div>
+            <div className="max-h-40 overflow-y-auto">
+              {isAuthenticated && user ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    {user.avatar && (
+                      <img
+                        src={user.avatar}
+                        alt={user.name || user.email}
+                        className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
+                      />
                     )}
+                    <div className="flex-1 min-w-0">
+                      <div className={`${getThemeClasses().text} text-sm font-medium truncate`}>
+                        {user.name || user.email}
+                      </div>
+                      {user.name && (
+                        <div className={`${getThemeClasses().textSecondary} text-xs truncate`}>
+                          {user.email}
+                        </div>
+                      )}
+                    </div>
                   </div>
+                  {user.plan && (
+                    <div className={`${getThemeClasses().textSecondary} text-xs`}>
+                      Plan: <span className="font-medium capitalize">{user.plan}</span>
+                    </div>
+                  )}
+                  {user.provider && (
+                    <div className={`${getThemeClasses().textSecondary} text-xs`}>
+                      Provider: {user.provider}
+                    </div>
+                  )}
                 </div>
-                {user.plan && (
-                  <div className={`${getThemeClasses().textSecondary} text-xs`}>
-                    Plan: <span className="font-medium capitalize">{user.plan}</span>
-                  </div>
-                )}
-                {user.provider && (
-                  <div className={`${getThemeClasses().textSecondary} text-xs`}>
-                    Provider: {user.provider}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                  Not authenticated
-                </p>
-                <button
-                  onClick={() => setIsLoginModalOpen(true)}
-                  className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    theme === 'white' 
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                      : theme === 'dark'
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-blue-500 text-white hover:bg-blue-600'
-                  }`}
-                >
-                  Sign in
-                </button>
-              </div>
-            )}
+              ) : (
+                <div className="space-y-2">
+                  <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
+                    Not authenticated
+                  </p>
+                  <button
+                    onClick={() => setIsLoginModalOpen(true)}
+                    className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      theme === 'white' 
+                        ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                        : theme === 'dark'
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                    }`}
+                  >
+                    Sign in
+                  </button>
+                </div>
+              )}
+            </div>
           </ExpandableSection>
         )}
       </div>

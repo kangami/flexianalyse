@@ -216,40 +216,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         throw new Error('Google Identity Services non disponible');
       }
 
-      // Configuration compatible FedCM selon la documentation Google
+      // Configuration pour afficher directement le sélecteur de compte
       window.google.accounts.id.initialize({
         client_id: googleClientId,
         callback: handleGoogleResponse,
         auto_select: false,
         cancel_on_tap_outside: true,
-        // Opt-in to FedCM pour éviter les avertissements
-        use_fedcm_for_prompt: true,
-        // Configuration pour le moment d'affichage
-        moment_callback: (promptMomentNotification: any) => {
-          console.log('Moment notification:', promptMomentNotification);
-          
-          // Gestion des différents statuts selon la documentation FedCM
-          if (promptMomentNotification.isNotDisplayed()) {
-            console.log('Prompt non affiché - raison:', promptMomentNotification.getNotDisplayedReason());
-            
-            // Si le prompt n'est pas affiché, utiliser le bouton de fallback
-            showGoogleButton();
-          } else if (promptMomentNotification.isSkippedMoment()) {
-            console.log('Moment ignoré - raison:', promptMomentNotification.getSkippedReason());
-            
-            // Moment ignoré, proposer le bouton
-            showGoogleButton();
-          } else if (promptMomentNotification.isDismissedMoment()) {
-            console.log('Moment fermé - raison:', promptMomentNotification.getDismissedReason());
-            
-            // L'utilisateur a fermé, on peut proposer le bouton plus tard
-            setAuthState(prev => ({ ...prev, isLoading: false }));
-          }
-        }
       });
 
-      // Déclencher le prompt One Tap
-      window.google.accounts.id.prompt();
+      // Utiliser prompt() pour déclencher le sélecteur de compte
+      // Cela affichera le popup "Choose an account" comme dans l'image
+      window.google.accounts.id.prompt((notification: any) => {
+        // Si le prompt n'est pas affiché, utiliser le bouton de fallback
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          console.log('Prompt non affiché, utilisation du bouton de fallback');
+          showGoogleButton();
+        } else if (notification.isDismissedMoment()) {
+          console.log('Prompt fermé par l\'utilisateur');
+          setAuthState(prev => ({ ...prev, isLoading: false }));
+        }
+      });
 
     } catch (error) {
       console.error('Erreur Google:', error);
