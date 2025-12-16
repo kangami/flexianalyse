@@ -41,6 +41,8 @@ interface ChatPanelProps {
   isFileContentVisible?: boolean;
   setIsFileContentVisible?: (visible: boolean) => void;
   isProcessingDrop?: boolean;
+  isMobile?: boolean;
+  onFileSelect?: (file: File, details: { content: string | ArrayBuffer; description: string }) => void;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -59,7 +61,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   currentStatus = '',
   isFileContentVisible = false,
   setIsFileContentVisible,
-  isProcessingDrop = false
+  isProcessingDrop = false,
+  isMobile = false,
+  onFileSelect
 }) => {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
@@ -192,6 +196,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           onSuggestedActionClick={onSuggestedActionClick}
           isFileContentVisible={isFileContentVisible}
           setIsFileContentVisible={setIsFileContentVisible}
+          isMobile={isMobile}
+          onFileSelect={onFileSelect}
         />
       </div>
     </div>

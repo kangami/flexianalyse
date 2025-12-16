@@ -95,10 +95,10 @@ const QueryForm: React.FC<QueryFormProps> = ({
         e.preventDefault();
         if (query.trim() && !loading) {
             // Vérifier la limite de requêtes pour les utilisateurs non connectés
-            /*if (!isAuthenticated && !checkQueryLimit()) {
+            if (!isAuthenticated && !checkQueryLimit()) {
                 setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
                 return;
-            }*/         
+            }         
             onQuerySubmit(query, researchMode);
             setQuery('');
         }
@@ -108,12 +108,12 @@ const QueryForm: React.FC<QueryFormProps> = ({
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             // Vérifier la limite avant de soumettre
-            /*if (query.trim() && !loading) {
+            if (query.trim() && !loading) {
                 if (!isAuthenticated && !checkQueryLimit()) {
                     setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
                     return;
                 }
-            }*/
+            }
             handleSubmit(e);
         }
     };

@@ -42,6 +42,9 @@ interface ResponseDisplayProps {
   isFileContentVisible?: boolean;
   setIsFileContentVisible?: (visible: boolean) => void;
   language?: 'en' | 'fr' | 'es';
+  // Props pour le bouton Select File sur mobile
+  isMobile?: boolean;
+  onFileSelect?: (file: File, details: { content: string | ArrayBuffer; description: string }) => void;
 }
 
 const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
@@ -61,7 +64,9 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
   onSuggestedActionClick,
   isFileContentVisible = false,
   setIsFileContentVisible,
-  language = 'en'
+  language = 'en',
+  isMobile = false,
+  onFileSelect
 }) => {
   const { t } = useLanguage();
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -255,9 +260,78 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
     };
   }, [enableTextSelection, onTextSelect, availableEditableFiles]);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const handleFileSelectClick = () => {
+    fileInputRef.current?.click();
+  };
+  
+  const handleFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0 || !onFileSelect) return;
+    
+    const file = files[0];
+    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    try {
+      let content: string | ArrayBuffer;
+      if (extension === '.pdf' || extension === '.docx') {
+        const arrayBuffer = await file.arrayBuffer();
+        content = arrayBuffer;
+      } else {
+        content = await file.text();
+      }
+      
+      onFileSelect(file, { content, description: file.name });
+    } catch (error) {
+      console.error('Error reading file:', error);
+    } finally {
+      // Reset input to allow selecting the same file again
+      if (event.target) {
+        event.target.value = '';
+      }
+    }
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-3 py-1 pb-2 smooth-scroll pr-2" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e0 #f7fafc' }}>
+      {/* Input file caché */}
+      {isMobile && onFileSelect && (
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileInputChange}
+          className="hidden"
+          accept=".pdf,.docx,.txt,.md,.java,.py,.js,.ts,.cpp,.c,.h,.rb,.go,.php,.html,.css,.scss,.jsx,.tsx,.sql"
+        />
+      )}
+      
+      <div className="flex-1 overflow-y-auto px-3 py-1 pb-2 smooth-scroll pr-2 relative" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e0 #f7fafc' }}>
+        {/* Bouton "Select File" centré sur mobile (dans la zone de chat, sans QueryForm) */}
+        {isMobile && onFileSelect && chatHistory.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <button
+              onClick={handleFileSelectClick}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 font-medium transition-colors pointer-events-auto"
+            >
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              <span>Select File</span>
+            </button>
+          </div>
+        )}
+        
         <div className="mx-auto w-full max-w-4xl">
         {/* Afficher le statut même s'il n'y a pas encore de message dans le chat */}
         {loading && currentStatus && chatHistory.length === 0 && (
