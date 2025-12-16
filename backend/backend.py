@@ -3087,10 +3087,10 @@ async def index_directory():
             logger.info("✅ Utilisation de text-embedding-3-small pour meilleure qualité sémantique")
         except Exception as e:
             logger.warning(f"text-embedding-3-small non disponible, fallback vers ada-002: {str(e)}")
-        embeddings = OpenAIEmbeddings(
-            api_key=openai_api_key,
-            model="text-embedding-ada-002"
-        )
+            embeddings = OpenAIEmbeddings(
+                api_key=openai_api_key,
+                model="text-embedding-ada-002"
+            )
         
         # Test rapide de l'API
         try:
@@ -3231,12 +3231,23 @@ async def handle_query():
             repo_structure = data.get('repo_structure', '')
             is_binary = data.get('is_binary', False)
             
+            # ✅ Directory/corpus mode (répertoire importé)
+            # Conserver l'existant: si file_name est fourni -> comportement inchangé.
+            # Nouveau: si aucun fichier n'est sélectionné MAIS un vector store de session existe,
+            # on autorise les requêtes "sur tout le corpus" (répertoire).
             if not file_name:
-                return jsonify({
-                    "error": "Mode local nécessite un file_name",
-                    "mode": "local",
-                    "suggestion": "Sélectionnez un fichier ou utilisez le mode online"
-                }), 400
+                if use_backend_vectorstore and session_id in vector_stores:
+                    file_name = "__DIRECTORY_CORPUS__"
+                    file_content = ""
+                    # on laisse directory_content se remplir depuis le vector store ci-dessous
+                    is_binary = False
+                    logger.info(f"📚 Mode CORPUS (répertoire) activé: query sur l'ensemble des documents, session={session_id}")
+                else:
+                    return jsonify({
+                        "error": "Mode local nécessite un file_name (ou un vector store de session via /index-directory)",
+                        "mode": "local",
+                        "suggestion": "Sélectionnez un fichier, ou importez un répertoire puis utilisez use_backend_vectorstore=true"
+                    }), 400
             
             # NOUVELLE LOGIQUE: Recherche sémantique améliorée avec recherche hybride (sémantique + mots-clés)
             relevant_docs = []
@@ -3247,7 +3258,24 @@ async def handle_query():
                     
                     logger.info(f"🔍 Hybrid retrieval (semantic + lexical) dans le vector store session {session_id}")
 
-                    relevant_docs, retrieval_debug = hybrid_retrieve_documents(
+                    # Two-pass retrieval (requested):
+                    # 1) If a specific file is selected, retrieve from that file first
+                    # 2) Then retrieve from the whole directory/corpus
+                    file_first_docs: List[Document] = []
+                    file_first_debug: Dict[str, Any] = {}
+                    if file_name and file_name != "__DIRECTORY_CORPUS__":
+                        file_first_docs, file_first_debug = hybrid_retrieve_documents(
+                            vector_store=session_vector_store,
+                            query=user_query,
+                            k_candidates=70,
+                            k_final=6,
+                            semantic_weight=0.60,
+                            bm25_weight=0.30,
+                            exact_weight=0.10,
+                            preferred_sources=[file_name],
+                        )
+
+                    corpus_docs, corpus_debug = hybrid_retrieve_documents(
                         vector_store=session_vector_store,
                         query=user_query,
                         k_candidates=70,
@@ -3256,7 +3284,26 @@ async def handle_query():
                         bm25_weight=0.30,
                         exact_weight=0.10,
                     )
-                    logger.info(f"🎯 Hybrid retrieval selected {len(relevant_docs)} docs | debug={retrieval_debug.get('top', [])}")
+
+                    # Merge preserving order, dedupe by (source, preview)
+                    merged: List[Document] = []
+                    seen = set()
+                    for d in (file_first_docs + corpus_docs):
+                        src = (d.metadata.get("source") or d.metadata.get("fileName") or d.metadata.get("file_name") or "").strip().lower()
+                        key = (src, (d.page_content or "")[:120])
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        merged.append(d)
+                        if len(merged) >= 14:
+                            break
+
+                    relevant_docs = merged
+                    logger.info(
+                        f"🎯 Hybrid two-pass selected {len(relevant_docs)} docs | "
+                        f"file_first={len(file_first_docs)} top={file_first_debug.get('top', [])} | "
+                        f"corpus_top={corpus_debug.get('top', [])}"
+                    )
                     
                     # Ajout des documents pertinents au contexte avec métadonnées enrichies
                     # Éviter les doublons en utilisant un set de file_name + début du contenu

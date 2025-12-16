@@ -217,15 +217,17 @@ const FlexiAnalyseApp: React.FC = () => {
     // Ajouter le fichier à la sidebar
     addFileToSidebar(file);
     
-    // Si le fichier fait partie d'un répertoire, régénérer les suggested actions
-    if (selectedDirectory && selectedDirectory.length > 1) {
-      await regenerateSuggestedActionsForFile(file);
-    }
-    
     // Afficher le statut initial avant de commencer l'analyse
     setLoading(true);
     
-    // Générer automatiquement un résumé avec animation de typing
+    // Si le fichier fait partie d'un répertoire, régénérer les suggested actions en arrière-plan (non-bloquant)
+    if (selectedDirectory && selectedDirectory.length > 1) {
+      regenerateSuggestedActionsForFile(file).catch(err => {
+        console.error('Error regenerating suggested actions:', err);
+      });
+    }
+    
+    // Générer automatiquement un résumé avec animation de typing (se lance immédiatement, ne bloque pas les actions suggérées)
     await generateFileSummaryWithStreaming(file, clonedContent);
   };
   
@@ -236,7 +238,7 @@ const FlexiAnalyseApp: React.FC = () => {
     e.stopPropagation();
   }, []);
   
-  const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+  const apiUrl = 'http://127.0.0.1:5000'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
 
   // Fonctions d'extraction de texte (doivent être définies avant generateFileSummary)
   const extractTextFromDocx = async (content: ArrayBuffer): Promise<string> => {
@@ -631,10 +633,10 @@ const FlexiAnalyseApp: React.FC = () => {
   // Fonction pour gérer l'import d'un répertoire
   const handleDirectorySelect = useCallback(async (files: File[]) => {
     // Bloquer l'import de répertoires pour les utilisateurs non connectés
-    if (!isAuthenticated) {
+    /*if (!isAuthenticated) {
       showLimitInfoBubble('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
       return;
-    }
+    }*/
     
     // Ajouter tous les fichiers à directoryFiles
     setDirectoryFiles(prevFiles => {
@@ -762,7 +764,7 @@ const FlexiAnalyseApp: React.FC = () => {
       }
       
       // Vérifier les limitations pour les utilisateurs non connectés
-      if (!isAuthenticated) {
+      /*if (!isAuthenticated) {
         // Bloquer l'upload de répertoires pour les non connectés
         if (supportedFiles.length > 1) {
           showLimitInfoBubble('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
@@ -778,7 +780,7 @@ const FlexiAnalyseApp: React.FC = () => {
           setCurrentStatus('');
           return;
         }
-      }
+      }*/
       
       // Si c'est un seul fichier, traiter comme avant
       if (supportedFiles.length === 1) {
@@ -799,9 +801,9 @@ const FlexiAnalyseApp: React.FC = () => {
         setIsProcessingDrop(false);
         
         // Incrémenter le compteur de fichiers uploadés pour les non connectés
-        if (!isAuthenticated) {
+        /*if (!isAuthenticated) {
           incrementUploadedFiles();
-        }
+        }*/
         
         // handleFileSelect appellera automatiquement generateFileSummaryWithStreaming
         // Ne pas attendre pour éviter de bloquer si le streaming échoue
@@ -965,7 +967,7 @@ const FlexiAnalyseApp: React.FC = () => {
   // Fonction principale de gestion des requêtes utilisateur
   const handleQuerySubmit = async (query: string, mode: 'online' | 'local') => {
     // Vérifier la limite de requêtes pour les utilisateurs non connectés
-    if (!isAuthenticated && !checkQueryLimit()) {
+    /*if (!isAuthenticated && !checkQueryLimit()) {
       showLimitInfoBubble('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
       return;
     }
@@ -973,7 +975,7 @@ const FlexiAnalyseApp: React.FC = () => {
     // Incrémenter le compteur de requêtes pour les non connectés
     if (!isAuthenticated) {
       incrementDailyQueries();
-    }
+    }*/
     
     //setResearchMode(mode);
     
@@ -1225,7 +1227,7 @@ const FlexiAnalyseApp: React.FC = () => {
   // Nouvelle fonction pour gérer les requêtes avec streaming
   const handleQuerySubmitWithStream = async (query: string, mode: 'online' | 'local') => {
     // Vérifier la limite de requêtes pour les utilisateurs non connectés
-    if (!isAuthenticated && !checkQueryLimit()) {
+    /*if (!isAuthenticated && !checkQueryLimit()) {
       showLimitInfoBubble('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
       return;
     }
@@ -1233,7 +1235,7 @@ const FlexiAnalyseApp: React.FC = () => {
     // Incrémenter le compteur de requêtes pour les non connectés
     if (!isAuthenticated) {
       incrementDailyQueries();
-    }
+    }*/
     
     // Si mode local, utiliser l'ancienne méthode pour l'instant
     if (mode === 'local') {

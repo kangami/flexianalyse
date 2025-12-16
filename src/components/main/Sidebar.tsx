@@ -656,7 +656,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         const acceptedFiles = filterFiles(event.target.files);
         
         // Vérifier les limitations pour les utilisateurs non connectés
-        if (!isAuthenticated) {
+        /*if (!isAuthenticated) {
           // Bloquer l'upload de plusieurs fichiers (répertoire)
           if (acceptedFiles.length > 1) {
             setError('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
@@ -688,7 +688,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             }
             return;
           }
-        }
+        }*/
         
         // Immediately display files in interface
         const fileTree = buildFileTree(acceptedFiles);
@@ -767,14 +767,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         const acceptedFiles = filterFiles(event.target.files);
         
         // Bloquer l'upload de répertoires pour les utilisateurs non connectés
-        if (!isAuthenticated && acceptedFiles.length > 1) {
+        /*if (!isAuthenticated && acceptedFiles.length > 1) {
           setError('Repository upload is only available for signed-in users. Please sign in to upload multiple files.');
           setIsLoading(false);
           if (event.target) {
             event.target.value = '';
           }
           return;
-        }
+        }*/
         
         // Toujours afficher les fichiers dans la sidebar
         const fileTree = buildFileTree(acceptedFiles);

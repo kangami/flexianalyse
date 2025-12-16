@@ -37,6 +37,44 @@ def _normalize_text(s: str) -> str:
     return s.strip()
 
 
+def _normalize_filename(name: str) -> str:
+    """
+    Normalize filenames for robust matching across UI/backend variations:
+    - drop paths
+    - lowercase
+    - strip trailing " (1)", " (2)", ...
+    """
+    base = (name or "").replace("\\", "/").split("/")[-1].strip().lower()
+    base = re.sub(r"\s*\(\d+\)\s*$", "", base).strip()
+    return base
+
+
+def _split_name_ext(name: str) -> Tuple[str, str]:
+    n = _normalize_filename(name)
+    m = re.match(r"^(.*?)(\.[a-z0-9]+)?$", n)
+    if not m:
+        return n, ""
+    base = (m.group(1) or "").strip()
+    ext = (m.group(2) or "").strip()
+    return base, ext
+
+
+def _source_matches(doc_source: str, preferred_sources: List[str]) -> bool:
+    """
+    Match by base name, and enforce extension match when extension is present.
+    """
+    doc_base, doc_ext = _split_name_ext(doc_source)
+    for s in preferred_sources:
+        pref_base, pref_ext = _split_name_ext(s)
+        if not pref_base:
+            continue
+        if pref_ext and doc_ext and pref_ext != doc_ext:
+            continue
+        if doc_base == pref_base or doc_base in pref_base or pref_base in doc_base:
+            return True
+    return False
+
+
 def _tokenize(s: str) -> List[str]:
     s = _normalize_text(s)
     # Keep letters/numbers and accents; split on non-word-ish.
@@ -129,6 +167,7 @@ def hybrid_retrieve_documents(
     semantic_weight: float = 0.60,
     bm25_weight: float = 0.30,
     exact_weight: float = 0.10,
+    preferred_sources: Optional[List[str]] = None,
 ) -> Tuple[List[Document], Dict[str, Any]]:
     """
     Returns: (top_docs, debug)
@@ -156,8 +195,19 @@ def hybrid_retrieve_documents(
         seen.add(key)
         candidates.append((doc, dist))
 
+    # Optional: restrict to preferred sources (used for "selected file first" retrieval)
+    if preferred_sources:
+        pref = [p for p in preferred_sources if (p or "").strip()]
+        if pref:
+            filtered = []
+            for doc, dist in candidates:
+                src = (doc.metadata.get("source") or doc.metadata.get("fileName") or doc.metadata.get("file_name") or "").strip()
+                if _source_matches(src, pref):
+                    filtered.append((doc, dist))
+            candidates = filtered
+
     if not candidates:
-        return [], {"reason": "no_candidates", "k_candidates": k_candidates}
+        return [], {"reason": "no_candidates", "k_candidates": k_candidates, "preferred_sources": preferred_sources}
 
     # 2) Lexical stats (BM25-ish over candidates)
     doc_tokens_list: List[List[str]] = []
