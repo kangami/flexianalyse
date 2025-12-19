@@ -895,7 +895,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               {node.isOpen ? <FolderOpen size={18} color="#FFD700"/> : <Folder size={18} color="#FFD700" />}
             </div>
             <span 
-              className="font-semibold truncate max-w-[180px]"
+              className="font-semibold block truncate max-w-full"
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               title={node.name}
             >
               {node.name}
@@ -909,7 +910,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             }`}
             title={`${node.name}${pendingFiles.includes(node.file!) ? ' (pending upload)' : ''}`}
           >
-            <span className="truncate max-w-[180px] inline-block align-middle">
+            <span className="block truncate max-w-full" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {node.name}
               {pendingFiles.includes(node.file!) && (
                 <span className="ml-1 text-xs text-orange-500">⏳</span>
@@ -1275,7 +1276,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 isExpanded={isExplorerExpanded}
                 onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
               >
-                <div className="max-h-48 overflow-y-auto">
+                <div className="max-h-48 overflow-y-auto overflow-x-hidden">
                   {isLoading ? (
                     <div className="flex items-center text-blue-600 text-sm py-2">
                       <svg
@@ -1649,7 +1650,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             isExpanded={isExplorerExpanded}
             onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
           >
-            <div className="max-h-48 overflow-y-auto">
+            <div className="max-h-48 overflow-y-auto overflow-x-hidden">
               {isLoading ? (
                 <div className={`flex items-center ${getThemeClasses().textSecondary} text-sm py-2`}>
                   <svg
