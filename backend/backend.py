@@ -750,22 +750,49 @@ async def infer_corpus_actions(documents: List[Document], language: str = 'en') 
     et proposer des actions suggérées (boutons) adaptées.
     """
     try:
-        # D'abord, détecter le type de document dominant dans le corpus
+        # D'abord, détecter le type de document dominant dans le corpus (avec plus de contexte)
         document_types = {}
-        for doc in documents[:20]:
-            doc_type = await detect_document_type(doc.page_content[:2000], doc.metadata.get('fileName', ''))
+        document_details = {}  # Stocker plus d'infos par type
+        
+        for doc in documents[:30]:  # Analyser plus de documents
+            doc_content = doc.page_content[:4000] if len(doc.page_content) > 4000 else doc.page_content  # Plus de contenu pour une meilleure détection
+            doc_type = await detect_document_type(doc_content, doc.metadata.get('fileName', ''))
             document_types[doc_type] = document_types.get(doc_type, 0) + 1
+            
+            # Stocker les détails pour enrichir le prompt
+            if doc_type not in document_details:
+                document_details[doc_type] = []
+            meta_name = doc.metadata.get('fileName') or doc.metadata.get('source') or 'document'
+            # Prendre un échantillon plus intelligent (début + milieu si disponible)
+            content_sample = doc_content[:1000]
+            if len(doc_content) > 2000:
+                mid_point = len(doc_content) // 2
+                content_sample += " ... " + doc_content[mid_point:mid_point+500]
+            document_details[doc_type].append({
+                'name': meta_name,
+                'snippet': content_sample.replace('\n', ' ').strip()[:1200]  # Plus de contexte
+            })
         
         # Trouver le type de document le plus fréquent
         dominant_type = max(document_types.items(), key=lambda x: x[1])[0] if document_types else 'document_generique'
         
-        # Construire un résumé compact du corpus pour le prompt
+        # Construire un résumé enrichi du corpus pour le prompt
         sample_texts = []
-        for doc in documents[:20]:
-            meta_name = doc.metadata.get('fileName') or doc.metadata.get('source') or 'document'
-            snippet = doc.page_content[:800].replace('\n', ' ')
-            sample_texts.append(f"- {meta_name}: {snippet}")
+        # Inclure tous les documents du type dominant (jusqu'à 10)
+        dominant_docs = document_details.get(dominant_type, [])[:10]
+        for doc_info in dominant_docs:
+            sample_texts.append(f"- {doc_info['name']}: {doc_info['snippet']}")
+        
+        # Ajouter quelques exemples d'autres types si présents
+        other_types = [dt for dt in document_types.keys() if dt != dominant_type]
+        for other_type in other_types[:2]:  # Max 2 autres types
+            for doc_info in document_details.get(other_type, [])[:2]:  # 2 exemples par type
+                sample_texts.append(f"- [{other_type}] {doc_info['name']}: {doc_info['snippet'][:600]}")
+        
         corpus_preview = "\n".join(sample_texts)
+        
+        # Informations additionnelles pour améliorer la précision
+        type_distribution = ", ".join([f"{dt}: {count}" for dt, count in sorted(document_types.items(), key=lambda x: x[1], reverse=True)[:3]])
 
         # Actions spécifiques selon le type de document et la langue
         specific_actions_prompts = {
@@ -838,7 +865,59 @@ Actions spécifiques pour un document financier :
 2. "Vérifier la période" - Extrait la période couverte par le document
 3. "Vérifier les montants" - Liste tous les montants (revenus, déductions, impôts, totaux)
 4. "Vérifier déductions" - Détaille toutes les déductions (impôts, cotisations)
-5. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON"""
+5. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'cv_resume': """
+Actions spécifiques pour un CV/Resume :
+1. "Vérifier identité" - Identifie le nom complet, coordonnées et informations de contact
+2. "Vérifier expérience" - Liste toutes les expériences professionnelles avec dates, postes et entreprises
+3. "Vérifier formation" - Détaille les diplômes, formations et certifications avec dates et institutions
+4. "Vérifier compétences" - Liste les compétences techniques, linguistiques et autres compétences
+5. "Vérifier réalisations" - Extrait les réalisations, projets et accomplissements majeurs
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'facture_invoice': """
+Actions spécifiques pour une facture/Invoice :
+1. "Vérifier les parties" - Identifie l'émetteur (vendeur) et le client avec leurs coordonnées
+2. "Vérifier les dates" - Extrait la date d'émission, date d'échéance et date de paiement
+3. "Vérifier les montants" - Liste le montant HT, TVA, montant TTC et modalités de paiement
+4. "Vérifier les articles" - Détaille tous les articles/lignes de facturation avec quantités et prix
+5. "Vérifier références" - Extrait le numéro de facture, références client et numéros de commande
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'contrat_prenuptial': """
+Actions spécifiques pour un contrat de mariage/prénuptial :
+1. "Vérifier les parties" - Identifie les époux/futurs époux avec leurs coordonnées complètes
+2. "Vérifier les dates" - Extrait la date de signature et la date de mariage prévue
+3. "Vérifier le régime matrimonial" - Détaille le régime choisi (séparation de biens, communauté, etc.)
+4. "Vérifier les biens" - Liste les biens propres et les biens communs avec leurs valeurs
+5. "Vérifier les clauses particulières" - Identifie les clauses spécifiques (héritage, donation, etc.)
+6. "Analyser les conditions" - Détaille les conditions de modification et de dissolution
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'procuration_poa': """
+Actions spécifiques pour une procuration/Power Of Attorney :
+1. "Vérifier le mandant" - Identifie le mandant (donneur de procuration) avec ses coordonnées
+2. "Vérifier le mandataire" - Identifie le mandataire (représentant) avec ses coordonnées
+3. "Vérifier les dates" - Extrait la date de signature, date de début et date d'expiration
+4. "Vérifier les pouvoirs" - Détaille tous les pouvoirs accordés (signature, gestion, décisions)
+5. "Vérifier les limitations" - Liste les limitations et restrictions des pouvoirs
+6. "Vérifier les conditions" - Détaille les conditions de révocation et d'utilisation
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'accord_confidentialite_nda': """
+Actions spécifiques pour un accord de confidentialité/NDA :
+1. "Vérifier les parties" - Identifie toutes les parties (divulgateur et bénéficiaire) avec leurs coordonnées
+2. "Vérifier les dates" - Extrait la date de signature et la durée de l'accord
+3. "Vérifier les informations confidentielles" - Détaille la portée des informations couvertes
+4. "Vérifier les obligations" - Liste les obligations de confidentialité et de non-divulgation
+5. "Analyser les exceptions" - Identifie les exceptions autorisées (loi, ordre judiciaire, etc.)
+6. "Vérifier les sanctions" - Détaille les pénalités et recours en cas de violation
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'acte_propriete_immobiliere': """
+Actions spécifiques pour un acte de propriété immobilière/Real Estate Deed :
+1. "Vérifier le propriétaire" - Identifie le propriétaire actuel avec ses coordonnées
+2. "Vérifier le bien" - Détaille les caractéristiques du bien (adresse, superficie, type, parcelle cadastrale)
+3. "Vérifier les dates" - Extrait la date d'acquisition, date de l'acte et historique des transactions
+4. "Vérifier les montants" - Liste le prix d'acquisition, taxes et frais associés
+5. "Vérifier les charges" - Détaille les servitudes, hypothèques et autres charges
+6. "Vérifier le bornage" - Identifie les limites et bornes de la propriété
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON"""
             },
             'en': {
                 'contrat_location': """
@@ -909,7 +988,59 @@ Specific actions for a financial document:
 2. "Verify period" - Extracts the period covered by the document
 3. "Verify amounts" - Lists all amounts (income, deductions, taxes, totals)
 4. "Verify deductions" - Details all deductions (taxes, contributions)
-5. "Extract structured data" - Extracts all data in a structured JSON format"""
+5. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'cv_resume': """
+Specific actions for a CV/Resume:
+1. "Verify identity" - Identifies full name, contact information and personal details
+2. "Verify experience" - Lists all professional experiences with dates, positions and companies
+3. "Verify education" - Details degrees, training and certifications with dates and institutions
+4. "Verify skills" - Lists technical, language and other skills
+5. "Verify achievements" - Extracts major achievements, projects and accomplishments
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'facture_invoice': """
+Specific actions for an invoice:
+1. "Verify parties" - Identifies the issuer (seller) and customer with their contact details
+2. "Verify dates" - Extracts issue date, due date and payment date
+3. "Verify amounts" - Lists net amount, tax, total amount and payment terms
+4. "Verify items" - Details all invoice items/lines with quantities and prices
+5. "Verify references" - Extracts invoice number, customer references and order numbers
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'contrat_prenuptial': """
+Specific actions for a prenuptial agreement:
+1. "Verify parties" - Identifies the spouses/future spouses with their full contact details
+2. "Verify dates" - Extracts signature date and planned marriage date
+3. "Verify marital regime" - Details the chosen regime (separation of property, community, etc.)
+4. "Verify assets" - Lists separate and community property with their values
+5. "Verify special clauses" - Identifies specific clauses (inheritance, donation, etc.)
+6. "Analyze conditions" - Details conditions for modification and dissolution
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'procuration_poa': """
+Specific actions for a Power Of Attorney:
+1. "Verify principal" - Identifies the principal (grantor) with contact details
+2. "Verify agent" - Identifies the agent (attorney-in-fact) with contact details
+3. "Verify dates" - Extracts signature date, start date and expiration date
+4. "Verify powers" - Details all granted powers (signing, management, decisions)
+5. "Verify limitations" - Lists limitations and restrictions of powers
+6. "Verify conditions" - Details conditions for revocation and use
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'accord_confidentialite_nda': """
+Specific actions for a Non-Disclosure Agreement (NDA):
+1. "Verify parties" - Identifies all parties (discloser and recipient) with their contact details
+2. "Verify dates" - Extracts signature date and duration of the agreement
+3. "Verify confidential information" - Details the scope of covered information
+4. "Verify obligations" - Lists confidentiality and non-disclosure obligations
+5. "Analyze exceptions" - Identifies authorized exceptions (law, court order, etc.)
+6. "Verify penalties" - Details penalties and remedies in case of breach
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'acte_propriete_immobiliere': """
+Specific actions for a Real Estate Deed:
+1. "Verify owner" - Identifies the current owner with contact details
+2. "Verify property" - Details property characteristics (address, area, type, cadastral lot)
+3. "Verify dates" - Extracts acquisition date, deed date and transaction history
+4. "Verify amounts" - Lists acquisition price, taxes and associated fees
+5. "Verify encumbrances" - Details easements, mortgages and other encumbrances
+6. "Verify boundaries" - Identifies property limits and boundaries
+7. "Extract structured data" - Extracts all data in a structured JSON format"""
             },
             'es': {
                 'contrat_location': """
@@ -980,7 +1111,59 @@ Acciones específicas para un documento financiero:
 2. "Verificar período" - Extrae el período cubierto por el documento
 3. "Verificar montos" - Enumera todos los montos (ingresos, deducciones, impuestos, totales)
 4. "Verificar deducciones" - Detalla todas las deducciones (impuestos, cotizaciones)
-5. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado"""
+5. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'cv_resume': """
+Acciones específicas para un CV/Resume:
+1. "Verificar identidad" - Identifica el nombre completo, datos de contacto e información personal
+2. "Verificar experiencia" - Enumera todas las experiencias profesionales con fechas, puestos y empresas
+3. "Verificar formación" - Detalla títulos, formaciones y certificaciones con fechas e instituciones
+4. "Verificar competencias" - Enumera las competencias técnicas, lingüísticas y otras habilidades
+5. "Verificar logros" - Extrae los logros, proyectos y realizaciones principales
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'facture_invoice': """
+Acciones específicas para una factura/Invoice:
+1. "Verificar partes" - Identifica el emisor (vendedor) y el cliente con sus datos de contacto
+2. "Verificar fechas" - Extrae la fecha de emisión, fecha de vencimiento y fecha de pago
+3. "Verificar montos" - Enumera el importe sin IVA, IVA, importe total y modalidades de pago
+4. "Verificar artículos" - Detalla todos los artículos/líneas de facturación con cantidades y precios
+5. "Verificar referencias" - Extrae el número de factura, referencias del cliente y números de pedido
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'contrat_prenuptial': """
+Acciones específicas para un contrato de matrimonio/prenupcial:
+1. "Verificar partes" - Identifica los cónyuges/futuros cónyuges con sus datos de contacto completos
+2. "Verificar fechas" - Extrae la fecha de firma y la fecha de matrimonio prevista
+3. "Verificar régimen matrimonial" - Detalla el régimen elegido (separación de bienes, comunidad, etc.)
+4. "Verificar bienes" - Enumera los bienes propios y los bienes comunes con sus valores
+5. "Verificar cláusulas particulares" - Identifica las cláusulas específicas (herencia, donación, etc.)
+6. "Analizar condiciones" - Detalla las condiciones de modificación y disolución
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'procuration_poa': """
+Acciones específicas para una procuración/Power Of Attorney:
+1. "Verificar mandante" - Identifica al mandante (otorgante) con sus datos de contacto
+2. "Verificar mandatario" - Identifica al mandatario (representante) con sus datos de contacto
+3. "Verificar fechas" - Extrae la fecha de firma, fecha de inicio y fecha de expiración
+4. "Verificar poderes" - Detalla todos los poderes concedidos (firma, gestión, decisiones)
+5. "Verificar limitaciones" - Enumera las limitaciones y restricciones de los poderes
+6. "Verificar condiciones" - Detalla las condiciones de revocación y uso
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'accord_confidentialite_nda': """
+Acciones específicas para un acuerdo de confidencialidad/NDA:
+1. "Verificar partes" - Identifica todas las partes (divulgador y beneficiario) con sus datos de contacto
+2. "Verificar fechas" - Extrae la fecha de firma y la duración del acuerdo
+3. "Verificar información confidencial" - Detalla el alcance de la información cubierta
+4. "Verificar obligaciones" - Enumera las obligaciones de confidencialidad y no divulgación
+5. "Analizar excepciones" - Identifica las excepciones autorizadas (ley, orden judicial, etc.)
+6. "Verificar sanciones" - Detalla las penalizaciones y recursos en caso de violación
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructur ado""",
+                'acte_propriete_immobiliere': """
+Acciones específicas para un acta de propiedad inmobiliaria/Real Estate Deed:
+1. "Verificar propietario" - Identifica al propietario actual con sus datos de contacto
+2. "Verificar propiedad" - Detalla las características de la propiedad (dirección, superficie, tipo, lote catastral)
+3. "Verificar fechas" - Extrae la fecha de adquisición, fecha del acta e historial de transacciones
+4. "Verificar montos" - Enumera el precio de adquisición, impuestos y honorarios asociados
+5. "Verificar cargas" - Detalla las servidumbres, hipotecas y otras cargas
+6. "Verificar límites" - Identifica los límites y linderos de la propiedad
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado"""
             }
         }
 
@@ -1018,13 +1201,28 @@ IMPORTANT :
 - Inclus toujours "Extraire données structurées" comme dernière action
 """,
             'en': f"""
-You receive a small preview of many documents uploaded by a user.
-The dominant document type detected is: {dominant_type}
+You are a document analysis expert. You receive a preview of documents uploaded by a user.
+
+CONTEXTUAL INFORMATION:
+- Dominant document type detected: {dominant_type}
+- Type distribution in corpus: {type_distribution}
+- Total documents analyzed: {len(documents)}
 
 {specific_prompt}
 
-Based ONLY on these texts, you must propose up to 7 suggested actions as JSON.
-Each action will appear as a button in a UI.
+ANALYZE THE PROVIDED DOCUMENTS and propose up to 7 PRECISE and USEFUL suggested actions in JSON format.
+Actions must be:
+1. SPECIFIC to the actual content of the documents (analyze the content to propose relevant actions)
+2. PRACTICAL (what users actually check in this document type)
+3. ACTIONABLE (each action should allow extracting or verifying precise information)
+
+DETAILED INSTRUCTIONS:
+- First analyze the document content to identify key elements present (dates, amounts, parties, clauses, etc.)
+- Propose actions that exactly match what is present in the documents
+- Titles must be short and clear (max 25 chars), actionable and direct
+- sample_prompt must be precise and request specific information findable in the documents
+- Always prioritize: parties/identities → dates → amounts/finances → obligations/clauses → other details
+- Always include "Extract structured data" as the last action
 
 Return STRICT valid JSON with this exact shape:
 {{
@@ -1034,25 +1232,34 @@ Return STRICT valid JSON with this exact shape:
       "id": "machine_readable_id",
       "title": "Short button label (max 25 chars)",
       "description": "One sentence explaining what this action does for the user.",
-      "sample_prompt": "A full natural language prompt the app can send to the assistant when the user clicks this action."
+      "sample_prompt": "Complete, precise and actionable natural language prompt the app will send to the assistant when the user clicks this action. The prompt must request specific information present in the documents."
     }}
   ]
 }}
-
-IMPORTANT:
-- Titles must be short and clear (max 25 characters)
-- Actions must be specific to the detected document type
-- Prioritize actions that users typically check (parties, dates, amounts, clauses, obligations)
-- Always include "Extract structured data" as the last action
 """,
             'es': f"""
-Recibes una vista previa de varios documentos cargados por un usuario.
-El tipo de documento dominante detectado es: {dominant_type}
+Eres un experto en análisis documental. Recibes una vista previa de documentos cargados por un usuario.
+
+INFORMACIÓN CONTEXTUAL:
+- Tipo de documento dominante detectado: {dominant_type}
+- Distribución de tipos en el corpus: {type_distribution}
+- Total de documentos analizados: {len(documents)}
 
 {specific_prompt}
 
-Basándote ÚNICAMENTE en estos textos, debes proponer hasta 7 acciones sugeridas en formato JSON.
-Cada acción aparecerá como un botón en una interfaz.
+ANALIZA LOS DOCUMENTOS PROPORCIONADOS y propone hasta 7 acciones sugeridas PRECISAS y ÚTILES en formato JSON.
+Las acciones deben ser:
+1. ESPECÍFICAS al contenido real de los documentos (analiza el contenido para proponer acciones relevantes)
+2. PRÁCTICAS (lo que los usuarios realmente verifican en este tipo de documento)
+3. ACCIONABLES (cada acción debe permitir extraer o verificar información precisa)
+
+INSTRUCCIONES DETALLADAS:
+- Primero analiza el contenido del documento para identificar elementos clave presentes (fechas, montos, partes, cláusulas, etc.)
+- Propone acciones que correspondan exactamente a lo que está presente en los documentos
+- Los títulos deben ser cortos y claros (máx 25 caracteres), accionables y directos
+- Los sample_prompt deben ser precisos y solicitar información específica encontrable en los documentos
+- Prioriza siempre: partes/identidades → fechas → montos/finanzas → obligaciones/cláusulas → otros detalles
+- Siempre incluye "Extraer datos estructurados" como última acción
 
 Retorna JSON ESTRICTO con exactamente esta forma:
 {{
@@ -1062,16 +1269,10 @@ Retorna JSON ESTRICTO con exactamente esta forma:
       "id": "identificador_legible_por_maquina",
       "title": "Etiqueta corta del botón (máx 25 caracteres)",
       "description": "Una oración que explica lo que hace esta acción para el usuario.",
-      "sample_prompt": "Un prompt completo en lenguaje natural que la app puede enviar al asistente cuando el usuario hace clic en este botón."
+      "sample_prompt": "Prompt completo, preciso y accionable en lenguaje natural que la app enviará al asistente cuando el usuario haga clic en esta acción. El prompt debe solicitar información específica presente en los documentos."
     }}
   ]
 }}
-
-IMPORTANTE:
-- Los títulos deben ser cortos y claros (máx 25 caracteres)
-- Las acciones deben ser específicas al tipo de documento detectado
-- Prioriza las acciones que los usuarios típicamente verifican (partes, fechas, montos, cláusulas, obligaciones)
-- Siempre incluye "Extraer datos estructurados" como última acción
 """
         }
         
@@ -1629,7 +1830,7 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
     try:
         # Enterprise-style hybrid retrieval (deterministic): semantic + lexical reranking.
         # This is more precise than raw similarity_search, and avoids LLM reranking drift.
-        docs, debug = hybrid_retrieve_documents(
+        result = hybrid_retrieve_documents(
             vector_store=vector_store,
             query=user_query,
             k_candidates=70,
@@ -1638,8 +1839,15 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
             bm25_weight=0.30,
             exact_weight=0.10,
         )
+        if isinstance(result, tuple) and len(result) == 2:
+            docs, debug = result
+            if not isinstance(debug, dict):
+                debug = {}
+        else:
+            docs = []
+            debug = {}
         if docs:
-            logger.info(f"🔎 search_semantic_documents_sync hybrid selected {len(docs)} docs | top={debug.get('top', [])}")
+            logger.info(f"🔎 search_semantic_documents_sync hybrid selected {len(docs)} docs | top={debug.get('top', []) if isinstance(debug, dict) else []}")
             out: List[Dict] = []
             seen = set()
             for d in docs:
@@ -2089,7 +2297,7 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                                 repo_structure: str, user_query: str, is_binary: bool = False, 
                                 selected_model: str = DEFAULT_MODEL, language: str = 'en',
                                 conversation_history: Optional[List[Dict]] = None,
-                                enable_auto_online_search: bool = True) -> str:
+                                enable_auto_online_search: bool = True) -> tuple[str, str]:
     """
     Mode LOCAL: analyse STRICTEMENT les documents fournis (fichier principal + contexte).
     On réduit et structure le contexte pour améliorer la précision et limiter les hallucinations.
@@ -2105,8 +2313,12 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
     # Grouper les documents par fichier source pour éviter la duplication et préserver le contexte complet
     docs_by_file = {}
     for doc in directory_content or []:
+        if not isinstance(doc, dict):
+            continue
         file_label = doc.get('fileName') or doc.get('file_name') or "document_contextuel"
         raw_content = doc.get('content', '') or ''
+        if raw_content is None:
+            raw_content = ''
         
         if file_label not in docs_by_file:
             docs_by_file[file_label] = []
@@ -2152,6 +2364,8 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
 
     # On tronque aussi légèrement le contenu du fichier principal si nécessaire
     main_max_len = 4000
+    if file_content is None:
+        file_content = ""
     trimmed_main_content = file_content[:main_max_len] + ("..." if len(file_content) > main_max_len else "")
 
     # Construire un résumé compact de l'historique de conversation (si fourni)
@@ -2258,7 +2472,9 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
     )
 
     try:
-        result = await execute_model_query(prompt, selected_model)
+        # Utiliser execute_model_query_with_fallback pour garantir la pertinence
+        result, model_used = await execute_model_query_with_fallback(prompt, selected_model, user_query)
+        logger.info(f"✅ Modèle utilisé pour la réponse: {model_used}")
         
         # Détection automatique si l'information n'est pas disponible et recherche en ligne si activée
         if enable_auto_online_search:
@@ -2289,7 +2505,7 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                             f"**Réponse enrichie:**"
                         )
                         
-                        enriched_result = await execute_model_query(enrichment_prompt, selected_model)
+                        enriched_result, _ = await execute_model_query_with_fallback(enrichment_prompt, selected_model, user_query)
                         
                         # Ajouter une note indiquant que la recherche en ligne a été utilisée
                         result = (
@@ -2309,12 +2525,199 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                     pass
     except Exception as e:
         result = f"Erreur lors de l'analyse locale: {str(e)}"
+        model_used = selected_model
 
-    return result
+    return result, model_used
+
+def is_response_relevant(response: str, user_query: str) -> bool:
+    """
+    Détermine si une réponse est pertinente en vérifiant:
+    1. Si la réponse n'est pas vide ou trop courte
+    2. Si la réponse ne contient pas de phrases indiquant que l'information est absente
+    3. Si la réponse semble contenir une information réelle (pas juste "je ne sais pas")
+    """
+    if not response or len(response.strip()) < 20:
+        logger.warning(f"❌ Réponse trop courte ou vide: {len(response.strip() if response else 0)} chars")
+        return False
+    
+    response_lower = response.lower()
+    user_query_lower = user_query.lower()
+    
+    # Phrases indiquant que l'information n'est pas trouvée (plus complètes)
+    missing_phrases = [
+        "n'apparaît pas dans les documents",
+        "n'est pas présente dans",
+        "n'est pas disponible dans",
+        "n'est pas trouvé",
+        "n'est pas mentionné",
+        "n'est pas indiqué",
+        "ne trouve pas",
+        "ne peut pas trouver",
+        "ne peut pas être trouvé",
+        "impossible de trouver",
+        "information absente",
+        "donnée absente",
+        "non disponible",
+        "pas d'information",
+        "aucune information",
+        "je ne peux pas",
+        "je ne trouve pas",
+        "je n'ai pas trouvé",
+        "dans les documents fournis, l'information",
+        "l'information sur",
+        "n'est pas directement mentionné",
+        "does not appear in",
+        "is not present in",
+        "is not available in",
+        "is not found",
+        "is not mentioned",
+        "cannot find",
+        "unable to find",
+        "information missing",
+        "data not available",
+        "no information",
+        "i cannot",
+        "i cannot find",
+        "i did not find",
+        "in the provided documents, the information",
+        "the information about",
+        "is not directly mentioned"
+    ]
+    
+    # Détection stricte: si une phrase d'absence apparaît dans la réponse, c'est non pertinent
+    # Vérifier particulièrement dans les premiers 300 caractères (début de réponse)
+    response_start = response_lower[:300]
+    for phrase in missing_phrases:
+        if phrase in response_lower:
+            # Si la phrase d'absence apparaît dans les 300 premiers caractères, c'est définitivement non pertinent
+            if phrase in response_start:
+                logger.warning(f"❌ Phrase d'absence détectée dans les premiers 300 chars: '{phrase}'")
+                return False
+            # Si la phrase apparaît plus loin mais que la réponse contient principalement cette information, c'est aussi non pertinent
+            # Compter combien de fois les phrases d'absence apparaissent
+            missing_count = sum(1 for p in missing_phrases if p in response_lower)
+            if missing_count >= 2:  # Si 2+ phrases d'absence, c'est probablement non pertinent
+                logger.warning(f"❌ Plusieurs phrases d'absence détectées ({missing_count})")
+                return False
+    
+    # Vérifier que la réponse contient au moins quelques mots de la requête (pertinence sémantique)
+    query_words = set(word.lower().strip('.,!?;:()[]{}"\'') for word in user_query_lower.split() if len(word) > 2)
+    response_words = set(word.lower().strip('.,!?;:()[]{}"\'') for word in response_lower.split() if len(word) > 2)
+    
+    # Extraire les mots-clés importants de la requête (noms propres, mots significatifs)
+    important_query_words = [w for w in query_words if w not in ['est', 'sont', 'être', 'avoir', 'was', 'is', 'are', 'the', 'a', 'an', 'le', 'la', 'les', 'un', 'une', 'des']]
+    
+    if important_query_words:
+        # Vérifier si au moins un mot important de la requête est dans la réponse
+        common_words = query_words & response_words
+        if len(common_words) == 0:
+            logger.warning(f"❌ Aucun mot en commun entre requête et réponse. Requête: {important_query_words[:5]}")
+            return False
+        
+        # Vérifier que la réponse contient au moins 30% des mots importants
+        important_common = [w for w in important_query_words if w in response_words]
+        if len(important_common) / len(important_query_words) < 0.3:
+            logger.warning(f"❌ Trop peu de mots importants trouvés ({len(important_common)}/{len(important_query_words)})")
+            # Mais accepter si la réponse est très détaillée et contient au moins un mot important
+            if len(response.strip()) < 400 or len(important_common) == 0:
+                return False
+    
+    # Vérifier si la réponse est trop générique (ex: "veuillez consulter les documents")
+    generic_phrases = [
+        "consultez les documents",
+        "veuillez consulter",
+        "please consult",
+        "refer to the documents",
+        "see the documents"
+    ]
+    if any(phrase in response_lower for phrase in generic_phrases) and len(response.strip()) < 150:
+        logger.warning(f"❌ Réponse trop générique")
+        return False
+    
+    logger.info(f"✅ Réponse considérée comme pertinente ({len(response.strip())} chars, {len(query_words & response_words)} mots en commun)")
+    return True
+
+async def execute_model_query_with_fallback(prompt: str, selected_model: str, user_query: str = "") -> tuple[str, str]:
+    """
+    Exécute la requête sur le modèle sélectionné avec fallback en cascade si la réponse n'est pas pertinente.
+    Retourne (response, model_used)
+    
+    Ordre de fallback si GPT-3.5-turbo ne donne pas de réponse pertinente:
+    1. Mistral
+    2. GPT-4o
+    3. GPT-5-Nano
+    4. GPT-5-Mini
+    5. GPT-5
+    """
+    # Liste complète des modèles de fallback (dans l'ordre de qualité croissante)
+    all_fallback_models = ["gpt-3.5-turbo", "mistral", "gpt-4o", "gpt-5-nano", "gpt-5-mini", "gpt-5"]
+    
+    # Construire la liste des modèles à essayer en commençant par le modèle sélectionné
+    selected_lower = selected_model.lower()
+    
+    if selected_lower in all_fallback_models:
+        # Trouver l'index du modèle sélectionné et prendre tous les modèles suivants
+        model_idx = all_fallback_models.index(selected_lower)
+        models_to_try = all_fallback_models[model_idx:]
+        logger.info(f"📋 Ordre de fallback: {models_to_try}")
+    else:
+        # Modèle non dans la liste, utiliser tel quel puis fallback complet
+        models_to_try = [selected_lower] + all_fallback_models
+        logger.info(f"📋 Modèle inconnu '{selected_lower}', utilisation avec fallback complet: {models_to_try}")
+    
+    last_exception = None
+    
+    for model in models_to_try:
+        try:
+            logger.info(f"🔄 Tentative avec le modèle: {model}")
+            
+            if model in ["gpt-3.5-turbo", "gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"]:
+                result = call_openai_api(prompt, model)
+            elif model == "mistral":
+                result = call_mistral_api(prompt)
+            elif model in OLLAMA_MODELS or model == "llama3":
+                result = call_ollama_api(prompt, model)
+            else:
+                # Modèle inconnu, utiliser OpenAI par défaut
+                result = call_openai_api(prompt, DEFAULT_MODEL)
+                model = DEFAULT_MODEL
+            
+            # Vérifier la pertinence si user_query est fourni
+            # Pour GPT-3.5-turbo, on vérifie toujours (plus susceptible d'échouer)
+            # Pour les autres modèles moins puissants (mistral), on vérifie aussi
+            # Pour les modèles plus puissants (gpt-4o, gpt-5*), on fait confiance mais on peut quand même vérifier
+            should_check_relevance = user_query and (
+                model == "gpt-3.5-turbo" or 
+                model == "mistral" or
+                model in ["gpt-5-nano", "gpt-5-mini"]  # Vérifier aussi pour les modèles moins puissants
+            )
+            
+            if should_check_relevance:
+                if is_response_relevant(result, user_query):
+                    logger.info(f"✅ Réponse pertinente obtenue avec {model}")
+                    return result, model
+                else:
+                    logger.warning(f"⚠️ Réponse non pertinente avec {model}, passage au modèle suivant...")
+                    continue
+            else:
+                # Pour les modèles plus puissants (gpt-4o, gpt-5) ou si pas de user_query, accepter la réponse
+                logger.info(f"✅ Réponse obtenue avec {model} (vérification de pertinence sautée)")
+                return result, model
+                
+        except Exception as e:
+            logger.warning(f"❌ Erreur avec le modèle {model}: {str(e)}, passage au modèle suivant...")
+            last_exception = e
+            continue
+    
+    # Si tous les modèles ont échoué, lever l'exception du dernier
+    if last_exception:
+        raise last_exception
+    else:
+        raise RuntimeError("Tous les modèles de fallback ont échoué")
 
 async def execute_model_query(prompt: str, selected_model: str) -> str:
     """
-    Exécute la requête sur le modèle sélectionné
+    Exécute la requête sur le modèle sélectionné (version simple, sans fallback)
     """
     try:
         if selected_model.lower() in ["gpt-3.5-turbo", "gpt-4o"]:
@@ -2337,59 +2740,188 @@ async def execute_model_query(prompt: str, selected_model: str) -> str:
 
 async def detect_document_type(file_content: str, file_name: str) -> str:
     """
-    Détecte le type de document (contrat, testament, acte notarié, lettre, etc.)
+    Détecte le type de document de manière précise en utilisant une approche hybride:
+    1. Analyse basée sur des patterns (règles)
+    2. Analyse LLM pour les cas complexes
     """
-    content_lower = file_content[:3000].lower()  # Augmenter la fenêtre d'analyse
+    content_lower = file_content[:5000].lower()  # Augmenter la fenêtre d'analyse
     file_name_lower = file_name.lower()
+    content_sample = file_content[:1500]  # Échantillon pour l'analyse LLM si nécessaire
     
-    # Détection des lettres (doit être fait en premier pour éviter les faux positifs)
+    # ============ DÉTECTION PAR PATTERNS (FAST PATH) ============
+    
+    # Détection CV/Resume (très spécifique)
+    cv_keywords = ['curriculum vitae', 'cv', 'resume', 'résumé professionnel', 'professional summary']
+    cv_indicators = ['expérience professionnelle', 'professional experience', 'compétences', 'skills', 
+                     'formation', 'education', 'emploi', 'job', 'poste', 'position',
+                     'langues', 'languages', 'certifications', 'réalisations', 'achievements']
+    if any(word in file_name_lower for word in cv_keywords) or \
+       (any(word in content_lower[:800] for word in cv_keywords) and 
+        sum(1 for word in cv_indicators if word in content_lower) >= 3):
+        return 'cv_resume'
+    
+    # Détection facture/Invoice (très spécifique)
+    invoice_keywords = ['facture', 'invoice', 'bill', 'reçu', 'receipt', 'quittance']
+    invoice_indicators = ['montant total', 'total amount', 'tva', 'tax', 'date d\'émission', 'issue date',
+                          'numéro de facture', 'invoice number', 'client', 'customer', 'paiement', 'payment']
+    if any(word in file_name_lower for word in invoice_keywords) or \
+       (any(word in content_lower[:800] for word in invoice_keywords) and 
+        sum(1 for word in invoice_indicators if word in content_lower) >= 2):
+        return 'facture_invoice'
+    
+    # Détection des lettres (doit être fait tôt pour éviter les faux positifs)
     letter_keywords = ['lettre', 'letter', 'correspondance', 'correspondence', 'courrier', 'mail']
     letter_context = ['soutien', 'support', 'recommandation', 'recommendation', 'demande', 'request', 
-                     'attestation', 'certificate', 'certificat', 'justificatif', 'justification']
-    
+                     'attestation', 'certificate', 'certificat', 'justificatif', 'justification',
+                     'cher monsieur', 'dear sir', 'madame', 'madam', 'monsieur', 'sir']
     if any(word in file_name_lower for word in letter_keywords) or \
        (any(word in content_lower[:500] for word in letter_keywords) and 
-        any(word in content_lower for word in letter_context)):
+        (any(word in content_lower for word in letter_context) or 
+         'objet:' in content_lower[:300] or 'subject:' in content_lower[:300])):
         return 'lettre'
     
-    # Détection des documents financiers/fiscaux
-    financial_keywords = ['t4', 't-4', 'relevé', 'statement', 'payroll', 'paie', 'salaire', 'salary', 
-                          'revenu', 'income', 'impôt', 'tax', 'déduction', 'deduction']
+    # Détection des documents financiers/fiscaux (améliorée)
+    financial_keywords = ['t4', 't-4', 't4a', 't4a-', 'relevé', 'statement', 'payroll', 'paie', 
+                          'salaire', 'salary', 'revenu', 'income', 'impôt', 'tax', 'déduction', 'deduction',
+                          'feuillet', 'slip', 'relevé fiscal', 'tax statement', 'avis de cotisation', 'notice of assessment']
+    financial_indicators = ['revenus bruts', 'gross income', 'revenus nets', 'net income', 'impôt retenu', 'tax withheld',
+                           'année', 'year', 'période', 'period', 'numéro d\'assurance sociale', 'social insurance number']
     if any(word in file_name_lower for word in financial_keywords) or \
-       any(word in content_lower[:500] for word in financial_keywords):
+       (any(word in content_lower[:800] for word in financial_keywords) and 
+        sum(1 for word in financial_indicators if word in content_lower) >= 2):
         return 'document_financier'
     
-    # Détection des contrats (doit être fait après les lettres)
-    if any(word in content_lower or word in file_name_lower for word in ['contrat', 'contract', 'agreement']):
-        if any(word in content_lower for word in ['location', 'rental', 'bail', 'loyer']):
+    # Détection des contrats (améliorée avec plus de contexte)
+    contract_keywords = ['contrat', 'contract', 'agreement', 'convention', 'accord']
+    if any(word in content_lower or word in file_name_lower for word in contract_keywords):
+        # Contrat de location
+        rental_indicators = ['location', 'rental', 'bail', 'loyer', 'rent', 'locataire', 'tenant', 
+                            'bailleur', 'landlord', 'propriétaire', 'owner', 'garant', 'guarantor',
+                            'charges locatives', 'maintenance fees', 'caution', 'deposit']
+        if sum(1 for word in rental_indicators if word in content_lower) >= 3:
             return 'contrat_location'
-        elif any(word in content_lower for word in ['travail', 'employment', 'employé', 'employee']):
+        
+        # Contrat de travail
+        employment_indicators = ['travail', 'employment', 'employé', 'employee', 'employeur', 'employer',
+                                'salaire', 'salary', 'rémunération', 'remuneration', 'poste', 'position',
+                                'période d\'essai', 'probation', 'cde', 'cdi', 'cdd', 'contract duration']
+        if sum(1 for word in employment_indicators if word in content_lower) >= 3:
             return 'contrat_travail'
-        elif any(word in content_lower for word in ['vente', 'sale', 'achat', 'purchase']):
+        
+        # Contrat de vente
+        sale_indicators = ['vente', 'sale', 'achat', 'purchase', 'acheteur', 'buyer', 'vendeur', 'seller',
+                          'prix', 'price', 'livraison', 'delivery', 'garantie', 'warranty', 'garant', 'guarantee']
+        if sum(1 for word in sale_indicators if word in content_lower) >= 3:
             return 'contrat_vente'
-        else:
-            return 'contrat_generique'
+        
+        # Contrat générique
+        return 'contrat_generique'
     
     # Détection des testaments
-    elif any(word in content_lower or word in file_name_lower for word in ['testament', 'will']):
+    will_keywords = ['testament', 'will', 'testamentaire', 'testamentary']
+    will_indicators = ['héritier', 'heir', 'bénéficiaire', 'beneficiary', 'legs', 'bequest', 'legataire', 'legatee',
+                      'exécuteur', 'executor', 'succession', 'inheritance']
+    if any(word in content_lower or word in file_name_lower for word in will_keywords) or \
+       (any(word in will_keywords for word in file_name_lower) and 
+        sum(1 for word in will_indicators if word in content_lower) >= 2):
         return 'testament'
     
-    # Détection des actes notariés (doit être plus strict pour éviter les faux positifs)
-    notary_keywords = ['acte notarié', 'notarial act', 'acte authentique', 'authentic act']
-    notary_context = ['notaire', 'notary', 'étude notariale', 'notary office', 'minute', 
-                     'authentification', 'authentification', 'signature authentique']
+    # Détection des contrats de mariage/prénuptiaux (Prenuptial Agreement)
+    prenuptial_keywords = ['contrat de mariage', 'prenuptial agreement', 'prenup', 'contrat prénuptial', 
+                          'marriage contract', 'convention matrimoniale', 'marital agreement']
+    prenuptial_indicators = ['régime matrimonial', 'matrimonial regime', 'biens', 'property', 'séparation de biens',
+                            'separation of property', 'communauté', 'community', 'époux', 'spouse', 'mariage', 'marriage']
+    if any(phrase in content_lower or phrase in file_name_lower for phrase in prenuptial_keywords) or \
+       (any(word in file_name_lower for word in ['prenup', 'prenuptial', 'marriage contract', 'contrat mariage']) and 
+        sum(1 for word in prenuptial_indicators if word in content_lower) >= 2):
+        return 'contrat_prenuptial'
     
-    # Un acte notarié doit contenir à la fois des mots-clés d'acte ET de notaire
+    # Détection des procurations (Power Of Attorney)
+    poa_keywords = ['procuration', 'power of attorney', 'power-of-attorney', 'mandat', 'mandate', 'poa']
+    poa_indicators = ['mandant', 'principal', 'mandataire', 'agent', 'attorney-in-fact', 'pouvoir', 'authority',
+                     'représenter', 'represent', 'agir au nom', 'act on behalf', 'signer', 'sign']
+    if any(word in content_lower or word in file_name_lower for word in poa_keywords) or \
+       (any(word in file_name_lower for word in ['poa', 'power attorney', 'procuration']) and 
+        sum(1 for word in poa_indicators if word in content_lower) >= 2):
+        return 'procuration_poa'
+    
+    # Détection des accords de confidentialité (NDA)
+    nda_keywords = ['accord de confidentialité', 'non-disclosure agreement', 'nda', 'n.d.a.', 
+                   'confidentiality agreement', 'accord de non-divulgation']
+    nda_indicators = ['confidentiel', 'confidential', 'secret', 'secret information', 'proprietary', 'propriétaire',
+                     'divulgation', 'disclosure', 'révéler', 'reveal', 'informations confidentielles']
+    if any(phrase in content_lower or phrase in file_name_lower for phrase in nda_keywords) or \
+       (any(word in file_name_lower for word in ['nda', 'non-disclosure', 'confidentiality']) and 
+        sum(1 for word in nda_indicators if word in content_lower) >= 2):
+        return 'accord_confidentialite_nda'
+    
+    # Détection des actes de propriété immobilière (Real Estate Deed)
+    deed_keywords = ['acte de propriété', 'real estate deed', 'property deed', 'acte de vente immobilière',
+                    'deed of sale', 'acte notarié', 'notarial deed', 'title deed', 'titre de propriété']
+    deed_indicators = ['propriétaire', 'owner', 'propriété immobilière', 'real estate', 'bien immobilier',
+                      'property', 'parcelle', 'lot', 'cadastre', 'cadastral', 'superficie', 'area',
+                      'adresse', 'address', 'bornage', 'boundary', 'hypothèque', 'mortgage']
+    if any(phrase in content_lower or phrase in file_name_lower for phrase in deed_keywords) or \
+       (any(word in file_name_lower for word in ['deed', 'acte propriété', 'titre propriété']) and 
+        sum(1 for word in deed_indicators if word in content_lower) >= 3):
+        return 'acte_propriete_immobiliere'
+    
+    # Détection des actes notariés (améliorée)
+    notary_keywords = ['acte notarié', 'notarial act', 'acte authentique', 'authentic act', 'acte sous seing privé']
+    notary_context = ['notaire', 'notary', 'étude notariale', 'notary office', 'minute', 
+                     'authentification', 'authentification', 'signature authentique', 'répertoire des minutes']
+    
     has_acte = any(word in content_lower or word in file_name_lower for word in ['acte', 'deed'])
     has_notary = any(word in content_lower for word in notary_context) or \
                  any(phrase in content_lower for phrase in notary_keywords)
     
     if has_acte and has_notary:
         return 'acte_notarie'
-    elif any(word in content_lower or word in file_name_lower for word in ['bail', 'lease']):
-        return 'bail'
-    else:
-        return 'document_generique'
+    
+    # Détection bail/lease (séparé des contrats de location)
+    if any(word in content_lower or word in file_name_lower for word in ['bail', 'lease']) and \
+       'contrat' not in content_lower[:500]:  # Si c'est mentionné comme bail mais pas comme contrat
+        return 'contrat_location'  # Normaliser vers contrat_location
+    
+    # ============ DÉTECTION PAR LLM POUR CAS COMPLEXES ============
+    # Si aucun pattern n'a matché, utiliser un LLM pour une détection plus fine
+    try:
+        detection_prompt = f"""Analyze this document sample and identify its type. Return ONLY one of these exact types:
+- cv_resume
+- facture_invoice
+- contrat_location
+- contrat_travail
+- contrat_vente
+- contrat_generique
+- contrat_prenuptial
+- procuration_poa
+- accord_confidentialite_nda
+- acte_propriete_immobiliere
+- testament
+- acte_notarie
+- lettre
+- document_financier
+- document_generique
+
+File name: {file_name}
+Content sample (first 1500 chars): {content_sample}
+
+Return ONLY the type identifier, nothing else:"""
+        
+        detected_type = call_mistral_api(detection_prompt).strip().lower()
+        
+        # Valider que le type détecté est valide
+        valid_types = ['cv_resume', 'facture_invoice', 'contrat_location', 'contrat_travail', 
+                      'contrat_vente', 'contrat_generique', 'contrat_prenuptial', 'procuration_poa',
+                      'accord_confidentialite_nda', 'acte_propriete_immobiliere', 'testament', 
+                      'acte_notarie', 'lettre', 'document_financier', 'document_generique']
+        if detected_type in valid_types:
+            return detected_type
+    except Exception as e:
+        logger.warning(f"LLM document type detection failed: {e}")
+    
+    # Fallback
+    return 'document_generique'
 
 async def extract_structured_data(file_content: str, file_name: str, document_type: str, 
                                   selected_model: str = DEFAULT_MODEL, language: str = 'fr') -> Dict[str, Any]:
@@ -2975,7 +3507,7 @@ async def query_model_online_mode(user_query: str, selected_model: str = DEFAULT
                         f"{t['enriched_response']}"
                     )
                     
-                    enriched_response = await execute_model_query(enrichment_prompt, selected_model)
+                    enriched_response, _ = await execute_model_query_with_fallback(enrichment_prompt, selected_model, user_query)
                     
                     # Ajout des métadonnées de recherche
                     final_response = (
@@ -3232,95 +3764,114 @@ async def handle_query():
             is_binary = data.get('is_binary', False)
             
             # ✅ Directory/corpus mode (répertoire importé)
-            # Conserver l'existant: si file_name est fourni -> comportement inchangé.
-            # Nouveau: si aucun fichier n'est sélectionné MAIS un vector store de session existe,
-            # on autorise les requêtes "sur tout le corpus" (répertoire).
+            # Si un vector store existe pour cette session, autoriser les requêtes même sans file_name
+            # Si use_backend_vectorstore est True OU si un vector store existe pour la session, on peut procéder
+            has_vector_store = session_id in vector_stores
+            should_use_vectorstore = use_backend_vectorstore or has_vector_store
+            
             if not file_name:
-                if use_backend_vectorstore and session_id in vector_stores:
+                if should_use_vectorstore and has_vector_store:
                     file_name = "__DIRECTORY_CORPUS__"
                     file_content = ""
                     # on laisse directory_content se remplir depuis le vector store ci-dessous
                     is_binary = False
+                    use_backend_vectorstore = True  # Forcer à True puisque le vector store existe
                     logger.info(f"📚 Mode CORPUS (répertoire) activé: query sur l'ensemble des documents, session={session_id}")
                 else:
                     return jsonify({
-                        "error": "Mode local nécessite un file_name (ou un vector store de session via /index-directory)",
+                        "error": "Mode local nécessite un fichier sélectionné ou un répertoire indexé",
                         "mode": "local",
-                        "suggestion": "Sélectionnez un fichier, ou importez un répertoire puis utilisez use_backend_vectorstore=true"
+                        "session_id": session_id,
+                        "has_vector_store": has_vector_store,
+                        "use_backend_vectorstore": use_backend_vectorstore,
+                        "suggestion": "Sélectionnez un fichier, ou importez un répertoire pour l'indexer"
                     }), 400
             
             # NOUVELLE LOGIQUE: Recherche sémantique améliorée avec recherche hybride (sémantique + mots-clés)
-            relevant_docs = []
-            if use_backend_vectorstore and session_id in vector_stores:
+            relevant_docs: List[Document] = []
+            # Utiliser le vector store si disponible (que use_backend_vectorstore soit True ou False, si le store existe on l'utilise)
+            if should_use_vectorstore and has_vector_store:
                 try:
-                    session_store = vector_stores[session_id]
-                    session_vector_store = session_store['store']
-                    
-                    logger.info(f"🔍 Hybrid retrieval (semantic + lexical) dans le vector store session {session_id}")
+                    session_store = vector_stores.get(session_id)
+                    if not session_store or not isinstance(session_store, dict) or 'store' not in session_store or session_store.get('store') is None:
+                        logger.warning(f"Vector store non disponible pour session {session_id}")
+                    else:
+                        session_vector_store = session_store['store']
+                        logger.info(f"🔍 Hybrid retrieval (semantic + lexical) dans le vector store session {session_id}")
 
-                    # Two-pass retrieval (requested):
-                    # 1) If a specific file is selected, retrieve from that file first
-                    # 2) Then retrieve from the whole directory/corpus
-                    file_first_docs: List[Document] = []
-                    file_first_debug: Dict[str, Any] = {}
-                    if file_name and file_name != "__DIRECTORY_CORPUS__":
-                        file_first_docs, file_first_debug = hybrid_retrieve_documents(
+                        # Two-pass retrieval (requested):
+                        # 1) If a specific file is selected, retrieve from that file first
+                        # 2) Then retrieve from the whole directory/corpus
+                        file_first_docs: List[Document] = []
+                        file_first_debug: Dict[str, Any] = {}
+                        if file_name and file_name != "__DIRECTORY_CORPUS__":
+                            file_first_docs, file_first_debug = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=70,
+                                k_final=6,
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                                preferred_sources=[file_name],
+                            )
+                        else:
+                            # Initialiser file_first_debug avec un dict vide si pas de fichier sélectionné
+                            file_first_debug = {}
+
+                        corpus_result = hybrid_retrieve_documents(
                             vector_store=session_vector_store,
                             query=user_query,
                             k_candidates=70,
-                            k_final=6,
+                            k_final=12,
                             semantic_weight=0.60,
                             bm25_weight=0.30,
                             exact_weight=0.10,
-                            preferred_sources=[file_name],
                         )
+                        if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
+                            corpus_docs, corpus_debug = corpus_result
+                            if not isinstance(corpus_debug, dict):
+                                corpus_debug = {}
+                        else:
+                            corpus_docs = []
+                            corpus_debug = {}
 
-                    corpus_docs, corpus_debug = hybrid_retrieve_documents(
-                        vector_store=session_vector_store,
-                        query=user_query,
-                        k_candidates=70,
-                        k_final=12,
-                        semantic_weight=0.60,
-                        bm25_weight=0.30,
-                        exact_weight=0.10,
-                    )
+                        # Merge preserving order, dedupe by (source, preview)
+                        merged: List[Document] = []
+                        seen = set()
+                        for d in (file_first_docs + corpus_docs):
+                            src = (d.metadata.get("source") or d.metadata.get("fileName") or d.metadata.get("file_name") or "").strip().lower()
+                            key = (src, (d.page_content or "")[:120])
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            merged.append(d)
+                            if len(merged) >= 14:
+                                break
 
-                    # Merge preserving order, dedupe by (source, preview)
-                    merged: List[Document] = []
-                    seen = set()
-                    for d in (file_first_docs + corpus_docs):
-                        src = (d.metadata.get("source") or d.metadata.get("fileName") or d.metadata.get("file_name") or "").strip().lower()
-                        key = (src, (d.page_content or "")[:120])
-                        if key in seen:
-                            continue
-                        seen.add(key)
-                        merged.append(d)
-                        if len(merged) >= 14:
-                            break
-
-                    relevant_docs = merged
-                    logger.info(
-                        f"🎯 Hybrid two-pass selected {len(relevant_docs)} docs | "
-                        f"file_first={len(file_first_docs)} top={file_first_debug.get('top', [])} | "
-                        f"corpus_top={corpus_debug.get('top', [])}"
-                    )
-                    
-                    # Ajout des documents pertinents au contexte avec métadonnées enrichies
-                    # Éviter les doublons en utilisant un set de file_name + début du contenu
-                    seen_docs = set()
-                    for doc in relevant_docs:
-                        file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
-                        content_preview = doc.page_content[:100]  # Premier 100 chars pour détecter les doublons
-                        doc_key = f"{file_name_from_meta}:{content_preview}"
+                        relevant_docs = merged
+                        logger.info(
+                            f"🎯 Hybrid two-pass selected {len(relevant_docs)} docs | "
+                            f"file_first={len(file_first_docs)} top={file_first_debug.get('top', []) if isinstance(file_first_debug, dict) else []} | "
+                            f"corpus_top={corpus_debug.get('top', []) if isinstance(corpus_debug, dict) else []}"
+                        )
                         
-                        if doc_key not in seen_docs:
-                            seen_docs.add(doc_key)
-                        directory_content.append({ 
-                                "fileName": file_name_from_meta, 
-                                "content": doc.page_content[:2500]  # Augmenté à 2500 chars par chunk
-                        })
-                    
-                    logger.info(f"📚 {len(seen_docs)} documents uniques ajoutés depuis le vector store de session")
+                        # Ajout des documents pertinents au contexte avec métadonnées enrichies
+                        # Éviter les doublons en utilisant un set de file_name + début du contenu
+                        seen_docs = set()
+                        for doc in relevant_docs:
+                            file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
+                            content_preview = doc.page_content[:100]  # Premier 100 chars pour détecter les doublons
+                            doc_key = f"{file_name_from_meta}:{content_preview}"
+                            
+                            if doc_key not in seen_docs:
+                                seen_docs.add(doc_key)
+                            directory_content.append({ 
+                                    "fileName": file_name_from_meta, 
+                                    "content": doc.page_content[:2500]  # Augmenté à 2500 chars par chunk
+                            })
+                        
+                        logger.info(f"📚 {len(seen_docs)} documents uniques ajoutés depuis le vector store de session")
                     
                 except Exception as e:
                     logger.warning(f"Erreur lors de la récupération depuis le vector store: {str(e)}")
@@ -3371,7 +3922,7 @@ async def handle_query():
             
             # Exécution de la requête en mode local - recherche en ligne DÉSACTIVÉE par défaut
             enable_auto_search = data.get('enable_auto_online_search', False)  # Désactivé par défaut en mode local
-            response = await query_model_local_mode(
+            response, actual_model_used = await query_model_local_mode(
                 file_name=file_name,
                 file_content=file_content,
                 directory_content=directory_content,
@@ -3387,7 +3938,7 @@ async def handle_query():
             return jsonify({
                 "response": response,
                 "mode": "local",
-                "model_used": selected_model,
+                "model_used": actual_model_used,
                 "model_config": MODEL_CONFIG.get(selected_model, {}),
                 "context_info": {
                     "file_name": file_name,
@@ -3503,12 +4054,15 @@ def handle_query_stream():
             # Si le vector store backend est disponible, utiliser la recherche sémantique améliorée
             if use_backend_vectorstore and session_id in vector_stores:
                 try:
-                    session_store = vector_stores[session_id]
-                    session_vector_store = session_store['store']
-                    
-                    # Utiliser la fonction helper synchrone pour la recherche sémantique (avec historique pour détecter les pronoms)
-                    directory_content = search_semantic_documents_sync(session_vector_store, user_query, session_id, conversation_history)
-                    logger.info(f"✅ {len(directory_content)} documents récupérés par recherche sémantique pour le streaming")
+                    session_store = vector_stores.get(session_id)
+                    if not session_store or not isinstance(session_store, dict) or 'store' not in session_store or session_store.get('store') is None:
+                        logger.warning(f"Vector store non disponible pour session {session_id}")
+                    else:
+                        session_vector_store = session_store['store']
+                        
+                        # Utiliser la fonction helper synchrone pour la recherche sémantique (avec historique pour détecter les pronoms)
+                        directory_content = search_semantic_documents_sync(session_vector_store, user_query, session_id, conversation_history)
+                        logger.info(f"✅ {len(directory_content)} documents récupérés par recherche sémantique pour le streaming")
                 except Exception as e:
                     logger.warning(f"Erreur lors de la recherche sémantique en streaming: {str(e)}")
             

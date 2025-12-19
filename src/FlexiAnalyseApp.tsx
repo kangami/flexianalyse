@@ -660,6 +660,9 @@ const FlexiAnalyseApp: React.FC = () => {
     // Marquer qu'un répertoire est sélectionné
     setSelectedDirectory(files);
     
+    // Désactiver la recherche web et forcer le mode "local" dès qu'un répertoire est importé
+    setResearchMode('local');
+    
     // Réinitialiser le fichier sélectionné pour afficher le message de sélection
     setSelectedFile(null);
     setFileDetails(null);
@@ -999,11 +1002,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
     try {
       // Détermination automatique du mode si aucun fichier n'est sélectionné
+      // MAIS permettre le mode local si un répertoire est indexé (recherche sur le corpus)
       let effectiveMode = mode;
-      if (!selectedFile && mode === 'local') {
-        console.log('Aucun fichier sélectionné, basculement automatique vers le mode online');
+      if (!selectedFile && mode === 'local' && !isDirectoryIndexed && directoryFiles.length === 0) {
+        console.log('Aucun fichier sélectionné et aucun répertoire indexé, basculement automatique vers le mode online');
         effectiveMode = 'online';
-        //setResearchMode('online');
       }
 
       // Préparation des données selon le mode
@@ -1038,45 +1041,57 @@ const FlexiAnalyseApp: React.FC = () => {
         }
 
         // MODE LOCAL: Utilisation de l'indexation backend
-        if (!selectedFile || !fileDetails) {
-          throw new Error('Mode local nécessite un fichier sélectionné');
+        // Permettre le mode local même sans fichier sélectionné si un répertoire est indexé (recherche sur le corpus)
+        if (!selectedFile && (!isDirectoryIndexed || directoryFiles.length === 0)) {
+          throw new Error('Mode local nécessite un fichier sélectionné ou un répertoire indexé');
         }
 
-        // Mettre à jour le statut pour l'analyse du fichier
-        setCurrentStatus(t('status.analyzing.file', { fileName: selectedFile.name }));
+        // Si un fichier est sélectionné, extraire son contenu
+        let currentFileContent: string | null = null;
+        let isBinary = false;
+        let fileName: string | null = null;
 
-        // Traitement du fichier actuel
-        const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
-        const isBinary = ['.docx', '.pdf'].includes(extension);
-        let currentFileContent: string;
+        if (selectedFile && fileDetails) {
+          // Mettre à jour le statut pour l'analyse du fichier
+          setCurrentStatus(t('status.analyzing.file', { fileName: selectedFile.name }));
+          fileName = selectedFile.name;
 
-        if (isBinary) {
-          if (fileDetails.content instanceof ArrayBuffer) {
-            const contentCopy = fileDetails.content.slice(0); 
-            if (extension === '.docx') {
-              currentFileContent = await extractTextFromDocx(contentCopy);
-            } else if (extension === '.pdf') {
-              currentFileContent = await extractTextFromPdf(contentCopy);
+          // Traitement du fichier actuel
+          const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
+          isBinary = ['.docx', '.pdf'].includes(extension);
+
+          if (isBinary) {
+            if (fileDetails.content instanceof ArrayBuffer) {
+              const contentCopy = fileDetails.content.slice(0); 
+              if (extension === '.docx') {
+                currentFileContent = await extractTextFromDocx(contentCopy);
+              } else if (extension === '.pdf') {
+                currentFileContent = await extractTextFromPdf(contentCopy);
+              } else {
+                currentFileContent = 'Type de fichier binaire non supporté';
+              }
             } else {
-              currentFileContent = 'Type de fichier binaire non supporté';
+              currentFileContent = 'Erreur: Contenu binaire non disponible';
             }
           } else {
-            currentFileContent = 'Erreur: Contenu binaire non disponible';
+            currentFileContent = typeof fileDetails.content === 'string' ? fileDetails.content : '';
           }
         } else {
-          currentFileContent = typeof fileDetails.content === 'string' ? fileDetails.content : '';
+          // Pas de fichier sélectionné, mais répertoire indexé : recherche sur le corpus
+          fileName = '__DIRECTORY_CORPUS__';
+          setCurrentStatus(t('status.searching.documents'));
         }
 
         // Payload pour mode local avec indexation backend
         requestPayload = {
           ...requestPayload,
-          file_name: selectedFile.name,
+          file_name: fileName,
           file_content: currentFileContent,
           directory_content: [], // Vide: le backend gérera via son vector store
           repo_structure: repoStructure,
           is_binary: isBinary,
           disable_online_search: true,
-          use_backend_vectorstore: isDirectoryIndexed, // Nouveau flag
+          use_backend_vectorstore: isDirectoryIndexed || directoryFiles.length > 0, // Utiliser le vector store si répertoire indexé
         };
 
         console.log(`🚀 Envoi de la requête en mode local:`, {
@@ -1174,7 +1189,7 @@ const FlexiAnalyseApp: React.FC = () => {
           // Logique de détection alternative du contenu modifié
           const lines = aiResponse.split('\n');
           const currentFileContent = requestPayload.file_content;
-          const originalLines = currentFileContent.split('\n').filter(line => line.trim());
+          const originalLines = currentFileContent.split('\n').filter((line: string) => line.trim());
           let potentialContent: string[] = [];
           let isCollecting = false;
 
@@ -1257,15 +1272,12 @@ const FlexiAnalyseApp: React.FC = () => {
     // Ajouter le message à l'historique
     setChatHistory((prev) => [...prev, newMessage]);
     setLoading(true);
-    setCurrentStatus(mode === 'local' ? t('status.analyzing.question') : t('status.processing.request'));
+    // Note: mode est toujours 'online' ici car handleQuerySubmitWithStream redirige vers handleQuerySubmit pour 'local'
+    setCurrentStatus(t('status.processing.request'));
 
     try {
-      // Mettre à jour le statut selon le mode
-      if (mode === 'local' && selectedFile) {
-        setCurrentStatus(t('status.analyzing.file', { fileName: selectedFile.name }));
-      } else {
-        setCurrentStatus(t('status.searching.online'));
-      }
+      // Mettre à jour le statut (toujours 'online' dans cette fonction car 'local' redirige vers handleQuerySubmit)
+      setCurrentStatus(t('status.searching.online'));
 
       const response = await fetch(`${apiUrl}/query-stream`, {
         method: 'POST',
