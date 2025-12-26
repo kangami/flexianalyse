@@ -1,6 +1,12 @@
 """
 Configuration des modèles AI disponibles
 """
+import os
+from dotenv import load_dotenv
+
+# Load environment variables early
+load_dotenv()
+
 MODEL_CONFIG = {
     "gpt-3.5-turbo": {
         "name": "GPT-3.5 Turbo",
@@ -71,25 +77,26 @@ MODEL_CONFIG = {
         "cost_tier": "free",
         "api_type": "ollama"
     },
-    "openai": {
-        "name": "OpenAI GPT",
-        "provider": "OpenAI",
-        "model_id": "gpt-4o",
-        "max_tokens": 500,
-        "description": "Legacy OpenAI model",
-        "cost_tier": "medium",
-        "api_type": "chat"
+    "gemini-3-flash": {
+        "name": "Gemini 3 Flash",
+        "provider": "Google",
+        "model_id": "gemini-3-flash-preview",
+        "max_tokens": 8192,
+        "description": "Fast and efficient Gemini 3 Flash model",
+        "cost_tier": "low",
+        "api_type": "gemini"
     }
 }
 
 # Config constants
-import os
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODELS = ["llama3.2", "llama3"]
 DEFAULT_MODEL = "mistral"
 MISTRAL_MODEL = "mistral-medium-latest"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+# Support both GOOGLE_API_KEY and GEMINI_API_KEY for compatibility
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 # Note: La validation de OPENAI_API_KEY se fait dans FlaskConfig.validate_env_vars()
 # pour ne pas bloquer l'import du module

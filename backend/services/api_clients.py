@@ -13,6 +13,7 @@ from config.models import (
     OLLAMA_API_URL, OLLAMA_MODELS, OPENAI_API_KEY, MISTRAL_API_KEY
 )
 
+
 logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
@@ -213,6 +214,31 @@ def stream_response(prompt, selected_model="gpt-3.5-turbo"):
                     if chunk.choices[0].delta.content:
                         yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
                 yield f"data: {json.dumps({'done': True})}\n\n"
+        elif selected_model.lower().startswith("gemini"):
+            try:
+                response = call_gemini_api(prompt, selected_model)
+                words = response.split(' ')
+                for i in range(0, len(words), 3):
+                    chunk = ' '.join(words[i:i+3])
+                    if i + 3 < len(words):
+                        chunk += ' '
+                    yield f"data: {json.dumps({'content': chunk})}\n\n"
+                    time.sleep(0.05)
+                yield f"data: {json.dumps({'done': True})}\n\n"
+            except Exception as gemini_error:
+                logger.warning(f"Gemini failed: {str(gemini_error)}, falling back to GPT-3.5")
+                yield f"data: {json.dumps({'warning': 'Gemini indisponible, utilisation de GPT-3.5'})}\n\n"
+                stream = openai_client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.5,
+                    max_tokens=500,
+                    stream=True
+                )
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        yield f"data: {json.dumps({'content': chunk.choices[0].delta.content})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
         else:
             logger.warning(f"Unknown model {selected_model}, using GPT-3.5")
             yield f"data: {json.dumps({'warning': f'Modèle {selected_model} inconnu, utilisation de GPT-3.5'})}\n\n"
@@ -307,4 +333,93 @@ def call_ollama_api(prompt, selected_model="llama3", max_retries=3):
     
     raise RuntimeError("[Ollama] Max retries exceeded")
 
+
+def call_gemini_api(prompt, selected_model="gemini-3-flash", max_retries=3):
+    """Call Google Gemini API using the new google.genai library"""
+    try:
+        from google.genai import Client
+    except ImportError:
+        raise ValueError("google-genai package is not installed. Please install it with: pip install google-genai")
+    
+    # Get API key directly from environment to ensure it's loaded after load_dotenv()
+    # Support both GOOGLE_API_KEY and GEMINI_API_KEY for compatibility
+    gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    
+    if not gemini_api_key:
+        raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY environment variable not set")
+    
+    model_config = get_model_config(selected_model)
+    model_id = model_config["model_id"]
+    
+    # Initialize client with API key
+    client = None
+    try:
+        client = Client(api_key=gemini_api_key)
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[Gemini] Using model: {model_id}")
+                
+                # Generate content using the new API
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=prompt
+                )
+                
+                # Extract text from response
+                # The response structure may be different, check common attributes
+                if hasattr(response, 'text'):
+                    return response.text.strip()
+                elif hasattr(response, 'candidates') and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content') and hasattr(candidate.content, 'parts'):
+                        text_parts = [part.text for part in candidate.content.parts if hasattr(part, 'text')]
+                        if text_parts:
+                            return ' '.join(text_parts).strip()
+                    elif hasattr(candidate, 'content'):
+                        # Try to get text directly from content
+                        content = candidate.content
+                        if hasattr(content, 'text'):
+                            return content.text.strip()
+                elif hasattr(response, 'content'):
+                    content = response.content
+                    if hasattr(content, 'parts'):
+                        text_parts = [part.text for part in content.parts if hasattr(part, 'text')]
+                        if text_parts:
+                            return ' '.join(text_parts).strip()
+                
+                # Fallback: try to convert to string
+                response_str = str(response)
+                if response_str:
+                    return response_str.strip()
+                
+                raise ValueError("Empty response from Gemini API")
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                # If model not found, provide helpful error message
+                if "not found" in error_str or "not supported" in error_str or "404" in error_str:
+                    logger.error(f"[Gemini] Model {model_id} not found. Please check available models or update model_id in config.")
+                    raise ValueError(f"Gemini model '{model_id}' not found. Please check available models.")
+                
+                logger.warning(f"[Gemini] Attempt {attempt+1}/{max_retries} failed with {model_id}: {str(e)}")
+                
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"[Gemini] Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"[Gemini] Max retries exceeded: {str(e)}")
+                    raise e
+        
+        raise RuntimeError("[Gemini] Max retries exceeded")
+        
+    finally:
+        # Close the client to release resources
+        if client:
+            try:
+                client.close()
+            except Exception:
+                pass  # Ignore errors when closing
 

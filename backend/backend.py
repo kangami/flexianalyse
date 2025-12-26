@@ -30,7 +30,7 @@ from config import (
 from utils.file_utils import extract_text_from_docx, extract_text_from_pdf
 from utils.translations import translations
 from services.api_clients import (
-    call_openai_api, call_mistral_api, call_ollama_api, 
+    call_openai_api, call_mistral_api, call_ollama_api, call_gemini_api,
     stream_response, openai_client, get_model_config
 )
 from services.analysis_service import analyze_file_content, save_file_description
@@ -732,6 +732,8 @@ async def _OLD_analyze_file_content(file_content, file_name, is_binary=False, ex
             description = call_openai_api(prompt, "openai")
         elif selected_model.lower() == "mistral":
             description = call_mistral_api(prompt)
+        elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
+            description = call_gemini_api(prompt, selected_model)
         elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
             description = call_ollama_api(prompt, selected_model)
         else:
@@ -1579,6 +1581,8 @@ async def query_model(file_name, file_content, directory_content, repo_structure
             result = call_openai_api(prompt, "openai")
         elif selected_model.lower() == "mistral":
             result = call_mistral_api(prompt)
+        elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
+            result = call_gemini_api(prompt, selected_model)
         elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
             result = call_ollama_api(prompt, selected_model)
         else:
@@ -1644,6 +1648,8 @@ def test_model(model_id):
             response = call_openai_api(test_prompt, model_id)
         elif model_id == "mistral":
             response = call_mistral_api(test_prompt)
+        elif model_id.startswith("gemini") or model_id in ["gemini-3-flash", "gemini-pro"]:
+            response = call_gemini_api(test_prompt, model_id)
         elif model_id in OLLAMA_MODELS or model_id == "llama3":
             response = call_ollama_api(test_prompt, model_id)
         else:
@@ -2675,6 +2681,8 @@ async def execute_model_query_with_fallback(prompt: str, selected_model: str, us
                 result = call_openai_api(prompt, model)
             elif model == "mistral":
                 result = call_mistral_api(prompt)
+            elif model.startswith("gemini") or model in ["gemini-3-flash", "gemini-pro"]:
+                result = call_gemini_api(prompt, model)
             elif model in OLLAMA_MODELS or model == "llama3":
                 result = call_ollama_api(prompt, model)
             else:
@@ -2728,6 +2736,8 @@ async def execute_model_query(prompt: str, selected_model: str) -> str:
             result = call_openai_api(prompt, "openai")
         elif selected_model.lower() == "mistral":
             result = call_mistral_api(prompt)
+        elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
+            result = call_gemini_api(prompt, selected_model)
         elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
             result = call_ollama_api(prompt, selected_model)
         else:

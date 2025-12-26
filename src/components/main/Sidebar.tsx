@@ -955,6 +955,46 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, []);
 
+  // Function to get model logo from CDN
+  const getModelLogo = useCallback((model: ModelInfo): string => {
+    const modelId = model.id.toLowerCase();
+    const provider = model.provider.toLowerCase();
+
+    // Map based on model ID first, then provider
+    // Using Simple Icons CDN with SVG format for reliable logo sources
+    if (modelId === 'auto') {
+      // Auto/Smart selector - using a robot/automation icon
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/robotframework.svg';
+    }
+    
+    // Check for Claude models BEFORE OpenAI or other generic AI checks
+    if (modelId.includes('claude') || provider.includes('anthropic')) {
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/anthropic.svg';
+    }
+
+    // Check for Gemini/Google models BEFORE OpenAI check to avoid conflicts
+    if (modelId.includes('gemini') || provider.includes('google')) {
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/google.svg';
+    }
+    
+    if (modelId.includes('gpt') || provider.includes('openai')) {
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/openai.svg';
+    }
+    
+    if (modelId.includes('mistral') || provider.includes('mistral')) {
+      // Mistral AI - using a generic AI/ML icon as fallback since Mistral isn't in simple-icons
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/matrix.svg';
+    }
+    
+    if (modelId.includes('llama') || provider.includes('local')) {
+      // Llama models are from Meta
+      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/meta.svg';
+    }
+    
+    // Default logo for unknown providers
+    return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/openai.svg';
+  }, []);
+
   // Memoized file structure calculations
   const fileStructure = useMemo(() => {
     const structure = generateRepoStructure(files);
@@ -1229,6 +1269,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                           <div className="flex items-center justify-between">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center space-x-2">
+                                <img 
+                                  src={getModelLogo(model)} 
+                                  alt={`${model.provider} logo`}
+                                  className="w-5 h-5 flex-shrink-0"
+                                  onError={(e) => {
+                                    // Fallback to a default icon if image fails to load
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
                                 <p className={`text-sm font-medium truncate ${
                                   selectedModel === model.id 
                                     ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')
@@ -1602,6 +1651,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2">
+                          <img 
+                            src={getModelLogo(model)} 
+                            alt={`${model.provider} logo`}
+                            className="w-5 h-5 flex-shrink-0"
+                            onError={(e) => {
+                              // Fallback to a default icon if image fails to load
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
                           <p className={`text-sm font-medium truncate ${
                             selectedModel === model.id 
                               ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')

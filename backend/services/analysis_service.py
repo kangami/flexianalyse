@@ -9,7 +9,7 @@ from typing import Dict, List, Any
 from langchain.schema import Document
 import aiocache
 from config.models import DEFAULT_MODEL, OLLAMA_MODELS
-from services.api_clients import call_openai_api, call_mistral_api, call_ollama_api
+from services.api_clients import call_openai_api, call_mistral_api, call_ollama_api, call_gemini_api
 from utils.translations import translations
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,8 @@ async def analyze_file_content(file_content, file_name, is_binary=False, extensi
             description = call_openai_api(prompt, "openai")
         elif selected_model.lower() == "mistral":
             description = call_mistral_api(prompt)
+        elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
+            description = call_gemini_api(prompt, selected_model)
         elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
             description = call_ollama_api(prompt, selected_model)
         else:
