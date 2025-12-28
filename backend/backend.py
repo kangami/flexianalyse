@@ -706,46 +706,6 @@ def _OLD_call_ollama_api(prompt, selected_model="llama3", max_retries=3):
     
     raise RuntimeError("[Ollama] Max retries exceeded")
 
-# analyze_file_content est maintenant importé depuis services.analysis_service
-async def _OLD_analyze_file_content(file_content, file_name, is_binary=False, extension='', selected_model=DEFAULT_MODEL, language='en'):
-    cache_key = f"desc_{file_name}_{selected_model}_{language}"
-    cached = await cache.get(cache_key)
-    if cached:
-        return cached
-
-    t = translations.get(language, translations['en'])
-
-    prompt = (
-        f"{t['analyze']} {t['content_of_file']} '{file_name}' {t['and_provide']}\n\n"
-        f"{t['content']}:\n{file_content}\n\n"
-        f"{t['description']}: {t['template']}"
-    )
-
-    try:
-        # Enhanced model routing with GPT-5 variants
-        if selected_model.lower() in ["gpt-3.5-turbo", "gpt-4o"]:
-            description = call_openai_api(prompt, selected_model)
-        elif selected_model.lower() in ["gpt-5", "gpt-5-mini", "gpt-5-nano"]:
-            description = call_openai_api(prompt, selected_model)
-        elif selected_model.lower() == "openai":
-            # Legacy compatibility
-            description = call_openai_api(prompt, "openai")
-        elif selected_model.lower() == "mistral":
-            description = call_mistral_api(prompt)
-        elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
-            description = call_gemini_api(prompt, selected_model)
-        elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
-            description = call_ollama_api(prompt, selected_model)
-        else:
-            logger.warning(f"Unknown model {selected_model}, falling back to default {DEFAULT_MODEL}")
-            description = call_openai_api(prompt, DEFAULT_MODEL)
-            
-    except Exception as e:
-        description = f"Error analyzing file: {str(e)}"
-
-    await cache.set(cache_key, description, ttl=3600)
-    return description
-
 async def infer_corpus_actions(documents: List[Document], language: str = 'en') -> Dict[str, Any]:
     """
     Utilise un petit appel modèle pour deviner le type de corpus (CV, rapports annuels, etc.)
@@ -3601,8 +3561,8 @@ async def index_directory():
 
         # Diviser les documents en chunks avec stratégie améliorée pour préserver le contexte
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=2000,  # Augmenté pour préserver plus de contexte
-            chunk_overlap=300,  # Plus de chevauchement pour préserver les phrases complètes
+            chunk_size=800,  # Augmenté pour préserver plus de contexte
+            chunk_overlap=150,  # Plus de chevauchement pour préserver les phrases complètes
             length_function=len,
             separators=["\n\n\n", "\n\n", "\n", ". ", " ", ""]  # Meilleure préservation des paragraphes
         )
@@ -3624,11 +3584,11 @@ async def index_directory():
             # Essayer d'abord le modèle plus récent (meilleure qualité sémantique)
             embeddings = OpenAIEmbeddings(
                 api_key=openai_api_key,
-                model="text-embedding-3-small"  # Plus performant que ada-002
+                model="text-embedding-3-large"  # Plus performant que ada-002
             )
-            logger.info("✅ Utilisation de text-embedding-3-small pour meilleure qualité sémantique")
+            logger.info("✅ Utilisation de text-embedding-3-large pour meilleure qualité sémantique")
         except Exception as e:
-            logger.warning(f"text-embedding-3-small non disponible, fallback vers ada-002: {str(e)}")
+            logger.warning(f"text-embedding-3-large non disponible, fallback vers ada-002: {str(e)}")
             embeddings = OpenAIEmbeddings(
                 api_key=openai_api_key,
                 model="text-embedding-ada-002"
