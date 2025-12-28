@@ -107,7 +107,7 @@ class AIBackendService {
   private baseURL: string;
   private uploadQueue: Set<string> = new Set();
 
-  constructor(baseURL = 'http://localhost:5000') {
+  constructor(baseURL = 'https://flexianalyse.com') {
     this.baseURL = baseURL;
   }
 
