@@ -23,6 +23,10 @@ interface ChatMessage {
   id: string;
   userQuery: string;
   aiResponse: string;
+  pagesReferenced?: Array<{
+    fileName: string;
+    pageNumber: number;
+  }>;
 }
 
 interface SuggestedAction {
@@ -238,28 +242,398 @@ const FlexiAnalyseApp: React.FC = () => {
     e.stopPropagation();
   }, []);
   
-  const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+  const apiUrl = 'http://127.0.0.1:5000'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
 
-  // Fonctions d'extraction de texte (doivent être définies avant generateFileSummary)
-  const extractTextFromDocx = async (content: ArrayBuffer): Promise<string> => {
+  // Interface pour une page de document
+  interface DocumentPage {
+    pageNumber: number;
+    content: string;
+    wordCount: number;
+    charCount: number;
+    images?: Array<{
+      id: string;
+      contentType: string;
+      dataUri?: string;
+      description?: string;
+      positionInPage?: string; // "top", "middle", "bottom"
+    }>;
+    hasImages: boolean;
+    startPosition: number; // Position dans le texte complet
+    endPosition: number;
+  }
+
+  // Interface pour le résultat d'extraction DOCX structuré
+  interface DocxExtractionResult {
+    text: string;
+    pages?: DocumentPage[];
+    images?: Array<{
+      id: string;
+      contentType: string;
+      dataUri?: string;
+      description?: string;
+      pageNumber?: number; // Page où se trouve l'image
+    }>;
+    hasImages: boolean;
+    metadata?: {
+      fileSize: number;
+      wordCount?: number;
+      pageCount?: number;
+      hasScannedContent?: boolean;
+      averageWordsPerPage?: number;
+    };
+  }
+
+  // Fonction améliorée d'extraction de texte DOCX avec support pour gros fichiers et images
+  const extractTextFromDocx = async (
+    content: ArrayBuffer,
+    onProgress?: (progress: { current: number; total: number; message: string }) => void
+  ): Promise<DocxExtractionResult> => {
     try {
       if (content.byteLength === 0) {
         console.error('Error: DOCX file is empty');
-        return 'Error: Le fichier DOCX est vide ou corrompu.';
+        return {
+          text: 'Error: Le fichier DOCX est vide ou corrompu.',
+          hasImages: false
+        };
       }
-      const result = await mammoth.extractRawText({ arrayBuffer: content });
-      if (!result || !result.value || result.value.trim().length === 0) {
-        return 'Le fichier DOCX ne contient pas de texte extractible.';
+
+      const fileSize = content.byteLength;
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+      const isLargeFile = fileSize > 5 * 1024 * 1024; // > 5MB
+
+      onProgress?.({ current: 0, total: 100, message: `Analyse du fichier DOCX (${fileSizeMB} MB)...` });
+
+      // Pour les gros fichiers, utiliser une stratégie de traitement optimisée
+      if (isLargeFile) {
+        console.log(`📄 Traitement d'un gros fichier DOCX (${fileSizeMB} MB), extraction optimisée...`);
+        onProgress?.({ current: 10, total: 100, message: 'Extraction du texte (fichier volumineux)...' });
       }
-      return result.value;
+
+      // Extraction du texte avec mammoth (optimisé pour gros fichiers)
+      // Utiliser extractRawText pour la performance sur gros fichiers
+      const textOptions = {
+        arrayBuffer: content,
+        // Options pour améliorer la performance sur gros fichiers
+        styleMap: [
+          // Ignorer certains styles pour accélérer l'extraction
+        ],
+        includeEmbeddedStyleMap: false, // Ne pas inclure les styles embed pour la performance
+        includeDefaultStyleMap: false
+      };
+
+      const textResult = await mammoth.extractRawText(textOptions);
+      
+      onProgress?.({ current: 50, total: 100, message: 'Texte extrait, recherche d\'images...' });
+
+      if (!textResult || !textResult.value) {
+        return {
+          text: 'Le fichier DOCX ne contient pas de texte extractible.',
+          hasImages: false,
+          metadata: { fileSize }
+        };
+      }
+
+      let extractedText = textResult.value;
+      const wordCount = extractedText.trim().split(/\s+/).filter(w => w.length > 0).length;
+
+      // Détecter si le texte semble être issu d'un scan (peu de texte, beaucoup de caractères spéciaux)
+      const hasScannedContent = wordCount < 100 && fileSize > 2 * 1024 * 1024;
+
+      // Extraction du contenu structuré par pages
+      onProgress?.({ current: 55, total: 100, message: 'Analyse de la structure des pages...' });
+      
+      let pages: DocumentPage[] = [];
+      try {
+        // Division du texte en pages basée sur:
+        // 1. Les sauts de page explicites (paragraphes courts entre longs paragraphes)
+        // 2. Une estimation basée sur le nombre de mots (~500 mots par page)
+        // Les sauts de page peuvent être représentés par <p style="page-break-before:always">
+        // ou des divs avec des classes spécifiques
+        
+        // Diviser le texte en pages basées sur:
+        // 1. Les sauts de page explicites (si présents)
+        // 2. Les sections logiques (paragraphes vides multiples)
+        // 3. Une estimation basée sur le nombre de mots (fallback)
+        
+        const paragraphs = extractedText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
+        const wordsPerPage = 500; // Estimation moyenne: ~500 mots par page
+        const currentPage: DocumentPage[] = [];
+        let currentPageContent: string[] = [];
+        let currentPageWords = 0;
+        let currentPageNumber = 1;
+        let globalPosition = 0;
+        
+        for (let i = 0; i < paragraphs.length; i++) {
+          const paragraph = paragraphs[i];
+          const paragraphWords = paragraph.trim().split(/\s+/).filter(w => w.length > 0).length;
+          const paragraphStartPos = globalPosition;
+          globalPosition += paragraph.length + 2; // +2 pour les sauts de ligne
+          
+          // Détecter les sauts de page explicites (paragraphe très court suivi d'un paragraphe long)
+          // ou si on dépasse la limite de mots par page
+          const shouldStartNewPage = 
+            (currentPageWords > 0 && currentPageWords + paragraphWords > wordsPerPage) ||
+            (paragraph.trim().length < 50 && i < paragraphs.length - 1 && paragraphs[i + 1]?.trim().length > 200);
+          
+          if (shouldStartNewPage && currentPageContent.length > 0) {
+            // Finaliser la page actuelle
+            const pageContent = currentPageContent.join('\n\n');
+            const pageWordCount = pageContent.trim().split(/\s+/).filter(w => w.length > 0).length;
+            
+            currentPage.push({
+              pageNumber: currentPageNumber,
+              content: pageContent,
+              wordCount: pageWordCount,
+              charCount: pageContent.length,
+              hasImages: false,
+              startPosition: paragraphStartPos - pageContent.length,
+              endPosition: paragraphStartPos
+            });
+            
+            // Démarrer une nouvelle page
+            currentPageNumber++;
+            currentPageContent = [];
+            currentPageWords = 0;
+          }
+          
+          currentPageContent.push(paragraph);
+          currentPageWords += paragraphWords;
+        }
+        
+        // Ajouter la dernière page
+        if (currentPageContent.length > 0) {
+          const pageContent = currentPageContent.join('\n\n');
+          const pageWordCount = pageContent.trim().split(/\s+/).filter(w => w.length > 0).length;
+          
+          currentPage.push({
+            pageNumber: currentPageNumber,
+            content: pageContent,
+            wordCount: pageWordCount,
+            charCount: pageContent.length,
+            hasImages: false,
+            startPosition: globalPosition - pageContent.length,
+            endPosition: globalPosition
+          });
+        }
+        
+        pages = currentPage;
+        
+        // Si aucune page n'a été créée (document très court), créer une page unique
+        if (pages.length === 0 && extractedText.trim().length > 0) {
+          pages = [{
+            pageNumber: 1,
+            content: extractedText,
+            wordCount: wordCount,
+            charCount: extractedText.length,
+            hasImages: false,
+            startPosition: 0,
+            endPosition: extractedText.length
+          }];
+        }
+        
+        console.log(`📄 Document divisé en ${pages.length} page(s) détectée(s)`);
+        onProgress?.({ current: 60, total: 100, message: `${pages.length} page(s) détectée(s)` });
+      } catch (pageError) {
+        console.warn('Erreur lors de la division en pages (non bloquant):', pageError);
+        // En cas d'erreur, créer une page unique avec tout le contenu
+        pages = [{
+          pageNumber: 1,
+          content: extractedText,
+          wordCount: wordCount,
+          charCount: extractedText.length,
+          hasImages: false,
+          startPosition: 0,
+          endPosition: extractedText.length
+        }];
+      }
+
+      // Extraction des images avec mammoth (convertToHtml pour obtenir les images)
+      const imageOptions = {
+        arrayBuffer: content,
+        convertImage: mammoth.images.imgElement(async (image) => {
+          // Fonction pour traiter les images - retourner une description pour l'indexation
+          try {
+            const imageBuffer: any = await image.read('base64');
+            let base64: string;
+            let contentType = 'image/png';
+            
+            if (typeof imageBuffer === 'string') {
+              base64 = imageBuffer;
+            } else if (imageBuffer && typeof imageBuffer === 'object') {
+              base64 = imageBuffer.data ? imageBuffer.data.toString('base64') : String(imageBuffer);
+              contentType = imageBuffer.contentType || 'image/png';
+            } else {
+              base64 = String(imageBuffer);
+            }
+            
+            return {
+              src: `data:${contentType};base64,${base64}`,
+              alt: `Image extraite du document`
+            };
+          } catch (err) {
+            console.warn('Erreur lors de la lecture de l\'image:', err);
+            return {
+              src: '',
+              alt: 'Image non disponible'
+            };
+          }
+        })
+      };
+
+      let images: DocxExtractionResult['images'] = [];
+      let hasImages = false;
+
+      try {
+        // Essayer d'extraire les images (peut échouer si pas d'images ou fichier trop gros)
+        if (!isLargeFile || fileSize < 20 * 1024 * 1024) { // Limiter à 20MB pour l'extraction d'images
+          const htmlResult = await mammoth.convertToHtml(imageOptions);
+          
+          // Parser le HTML pour extraire les images
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(htmlResult.value, 'text/html');
+          const imgElements = doc.querySelectorAll('img');
+          
+          if (imgElements.length > 0) {
+            hasImages = true;
+            images = Array.from(imgElements).map((img, index) => {
+              // Essayer de déterminer la page où se trouve l'image
+              // En analysant la position de l'élément img dans le HTML
+              let imagePageNumber: number | undefined = undefined;
+              
+              // Chercher dans quelle section/paragraphe se trouve l'image
+              let currentElement: Element | null = img.parentElement;
+              let textBeforeImage = '';
+              while (currentElement && currentElement !== doc.body) {
+                const siblings = Array.from(currentElement.parentElement?.children || []);
+                const imageIndex = siblings.indexOf(currentElement);
+                for (let i = 0; i < imageIndex; i++) {
+                  textBeforeImage += siblings[i].textContent || '';
+                }
+                currentElement = currentElement.parentElement;
+              }
+              
+              // Déterminer la page basée sur la position du texte avant l'image
+              const charPositionBeforeImage = textBeforeImage.length;
+              if (pages.length > 0) {
+                for (const page of pages) {
+                  if (charPositionBeforeImage >= page.startPosition && charPositionBeforeImage <= page.endPosition) {
+                    imagePageNumber = page.pageNumber;
+                    // Ajouter l'image à la page
+                    if (!page.images) {
+                      page.images = [];
+                    }
+                    page.images.push({
+                      id: `img_${index}`,
+                      contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
+                      dataUri: img.src,
+                      description: img.alt || `Image ${index + 1} du document`,
+                      positionInPage: 'middle' // Approximation
+                    });
+                    page.hasImages = true;
+                    break;
+                  }
+                }
+              }
+              
+              // Si pas de correspondance trouvée, attribuer à la première page
+              if (imagePageNumber === undefined && pages.length > 0) {
+                imagePageNumber = 1;
+                if (!pages[0].images) {
+                  pages[0].images = [];
+                }
+                pages[0].images.push({
+                  id: `img_${index}`,
+                  contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
+                  dataUri: img.src,
+                  description: img.alt || `Image ${index + 1} du document`,
+                  positionInPage: 'middle'
+                });
+                pages[0].hasImages = true;
+              }
+              
+              return {
+                id: `img_${index}`,
+                contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
+                dataUri: img.src,
+                description: img.alt || `Image ${index + 1} du document`,
+                pageNumber: imagePageNumber
+              };
+            });
+
+            // Ajouter des références aux images dans le texte pour l'indexation
+            const imagesByPage = images.reduce((acc, img) => {
+              const page = img.pageNumber || 1;
+              if (!acc[page]) acc[page] = [];
+              acc[page].push(img);
+              return acc;
+            }, {} as Record<number, typeof images>);
+            
+            const imageReferences = Object.entries(imagesByPage)
+              .map(([page, imgs]) => `Page ${page}: ${imgs.length} image(s)`)
+              .join(', ');
+            extractedText += `\n\n[Ce document contient ${images.length} image(s): ${imageReferences}]`;
+          }
+
+          onProgress?.({ current: 80, total: 100, message: hasImages ? `${images.length} image(s) trouvée(s)` : 'Aucune image trouvée' });
+        } else {
+          // Pour les très gros fichiers, détecter simplement la présence d'images
+          // sans les extraire complètement (économise la mémoire)
+          const htmlPreview = await mammoth.convertToHtml({ 
+            arrayBuffer: content.slice(0, 1024 * 1024) // Échantillon de 1MB pour détection
+          });
+          hasImages = htmlPreview.value.includes('<img') || htmlPreview.value.includes('image');
+          if (hasImages) {
+            extractedText += '\n\n[Ce document contient des images (non indexées - fichier trop volumineux).]';
+          }
+          onProgress?.({ current: 75, total: 100, message: hasImages ? 'Images détectées (non extraites)' : 'Analyse terminée' });
+        }
+      } catch (imageError) {
+        console.warn('Erreur lors de l\'extraction des images (non bloquant):', imageError);
+        // Ne pas bloquer si l'extraction d'images échoue
+      }
+
+      onProgress?.({ current: 100, total: 100, message: 'Extraction terminée' });
+
+      // Calculer les statistiques moyennes par page
+      const averageWordsPerPage = pages.length > 0 
+        ? Math.round(pages.reduce((sum, page) => sum + page.wordCount, 0) / pages.length)
+        : undefined;
+
+      return {
+        text: extractedText.trim() || 'Aucun texte extractible trouvé.',
+        pages: pages.length > 0 ? pages : undefined,
+        images: images.length > 0 ? images : undefined,
+        hasImages,
+        metadata: {
+          fileSize,
+          wordCount,
+          pageCount: pages.length,
+          hasScannedContent,
+          averageWordsPerPage
+        }
+      };
     } catch (error) {
       console.error('Error extracting text from .docx:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
       if (errorMessage.includes('Corrupted zip') || errorMessage.includes('data length = 0')) {
-        return 'Error: Le fichier DOCX est corrompu ou invalide. Veuillez vérifier le fichier.';
+        return {
+          text: 'Error: Le fichier DOCX est corrompu ou invalide. Veuillez vérifier le fichier.',
+          hasImages: false
+        };
       }
-      return `Error extracting text from .docx: ${errorMessage}`;
+      
+      return {
+        text: `Error extracting text from .docx: ${errorMessage}`,
+        hasImages: false
+      };
     }
+  };
+
+  // Fonction wrapper pour compatibilité (retourne juste le texte)
+  const extractTextFromDocxSimple = async (content: ArrayBuffer): Promise<string> => {
+    const result = await extractTextFromDocx(content);
+    return result.text;
   };
 
   const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
@@ -292,7 +666,8 @@ const FlexiAnalyseApp: React.FC = () => {
         fileContent = await extractTextFromPdf(content as ArrayBuffer);
       } else if (extension === '.docx') {
         setCurrentStatus(t('status.extracting.docx', { fileName: file.name }));
-        fileContent = await extractTextFromDocx(content as ArrayBuffer);
+        const docxResult = await extractTextFromDocx(content as ArrayBuffer);
+        fileContent = docxResult.text;
       } else {
         setCurrentStatus(t('status.reading.file', { fileName: file.name }));
         fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
@@ -595,7 +970,8 @@ const FlexiAnalyseApp: React.FC = () => {
         fileContent = await extractTextFromPdf(arrayBuffer);
       } else if (extension === '.docx') {
         const arrayBuffer = await file.arrayBuffer();
-        fileContent = await extractTextFromDocx(arrayBuffer);
+        const docxResult = await extractTextFromDocx(arrayBuffer);
+        fileContent = docxResult.text;
       } else {
         fileContent = await file.text();
       }
@@ -830,13 +1206,17 @@ const FlexiAnalyseApp: React.FC = () => {
     return 'en';
   };
 
-  const extractTextFromFile = async (file: File): Promise<string> => {
+  const extractTextFromFile = async (
+    file: File,
+    onProgress?: (progress: { current: number; total: number; message: string }) => void
+  ): Promise<string> => {
     const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
     const arrayBufferOriginal = await file.arrayBuffer();
     const arrayBuffer = arrayBufferOriginal.slice(0);
     
     if (extension === '.docx') {
-      return await extractTextFromDocx(arrayBuffer);
+      const result = await extractTextFromDocx(arrayBuffer, onProgress);
+      return result.text;
     } else if (extension === '.pdf') {
       return await extractTextFromPdf(arrayBuffer);
     } else if (['.txt', '.md', '.java', '.py', '.js', '.ts', '.cpp', '.c', '.h', '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx', '.tsx', '.sql'].includes(extension)) {
@@ -846,7 +1226,25 @@ const FlexiAnalyseApp: React.FC = () => {
     }
   };
 
-  // NOUVELLE FONCTION: Indexation côté backend
+  // Fonction pour extraire le contenu structuré d'un fichier (inclut images pour DOCX)
+  const extractStructuredContentFromFile = async (
+    file: File,
+    onProgress?: (progress: { current: number; total: number; message: string }) => void
+  ): Promise<DocxExtractionResult | { text: string; hasImages: false }> => {
+    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    const arrayBufferOriginal = await file.arrayBuffer();
+    const arrayBuffer = arrayBufferOriginal.slice(0);
+    
+    if (extension === '.docx') {
+      return await extractTextFromDocx(arrayBuffer, onProgress);
+    } else {
+      // Pour les autres types de fichiers, retourner juste le texte
+      const text = await extractTextFromFile(file, onProgress);
+      return { text, hasImages: false };
+    }
+  };
+
+  // NOUVELLE FONCTION: Indexation côté backend avec support pour contenu structuré (images DOCX)
   const indexDirectoryContentOnBackend = async (files: File[]) => {
     try {
       console.log('=== ENVOI DES FICHIERS AU BACKEND POUR INDEXATION ===');
@@ -854,30 +1252,88 @@ const FlexiAnalyseApp: React.FC = () => {
       
       setIndexingStatus(t('status.indexing.extracting', { count: files.length }));
       
-      // Extraire le contenu de tous les fichiers
-      const fileContents: { fileName: string; content: string }[] = [];
+      // Extraire le contenu structuré de tous les fichiers
+      const fileContents: Array<{
+        fileName: string;
+        content: string;
+        images?: Array<{
+          id: string;
+          contentType: string;
+          dataUri?: string;
+          description?: string;
+        }>;
+        hasImages?: boolean;
+        metadata?: {
+          fileSize: number;
+          wordCount?: number;
+          hasScannedContent?: boolean;
+        };
+      }> = [];
       
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         console.log(`Traitement du fichier ${i + 1}/${files.length}: ${file.name}`);
-        setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
         
-        const text = await extractTextFromFile(file);
-        if (text && text !== 'Unsupported file type') {
-          fileContents.push({
-            fileName: file.name,
-            content: text
-          });
-          console.log(`✅ Fichier traité: ${file.name} (${text.length} caractères)`);
-        } else {
-          console.log(`❌ Fichier ignoré: ${file.name} - type non supporté`);
+        // Utiliser le callback de progression pour mettre à jour le statut
+        const progressCallback = (progress: { current: number; total: number; message: string }) => {
+          const progressPercent = Math.round((progress.current / progress.total) * 100);
+          setIndexingStatus(
+            `${t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length })} - ${progress.message} (${progressPercent}%)`
+          );
+        };
+        
+        try {
+          if (extension === '.docx') {
+            // Utiliser l'extraction structurée pour DOCX (inclut images)
+            const structuredResult = await extractTextFromDocx(
+              await file.arrayBuffer(),
+              progressCallback
+            );
+            
+            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
+              fileContents.push({
+                fileName: file.name,
+                content: structuredResult.text,
+                images: structuredResult.images,
+                hasImages: structuredResult.hasImages,
+                metadata: structuredResult.metadata
+              });
+              console.log(`✅ Fichier DOCX traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''})`);
+            } else {
+              console.log(`❌ Fichier DOCX ignoré: ${file.name} - contenu invalide`);
+            }
+          } else {
+            // Pour les autres types de fichiers, utiliser l'extraction simple
+            setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
+            const text = await extractTextFromFile(file, progressCallback);
+            
+            if (text && text !== 'Unsupported file type') {
+              fileContents.push({
+                fileName: file.name,
+                content: text,
+                hasImages: false
+              });
+              console.log(`✅ Fichier traité: ${file.name} (${text.length} caractères)`);
+            } else {
+              console.log(`❌ Fichier ignoré: ${file.name} - type non supporté`);
+            }
+          }
+        } catch (fileError) {
+          console.error(`❌ Erreur lors du traitement de ${file.name}:`, fileError);
+          // Continuer avec les autres fichiers même si un échoue
         }
       }
 
       console.log(`📤 Envoi de ${fileContents.length} fichiers au backend...`);
-      setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
+      const filesWithImages = fileContents.filter(f => f.hasImages && f.images && f.images.length > 0).length;
+      if (filesWithImages > 0) {
+        setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }) + ` (${filesWithImages} fichier(s) avec images)`);
+      } else {
+        setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
+      }
 
-      // Envoyer au backend pour indexation
+      // Envoyer au backend pour indexation (avec support pour contenu structuré)
       const response = await fetch(`${apiUrl}/index-directory`, {
         method: 'POST',
         headers: { 
@@ -885,7 +1341,13 @@ const FlexiAnalyseApp: React.FC = () => {
           'Session-ID': sessionId
         },
         body: JSON.stringify({
-          files: fileContents,
+          files: fileContents.map(f => ({
+            fileName: f.fileName,
+            content: f.content,
+            images: f.images, // Envoyer les images pour traitement OCR optionnel
+            hasImages: f.hasImages,
+            metadata: f.metadata
+          })),
           language: language
         }),
       });
@@ -908,7 +1370,7 @@ const FlexiAnalyseApp: React.FC = () => {
         setSuggestedActions([]);
       }
       
-      console.log(`📚 ${data.indexed_files_count} fichiers indexés avec ${data.chunks_count} chunks`);
+      console.log(`📚 ${data.indexed_files_count} fichiers indexés avec ${data.chunks_count} chunks${filesWithImages > 0 ? ` (${filesWithImages} avec images)` : ''}`);
       
     } catch (error) {
       console.error("❌ Erreur lors de l'indexation côté backend:", error);
@@ -1051,7 +1513,8 @@ const FlexiAnalyseApp: React.FC = () => {
             if (fileDetails.content instanceof ArrayBuffer) {
               const contentCopy = fileDetails.content.slice(0); 
               if (extension === '.docx') {
-                currentFileContent = await extractTextFromDocx(contentCopy);
+                const docxResult = await extractTextFromDocx(contentCopy);
+                currentFileContent = docxResult.text;
               } else if (extension === '.pdf') {
                 currentFileContent = await extractTextFromPdf(contentCopy);
               } else {
@@ -1156,11 +1619,14 @@ const FlexiAnalyseApp: React.FC = () => {
         contextInfo: data.context_info,
       });
 
+      // Extraire les pages référencées depuis context_info
+      const pagesReferenced = data.context_info?.pages_referenced || null;
+
       // Mise à jour de l'historique
       setChatHistory((prev) => {
         return prev.map(msg => 
           msg.id === messageId 
-            ? { ...msg, aiResponse }
+            ? { ...msg, aiResponse, pagesReferenced: pagesReferenced || undefined }
             : msg
         );
       });

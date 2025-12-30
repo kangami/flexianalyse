@@ -1822,7 +1822,34 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
                 if key in seen:
                     continue
                 seen.add(key)
-                out.append({"fileName": fn, "content": (d.page_content or "")[:2500]})
+                
+                # Extraire les informations de page depuis les métadonnées
+                page_number = d.metadata.get("page_number")
+                is_page_chunk = d.metadata.get("is_page_chunk", False)
+                
+                result_dict = {
+                    "fileName": fn,
+                    "content": (d.page_content or "")[:2500]
+                }
+                
+                # Ajouter les informations de page si disponibles
+                if page_number is not None:
+                    result_dict["pageNumber"] = page_number
+                    result_dict["isPageChunk"] = is_page_chunk
+                
+                # Si c'est un chunk de page, extraire le numéro de page du contenu ou des métadonnées
+                if is_page_chunk and page_number is None:
+                    # Essayer d'extraire de la métadonnée ou du contenu
+                    content_preview = d.page_content or ""
+                    if "[Page" in content_preview and "de" in content_preview:
+                        # Extraire le numéro de page du format "[Page X de filename]"
+                        import re
+                        match = re.search(r'\[Page\s+(\d+)', content_preview)
+                        if match:
+                            result_dict["pageNumber"] = int(match.group(1))
+                            result_dict["isPageChunk"] = True
+                
+                out.append(result_dict)
             return out
 
         # DÉTECTION DES NOMS DE PERSONNES dans la requête ET l'historique
@@ -2277,6 +2304,7 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
     contextual_docs: List[str] = []
     
     # Grouper les documents par fichier source pour éviter la duplication et préserver le contexte complet
+    # Structure: {file_label: [(content, page_number), ...]}
     docs_by_file = {}
     for doc in directory_content or []:
         if not isinstance(doc, dict):
@@ -2285,16 +2313,30 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         raw_content = doc.get('content', '') or ''
         if raw_content is None:
             raw_content = ''
+        page_number = doc.get('pageNumber')  # Extraire le numéro de page si disponible
         
         if file_label not in docs_by_file:
             docs_by_file[file_label] = []
-        docs_by_file[file_label].append(raw_content)
+        docs_by_file[file_label].append((raw_content, page_number))
     
     # Construire un résumé structuré par fichier (les premiers sont les plus pertinents)
     # IMPORTANT: Préserver le maximum de contenu pour capturer les informations comme les adresses
-    for idx, (file_label, contents) in enumerate(docs_by_file.items(), 1):
+    for idx, (file_label, contents_with_pages) in enumerate(docs_by_file.items(), 1):
+        # Extraire les contenus et pages
+        contents = [c[0] for c in contents_with_pages]
+        pages = [c[1] for c in contents_with_pages if c[1] is not None]
+        
         # Combiner les chunks du même fichier avec un séparateur clair
         combined_content = "\n---\n".join(contents)
+        
+        # Créer un label avec les informations de page
+        page_info = ""
+        if pages:
+            unique_pages = sorted(set(pages))
+            if len(unique_pages) == 1:
+                page_info = f" 📄 Page {unique_pages[0]}"
+            else:
+                page_info = f" 📄 Pages {', '.join(map(str, unique_pages))}"
         
         # Pour les fichiers pertinents (top 5), préserver encore plus de contenu
         extended_max_len = max_chunk_len * 1.5 if idx <= 5 else max_chunk_len
@@ -2309,7 +2351,16 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         
         # Marquer les documents les plus pertinents (premiers dans la liste)
         relevance_marker = "⭐" if idx <= 3 else "🔍" if idx <= 8 else ""
-        contextual_docs.append(f"{relevance_marker} [{idx}] {file_label}:\n{content}")
+        # Ajouter les informations de page si disponibles (depuis les contenus)
+        page_info = ""
+        if pages:
+            unique_pages = sorted(set(pages))
+            if len(unique_pages) == 1:
+                page_info = f" 📄 Page {unique_pages[0]}"
+            else:
+                page_info = f" 📄 Pages {', '.join(map(str, unique_pages))}"
+        
+        contextual_docs.append(f"{relevance_marker} [{idx}] {file_label}{page_info}:\n{content}")
 
     directory_content_summary = "\n\n" + "="*80 + "\n\n".join(contextual_docs) + "\n\n" + "="*80 if contextual_docs else t.get(
         'no_other_files', "Aucun autre fichier dans le contexte."
@@ -2420,7 +2471,9 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         f"3. Les documents marqués ⭐ sont les plus pertinents selon la recherche sémantique - commence par ceux-là.\n"
         f"4. Ne conclus JAMAIS qu'une information est absente avant d'avoir analysé TOUS les documents fournis.\n"
         f"5. Si tu trouves l'information dans un autre document, cite explicitement le nom du fichier source.\n"
-        f"6. Si l'information est dans plusieurs documents, mentionne tous les fichiers concernés.\n\n"
+        f"6. IMPORTANT: Si un document a un numéro de page (📄 Page X), cite aussi la page dans ta réponse.\n"
+        f"   Format de citation: 'Document X, page Y' ou '[Document X, page Y]'.\n"
+        f"7. Si l'information est dans plusieurs documents, mentionne tous les fichiers concernés avec leurs pages si disponibles.\n\n"
         f"- Les documents sont classés par pertinence sémantique: les premiers sont les plus liés à ta question.\n"
         f"- Mais même les documents moins pertinents peuvent contenir l'information recherchée - ne les ignore pas.\n"
         f"{t['missing_info_clarify']}\n"
@@ -3538,18 +3591,153 @@ async def index_directory():
         
         logger.info(f"📂 Indexation de {len(files)} fichiers pour la session {session_id}")
         documents = []
+        images_processed_count = 0
+        ocr_enabled = os.getenv('ENABLE_OCR', 'false').lower() == 'true'
+        
         for file_data in files:
             if not file_data.get('content') or not file_data.get('fileName'):
                 logger.warning(f"Fichier ignoré (contenu ou nom manquant): {file_data.get('fileName', 'inconnu')}")
                 continue
 
+            # Extraire le contenu texte principal
+            main_content = file_data['content']
+            has_images = file_data.get('hasImages', False)
+            images = file_data.get('images', [])
+            metadata_info = file_data.get('metadata', {})
+            
+            # Si le fichier contient des images, essayer d'extraire le texte des images (OCR optionnel)
+            image_texts = []
+            file_images_processed = 0
+            if has_images and images and ocr_enabled:
+                logger.info(f"🖼️ Traitement de {len(images)} image(s) pour {file_data['fileName']}")
+                try:
+                    # Importer les bibliothèques OCR si disponibles
+                    try:
+                        from PIL import Image
+                        import io
+                        import base64
+                        
+                        # Essayer d'utiliser TrOCR ou pytesseract pour l'OCR
+                        ocr_available = False
+                        processor = None
+                        model = None
+                        
+                        try:
+                            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+                            processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
+                            model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
+                            ocr_available = True
+                            logger.info("✅ TrOCR disponible pour l'extraction de texte des images")
+                        except (ImportError, Exception) as e:
+                            ocr_available = False
+                            logger.warning(f"⚠️ TrOCR non disponible, OCR désactivé pour les images: {str(e)}")
+                        
+                        if ocr_available and processor and model:
+                            for img_idx, img_data in enumerate(images):
+                                try:
+                                    if img_data.get('dataUri'):
+                                        # Extraire les données base64
+                                        data_uri = img_data['dataUri']
+                                        if data_uri.startswith('data:'):
+                                            base64_data = data_uri.split(',')[1]
+                                            image_bytes = base64.b64decode(base64_data)
+                                            image = Image.open(io.BytesIO(image_bytes))
+                                            
+                                            # Utiliser TrOCR pour extraire le texte
+                                            pixel_values = processor(image, return_tensors="pt").pixel_values
+                                            generated_ids = model.generate(pixel_values)
+                                            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+                                            
+                                            if generated_text.strip():
+                                                image_texts.append(f"[Image {img_idx + 1}: {generated_text.strip()}]")
+                                                file_images_processed += 1
+                                                images_processed_count += 1
+                                                logger.info(f"✅ Texte extrait de l'image {img_idx + 1}: {generated_text[:50]}...")
+                                except Exception as img_error:
+                                    logger.warning(f"⚠️ Erreur lors du traitement de l'image {img_idx + 1}: {str(img_error)}")
+                                    continue
+                    except ImportError:
+                        logger.warning("⚠️ PIL/Pillow non disponible, OCR désactivé pour les images")
+                        
+                except Exception as ocr_error:
+                    logger.warning(f"⚠️ Erreur lors de l'initialisation OCR: {str(ocr_error)}")
+            
+            # Combiner le contenu principal avec les textes extraits des images
+            if image_texts:
+                main_content += "\n\n=== TEXTE EXTRAIT DES IMAGES ===\n" + "\n".join(image_texts)
+            
+            # Construire les métadonnées enrichies
+            document_metadata = {
+                'fileName': file_data['fileName'],
+                'file_size': metadata_info.get('file_size', len(main_content)),
+                'word_count': metadata_info.get('wordCount'),
+                'page_count': metadata_info.get('pageCount'),
+                'has_scanned_content': metadata_info.get('hasScannedContent', False),
+                'has_images': has_images,
+                'images_count': len(images) if images else 0,
+                'images_ocr_processed': file_images_processed,
+                'indexed_at': datetime.utcnow().isoformat()
+            }
+            
+            # Ajouter des métadonnées sur les images si disponibles
+            if images:
+                document_metadata['image_descriptions'] = [
+                    img.get('description', f"Image {idx + 1}") 
+                    for idx, img in enumerate(images)
+                ]
+                # Ajouter les informations de page pour les images
+                images_with_pages = [img for img in images if img.get('pageNumber')]
+                if images_with_pages:
+                    images_by_page_dict = {}
+                    for img in images_with_pages:
+                        page_num = str(img.get('pageNumber'))
+                        if page_num not in images_by_page_dict:
+                            images_by_page_dict[page_num] = []
+                        images_by_page_dict[page_num].append({
+                            'id': img.get('id'),
+                            'description': img.get('description')
+                        })
+                    document_metadata['images_by_page'] = images_by_page_dict
+            
+            # Ajouter des informations sur les pages si disponibles
+            pages_info = file_data.get('pages', [])
+            if pages_info:
+                document_metadata['pages_info'] = [
+                    {
+                        'page_number': page.get('pageNumber'),
+                        'word_count': page.get('wordCount'),
+                        'char_count': page.get('charCount'),
+                        'has_images': page.get('hasImages', False),
+                        'images_count': len(page.get('images', [])) if page.get('images') else 0
+                    }
+                    for page in pages_info
+                ]
+                
+                # Ajouter des chunks par page pour permettre la recherche granulaire par page
+                # Optionnel: permet de rechercher et référencer une page spécifique
+                if len(pages_info) > 1:
+                    logger.info(f"📄 Document {file_data['fileName']} divisé en {len(pages_info)} pages pour indexation granulaire")
+                    
+                    # Créer des documents additionnels par page pour recherche granulaire
+                    # Le document principal reste inchangé, mais on ajoute des références par page
+                    for page in pages_info:
+                        page_content = page.get('content', '')
+                        if page_content:
+                            # Ajouter un préfixe pour identifier la page dans le contenu
+                            page_document = Document(
+                                page_content=f"[Page {page.get('pageNumber')} de {file_data['fileName']}]\n\n{page_content}",
+                                metadata={
+                                    **document_metadata,
+                                    'page_number': page.get('pageNumber'),
+                                    'is_page_chunk': True,
+                                    'original_file': file_data['fileName']
+                                }
+                            )
+                            documents.append(page_document)
+
             documents.append(Document(
-                page_content=file_data['content'],
-                metadata={
-                    'fileName': file_data['fileName'],
-                    'file_size': len(file_data['content']),
-                    'indexed_at': datetime.utcnow().isoformat()
-                }
+                page_content=main_content,
+                metadata=document_metadata
             ))
         if not documents:
             return jsonify({
@@ -3625,6 +3813,8 @@ async def index_directory():
         }
         
         logger.info(f"✅ Indexation terminée pour la session {session_id}")
+        if images_processed_count > 0:
+            logger.info(f"🖼️ {images_processed_count} image(s) traitée(s) avec OCR")
         
         return jsonify({
             'success': True,
@@ -3634,7 +3824,9 @@ async def index_directory():
             'files_indexed': [f['fileName'] for f in files],
             'vector_store_ready': True,
             'suggested_actions': inferred_actions.get('suggested_actions', []),
-            'corpus_domain': inferred_actions.get('domain', 'unknown')
+            'corpus_domain': inferred_actions.get('domain', 'unknown'),
+            'images_ocr_processed': images_processed_count,
+            'ocr_enabled': ocr_enabled
         }), 200
         
     except Exception as e:
@@ -3905,6 +4097,15 @@ async def handle_query():
                 enable_auto_online_search=enable_auto_search
             )
             
+            # Extraire les informations de page des documents utilisés
+            pages_used = []
+            for doc in directory_content:
+                if isinstance(doc, dict) and doc.get('pageNumber') is not None:
+                    pages_used.append({
+                        "fileName": doc.get('fileName'),
+                        "pageNumber": doc.get('pageNumber')
+                    })
+            
             return jsonify({
                 "response": response,
                 "mode": "local",
@@ -3916,7 +4117,8 @@ async def handle_query():
                     "vector_store_docs": len(relevant_docs),
                     "is_binary": is_binary,
                     "session_id": session_id,
-                    "used_backend_vectorstore": use_backend_vectorstore
+                    "used_backend_vectorstore": use_backend_vectorstore,
+                    "pages_referenced": pages_used if pages_used else None
                 }
             }), 200
         

@@ -8,6 +8,10 @@ interface ChatMessage {
   id: string;
   userQuery: string;
   aiResponse: string;
+  pagesReferenced?: Array<{
+    fileName: string;
+    pageNumber: number;
+  }>;
 }
 
 interface EditableFile {
@@ -362,6 +366,26 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
                       style={(enableTextSelection || onTextSelect !== undefined) ? { userSelect: 'text', cursor: 'text' } : {}}
                       >
                         <MarkdownResponse content={message.aiResponse} />
+                        
+                        {/* Affichage des pages référencées */}
+                        {message.pagesReferenced && message.pagesReferenced.length > 0 && !isStreaming && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <div className="text-xs text-gray-600 font-medium mb-1">
+                              📄 Pages référencées:
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {message.pagesReferenced.map((page, idx) => (
+                                <span 
+                                  key={idx}
+                                  className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200"
+                                  title={`Information extraite de la page ${page.pageNumber} de ${page.fileName}`}
+                                >
+                                  📄 {page.fileName} - Page {page.pageNumber}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         
                         {/* Indicateur de streaming */}
                         {isStreaming && (
