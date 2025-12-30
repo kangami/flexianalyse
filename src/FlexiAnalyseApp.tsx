@@ -441,11 +441,6 @@ const FlexiAnalyseApp: React.FC = () => {
     }
   }, [apiUrl, extractTextFromPdf, extractTextFromDocx, language]);
 
-  // Fonction pour générer un résumé d'un fichier (ancienne version, gardée pour compatibilité)
-  const generateFileSummary = useCallback(async (file: File, content: string | ArrayBuffer) => {
-    await generateFileSummaryWithStreaming(file, content);
-  }, [generateFileSummaryWithStreaming]);
-
   // Fonction pour générer un résumé de répertoire avec streaming
   const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
     try {
@@ -654,9 +649,6 @@ const FlexiAnalyseApp: React.FC = () => {
       return [...prevFiles, ...newFiles];
     });
     
-    // Les fichiers sont déjà ajoutés à la sidebar dans handleFolderChange,
-    // donc pas besoin de les ajouter à nouveau ici pour éviter les doublons
-    
     // Marquer qu'un répertoire est sélectionné
     setSelectedDirectory(files);
     
@@ -671,11 +663,6 @@ const FlexiAnalyseApp: React.FC = () => {
     await generateRepositorySummaryWithStreaming(files);
   }, [generateRepositorySummaryWithStreaming, isAuthenticated, showLimitInfoBubble]);
   
-  // Fonction pour générer des descriptions pour un répertoire (ancienne version, gardée pour compatibilité)
-  const generateRepositorySummaries = useCallback(async (files: File[]) => {
-    await generateRepositorySummaryWithStreaming(files);
-  }, [generateRepositorySummaryWithStreaming]);
-
   // Fonction helper pour extraire tous les fichiers d'un répertoire
   const extractFilesFromDirectory = async (entry: FileSystemEntry | null, path: string = ''): Promise<File[]> => {
     const files: File[] = [];
