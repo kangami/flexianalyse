@@ -636,22 +636,259 @@ const FlexiAnalyseApp: React.FC = () => {
     return result.text;
   };
 
-  const extractTextFromPdf = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+  // Interface pour le résultat d'extraction PDF structuré (similaire à DOCX)
+  interface PdfExtractionResult {
+    text: string;
+    pages?: DocumentPage[];
+    images?: Array<{
+      id: string;
+      contentType: string;
+      dataUri?: string;
+      description?: string;
+      pageNumber?: number;
+    }>;
+    hasImages: boolean;
+    metadata?: {
+      fileSize: number;
+      wordCount?: number;
+      pageCount?: number;
+      hasScannedContent?: boolean;
+      scannedPages?: number[]; // Numéros des pages scannées
+      invoicePages?: number[]; // Numéros des pages qui semblent être des factures
+      averageWordsPerPage?: number;
+    };
+  }
+
+  // Fonction améliorée d'extraction de texte PDF avec support pour gros fichiers, images et tracking par page
+  const extractTextFromPdf = async (
+    arrayBuffer: ArrayBuffer,
+    onProgress?: (progress: { current: number; total: number; message: string }) => void
+  ): Promise<PdfExtractionResult> => {
     try {
-      const bufferCopy = arrayBuffer.slice(0);
-      const pdf = await pdfjslib.getDocument({ data: bufferCopy }).promise;
-      let text = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map((item: any) => item.str).join(' ');
-        text += strings + '\n';
+      const fileSize = arrayBuffer.byteLength;
+      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
+      const isLargeFile = fileSize > 5 * 1024 * 1024; // > 5MB
+
+      onProgress?.({ current: 0, total: 100, message: `Analyse du fichier PDF (${fileSizeMB} MB)...` });
+
+      if (isLargeFile) {
+        console.log(`📄 Traitement d'un gros fichier PDF (${fileSizeMB} MB), extraction optimisée...`);
+        onProgress?.({ current: 5, total: 100, message: 'Chargement du PDF (fichier volumineux)...' });
       }
-      return text;
+
+      const bufferCopy = arrayBuffer.slice(0);
+      const pdf = await pdfjslib.getDocument({ 
+        data: bufferCopy,
+        // Options pour améliorer la performance sur gros fichiers
+        verbosity: 0, // Réduire les logs
+        stopAtErrors: false,
+        maxImageSize: 1024 * 1024 * 10, // Limiter la taille des images à 10MB
+      }).promise;
+
+      const totalPages = pdf.numPages;
+      console.log(`📄 PDF chargé: ${totalPages} page(s)`);
+      onProgress?.({ current: 10, total: 100, message: `PDF chargé: ${totalPages} page(s) détectée(s)` });
+
+      let fullText = '';
+      const pages: DocumentPage[] = [];
+      const images: PdfExtractionResult['images'] = [];
+      const scannedPages: number[] = [];
+      const invoicePages: number[] = [];
+      let totalWordCount = 0;
+
+      // Traiter chaque page
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+        const progressPercent = 10 + Math.round((pageNum / totalPages) * 75);
+        onProgress?.({ 
+          current: progressPercent, 
+          total: 100, 
+          message: `Traitement de la page ${pageNum}/${totalPages}...` 
+        });
+
+        try {
+          const page = await pdf.getPage(pageNum);
+          
+          // 1. Extraire le texte de la page
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item: any) => item.str).join(' ').trim();
+          const pageWordCount = pageText.split(/\s+/).filter(w => w.length > 0).length;
+          totalWordCount += pageWordCount;
+
+          // 2. Détecter les images dans la page
+          let pageHasImages = false;
+          const pageImages: Array<{ id: string; dataUri: string; contentType: string; description: string }> = [];
+
+          try {
+            // Utiliser getOperatorList pour détecter les opérateurs d'images
+            const operatorList = await page.getOperatorList();
+            const hasImageOps = operatorList.fnArray.some((fn: number) => {
+              // Opérateurs PDF pour les images: Do, BI, ID, EI
+              // OPS constants: paintXObject (Do), paintInlineImageXObject (BI/ID/EI)
+              return fn === pdfjslib.OPS.paintImageXObject || 
+                     fn === pdfjslib.OPS.paintXObject ||
+                     fn === pdfjslib.OPS.paintInlineImageXObject;
+            });
+
+            if (hasImageOps) {
+              pageHasImages = true;
+              
+              // Essayer d'extraire les images en rendant la page en canvas
+              if (!isLargeFile || pageNum <= 5) { // Limiter l'extraction d'images pour gros fichiers
+                try {
+                  const viewport = page.getViewport({ scale: 2.0 });
+                  const canvas = document.createElement('canvas');
+                  const context = canvas.getContext('2d');
+                  
+                  if (context) {
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    await page.render({
+                      canvasContext: context,
+                      viewport: viewport
+                    }).promise;
+                    
+                    // Convertir le canvas en image
+                    const imageDataUri = canvas.toDataURL('image/png');
+                    pageImages.push({
+                      id: `pdf_img_page${pageNum}_1`,
+                      dataUri: imageDataUri,
+                      contentType: 'image/png',
+                      description: `Image extraite de la page ${pageNum} du PDF`
+                    });
+                  }
+                } catch (imgError) {
+                  console.warn(`Erreur lors de l'extraction d'image de la page ${pageNum}:`, imgError);
+                  // Continuer même si l'extraction d'image échoue
+                }
+              }
+            }
+          } catch (imgDetectError) {
+            console.warn(`Erreur lors de la détection d'images page ${pageNum}:`, imgDetectError);
+          }
+
+          // 3. Détecter si la page est scannée (peu de texte mais présence d'images ou grande taille)
+          const isScannedPage = pageWordCount < 50 && (pageHasImages || fileSize / totalPages > 200 * 1024);
+
+          // 4. Détecter si la page semble être une facture
+          const isInvoicePage = (() => {
+            if (pageWordCount < 20 && pageHasImages) return false; // Trop peu de texte
+            const textLower = pageText.toLowerCase();
+            const invoiceKeywords = ['facture', 'invoice', 'bill', 'montant', 'total', 'tva', 'tax', 
+                                     'date', 'client', 'customer', 'numero', 'number', 'due', 'échéance',
+                                     'amount', 'subtotal', 'reçu', 'receipt', 'payment', 'paiement'];
+            const matches = invoiceKeywords.filter(keyword => textLower.includes(keyword)).length;
+            return matches >= 3 || (matches >= 2 && pageHasImages);
+          })();
+
+          if (isScannedPage) {
+            scannedPages.push(pageNum);
+          }
+          if (isInvoicePage) {
+            invoicePages.push(pageNum);
+          }
+
+          // 5. Ajouter les images de la page à la liste globale
+          if (pageImages.length > 0) {
+            images.push(...pageImages.map(img => ({
+              ...img,
+              pageNumber: pageNum
+            })));
+          }
+
+          // 6. Construire l'objet page
+          const pageObj: DocumentPage = {
+            pageNumber: pageNum,
+            content: pageText || `[Page ${pageNum} - Contenu non extractible ou scanné]`,
+            wordCount: pageWordCount,
+            charCount: pageText.length,
+            hasImages: pageHasImages,
+            images: pageImages.length > 0 ? pageImages.map(img => ({
+              id: img.id,
+              contentType: img.contentType,
+              dataUri: img.dataUri,
+              description: img.description,
+              positionInPage: 'middle' // Approximation
+            })) : undefined,
+            startPosition: fullText.length,
+            endPosition: fullText.length + pageText.length
+          };
+
+          pages.push(pageObj);
+          fullText += pageText + '\n\n';
+
+          // Pour les gros fichiers, faire une pause toutes les 10 pages pour éviter de bloquer le UI
+          if (isLargeFile && pageNum % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+
+        } catch (pageError) {
+          console.error(`Erreur lors du traitement de la page ${pageNum}:`, pageError);
+          // Créer une page avec message d'erreur
+          pages.push({
+            pageNumber: pageNum,
+            content: `[Erreur lors de l'extraction de la page ${pageNum}]`,
+            wordCount: 0,
+            charCount: 0,
+            hasImages: false,
+            startPosition: fullText.length,
+            endPosition: fullText.length
+          });
+        }
+      }
+
+      onProgress?.({ current: 90, total: 100, message: 'Analyse terminée, compilation des résultats...' });
+
+      // Statistiques finales
+      const hasScannedContent = scannedPages.length > 0;
+      const averageWordsPerPage = pages.length > 0 ? Math.round(totalWordCount / pages.length) : 0;
+
+      // Ajouter des informations sur les pages scannées et factures dans le texte
+      if (scannedPages.length > 0) {
+        fullText += `\n\n[Note: ${scannedPages.length} page(s) scannée(s) détectée(s): ${scannedPages.join(', ')}]`;
+      }
+      if (invoicePages.length > 0) {
+        fullText += `\n\n[Note: ${invoicePages.length} page(s) de facture(s) détectée(s): ${invoicePages.join(', ')}]`;
+      }
+      if (images.length > 0) {
+        fullText += `\n\n[Ce document contient ${images.length} image(s) extraite(s).]`;
+      }
+
+      onProgress?.({ current: 100, total: 100, message: 'Extraction terminée' });
+
+      return {
+        text: fullText.trim() || 'Aucun texte extractible trouvé.',
+        pages: pages.length > 0 ? pages : undefined,
+        images: images.length > 0 ? images : undefined,
+        hasImages: images.length > 0,
+        metadata: {
+          fileSize,
+          wordCount: totalWordCount,
+          pageCount: totalPages,
+          hasScannedContent,
+          scannedPages: scannedPages.length > 0 ? scannedPages : undefined,
+          invoicePages: invoicePages.length > 0 ? invoicePages : undefined,
+          averageWordsPerPage
+        }
+      };
     } catch (error) {
       console.error('Error extracting text from PDF:', error);
-      return 'Error extracting text from PDF';
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      return {
+        text: `Error extracting text from PDF: ${errorMessage}`,
+        hasImages: false,
+        metadata: {
+          fileSize: arrayBuffer.byteLength
+        }
+      };
     }
+  };
+
+  // Fonction wrapper pour compatibilité (retourne juste le texte)
+  const extractTextFromPdfSimple = async (arrayBuffer: ArrayBuffer): Promise<string> => {
+    const result = await extractTextFromPdf(arrayBuffer);
+    return result.text;
   };
 
   // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
@@ -661,20 +898,56 @@ const FlexiAnalyseApp: React.FC = () => {
       const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
       
       // Afficher le statut d'extraction selon le type de fichier
+      try {
       if (extension === '.pdf') {
         setCurrentStatus(t('status.extracting.pdf', { fileName: file.name }));
-        fileContent = await extractTextFromPdf(content as ArrayBuffer);
+          const pdfResult = await extractTextFromPdf(content as ArrayBuffer, (progress) => {
+            setCurrentStatus(`${t('status.extracting.pdf', { fileName: file.name })} - ${progress.message}`);
+          });
+          fileContent = pdfResult?.text || '';
+          if (!fileContent || fileContent.trim().length === 0) {
+            console.warn(`Aucun texte extrait du PDF ${file.name}`);
+            fileContent = '[Aucun texte extractible du PDF]';
+          }
       } else if (extension === '.docx') {
         setCurrentStatus(t('status.extracting.docx', { fileName: file.name }));
-        const docxResult = await extractTextFromDocx(content as ArrayBuffer);
-        fileContent = docxResult.text;
+          const docxResult = await extractTextFromDocx(content as ArrayBuffer, (progress) => {
+            setCurrentStatus(`${t('status.extracting.docx', { fileName: file.name })} - ${progress.message}`);
+          });
+          fileContent = docxResult?.text || '';
+          if (!fileContent || fileContent.trim().length === 0) {
+            console.warn(`Aucun texte extrait du DOCX ${file.name}`);
+            fileContent = '[Aucun texte extractible du DOCX]';
+          }
       } else {
         setCurrentStatus(t('status.reading.file', { fileName: file.name }));
         fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
+        }
+      } catch (extractionError) {
+        console.error(`Erreur lors de l'extraction du texte de ${file.name}:`, extractionError);
+        fileContent = `[Erreur lors de l'extraction du texte: ${extractionError instanceof Error ? extractionError.message : 'Erreur inconnue'}]`;
+      }
+      
+      // Vérifier que le contenu est valide avant de continuer
+      if (!fileContent || fileContent.trim().length === 0 || fileContent.startsWith('[Erreur') || fileContent.startsWith('[Aucun')) {
+        console.warn(`Contenu invalide ou vide pour ${file.name}, impossible de générer un résumé`);
+        const messageId = Math.random().toString(36).substr(2, 9);
+        const summaryMessage: ChatMessage = {
+          id: messageId,
+          userQuery: `📄 ${file.name}`,
+          aiResponse: fileContent.includes('Erreur') || fileContent.includes('Aucun') 
+            ? `⚠️ ${fileContent}` 
+            : '⚠️ Impossible de générer un résumé: le fichier ne contient pas de texte extractible.'
+        };
+        setChatHistory((prev) => [...prev, summaryMessage]);
+        setLoading(false);
+        setCurrentStatus('');
+        return;
       }
       
       // Limiter le contenu pour la requête
       const limitedContent = fileContent.substring(0, 2000);
+      console.log(`📝 Génération du résumé pour ${file.name} (${limitedContent.length} caractères)`);
       
       // Créer un message dans le chat history pour le résumé
       const messageId = Math.random().toString(36).substr(2, 9);
@@ -814,7 +1087,7 @@ const FlexiAnalyseApp: React.FC = () => {
       });
       setLoading(false);
     }
-  }, [apiUrl, extractTextFromPdf, extractTextFromDocx, language]);
+  }, [apiUrl, language, t]);
 
   // Fonction pour générer un résumé de répertoire avec streaming
   const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
@@ -957,7 +1230,7 @@ const FlexiAnalyseApp: React.FC = () => {
       });
       setLoading(false);
     }
-  }, [apiUrl, language]);
+  }, [apiUrl, language, t]);
   
   // Fonction pour régénérer les suggested actions pour un fichier spécifique
   const regenerateSuggestedActionsForFile = useCallback(async (file: File) => {
@@ -967,7 +1240,8 @@ const FlexiAnalyseApp: React.FC = () => {
       
       if (extension === '.pdf') {
         const arrayBuffer = await file.arrayBuffer();
-        fileContent = await extractTextFromPdf(arrayBuffer);
+        const pdfResult = await extractTextFromPdf(arrayBuffer);
+        fileContent = pdfResult.text;
       } else if (extension === '.docx') {
         const arrayBuffer = await file.arrayBuffer();
         const docxResult = await extractTextFromDocx(arrayBuffer);
@@ -999,7 +1273,7 @@ const FlexiAnalyseApp: React.FC = () => {
     } catch (error) {
       console.error('Error regenerating suggested actions:', error);
     }
-  }, [apiUrl, extractTextFromPdf, extractTextFromDocx, language]);
+  }, [apiUrl, language, t]);
   
   // Fonction pour gérer l'import d'un répertoire
   const handleDirectorySelect = useCallback(async (files: File[]) => {
@@ -1218,7 +1492,8 @@ const FlexiAnalyseApp: React.FC = () => {
       const result = await extractTextFromDocx(arrayBuffer, onProgress);
       return result.text;
     } else if (extension === '.pdf') {
-      return await extractTextFromPdf(arrayBuffer);
+      const result = await extractTextFromPdf(arrayBuffer, onProgress);
+      return result.text;
     } else if (['.txt', '.md', '.java', '.py', '.js', '.ts', '.cpp', '.c', '.h', '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx', '.tsx', '.sql'].includes(extension)) {
       return new TextDecoder().decode(new Uint8Array(arrayBuffer));
     } else {
@@ -1261,12 +1536,17 @@ const FlexiAnalyseApp: React.FC = () => {
           contentType: string;
           dataUri?: string;
           description?: string;
+          pageNumber?: number;
         }>;
         hasImages?: boolean;
         metadata?: {
           fileSize: number;
           wordCount?: number;
+          pageCount?: number;
           hasScannedContent?: boolean;
+          scannedPages?: number[];
+          invoicePages?: number[];
+          averageWordsPerPage?: number;
         };
       }> = [];
       
@@ -1303,20 +1583,39 @@ const FlexiAnalyseApp: React.FC = () => {
             } else {
               console.log(`❌ Fichier DOCX ignoré: ${file.name} - contenu invalide`);
             }
-          } else {
-            // Pour les autres types de fichiers, utiliser l'extraction simple
-            setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
-            const text = await extractTextFromFile(file, progressCallback);
+          } else if (extension === '.pdf') {
+            // Utiliser l'extraction structurée pour PDF (inclut pages et images)
+            const structuredResult = await extractTextFromPdf(
+              await file.arrayBuffer(),
+              progressCallback
+            );
             
-            if (text && text !== 'Unsupported file type') {
+            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
               fileContents.push({
                 fileName: file.name,
+                content: structuredResult.text,
+                images: structuredResult.images,
+                hasImages: structuredResult.hasImages,
+                metadata: structuredResult.metadata
+              });
+              console.log(`✅ Fichier PDF traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}, ${structuredResult.metadata?.pageCount || 0} page(s))`);
+            } else {
+              console.log(`❌ Fichier PDF ignoré: ${file.name} - contenu invalide`);
+            }
+          } else {
+            // Pour les autres types de fichiers, utiliser l'extraction simple
+        setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
+            const text = await extractTextFromFile(file, progressCallback);
+        
+        if (text && text !== 'Unsupported file type') {
+          fileContents.push({
+            fileName: file.name,
                 content: text,
                 hasImages: false
-              });
-              console.log(`✅ Fichier traité: ${file.name} (${text.length} caractères)`);
-            } else {
-              console.log(`❌ Fichier ignoré: ${file.name} - type non supporté`);
+          });
+          console.log(`✅ Fichier traité: ${file.name} (${text.length} caractères)`);
+        } else {
+          console.log(`❌ Fichier ignoré: ${file.name} - type non supporté`);
             }
           }
         } catch (fileError) {
@@ -1330,7 +1629,7 @@ const FlexiAnalyseApp: React.FC = () => {
       if (filesWithImages > 0) {
         setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }) + ` (${filesWithImages} fichier(s) avec images)`);
       } else {
-        setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
+      setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
       }
 
       // Envoyer au backend pour indexation (avec support pour contenu structuré)
@@ -1399,10 +1698,14 @@ const FlexiAnalyseApp: React.FC = () => {
       console.log('Changements détectés:', hasFilesChanged);
 
       if (directoryFiles.length > 0 && hasFilesChanged) {
-        console.log('🔄 Démarrage de l\'indexation backend...');
-        await indexDirectoryContentOnBackend(directoryFiles);
-        // Mettre à jour la référence avec une copie pour éviter les problèmes de référence
-        lastIndexedFilesRef.current = [...directoryFiles];
+        console.log('🔄 Démarrage de l\'indexation backend en arrière-plan...');
+        // Lancer l'indexation en arrière-plan sans bloquer
+        indexDirectoryContentOnBackend(directoryFiles).then(() => {
+          // Mettre à jour la référence avec une copie pour éviter les problèmes de référence
+          lastIndexedFilesRef.current = [...directoryFiles];
+        }).catch((error) => {
+          console.error('Erreur lors de l\'indexation en arrière-plan:', error);
+        });
       } else if (directoryFiles.length > 0 && !hasFilesChanged) {
         console.log('ℹ️ Fichiers déjà indexés, pas de changement');
         setIsDirectoryIndexed(true);
@@ -1477,16 +1780,22 @@ const FlexiAnalyseApp: React.FC = () => {
       };
 
       if (effectiveMode === 'local') {
-        // S'assurer que le vector store backend est prêt avant la première requête locale
+        // Si le vector store backend n'est pas prêt, lancer l'indexation en arrière-plan
+        // mais continuer quand même avec la requête (elle pourra échouer si vraiment pas prêt)
         if (directoryFiles.length > 0 && !isDirectoryIndexed) {
-          console.log('📚 Vector store non prêt, démarrage indexation avant la requête locale...');
+          console.log('📚 Vector store non prêt, démarrage indexation en arrière-plan...');
           setIndexingStatus(t('status.indexing.documents'));
-          try {
-            await indexDirectoryContentOnBackend(directoryFiles);
+          // Lancer l'indexation en arrière-plan sans attendre
+          indexDirectoryContentOnBackend(directoryFiles).then(() => {
             lastIndexedFilesRef.current = directoryFiles;
-          } finally {
             setIndexingStatus('');
-          }
+            console.log('✅ Indexation terminée en arrière-plan');
+          }).catch((error) => {
+            console.error('Erreur lors de l\'indexation en arrière-plan:', error);
+            setIndexingStatus('');
+          });
+          // Continuer avec la requête même si l'indexation n'est pas terminée
+          // (la requête utilisera ce qui est déjà indexé)
         }
 
         // MODE LOCAL: Utilisation de l'indexation backend
@@ -1516,7 +1825,8 @@ const FlexiAnalyseApp: React.FC = () => {
                 const docxResult = await extractTextFromDocx(contentCopy);
                 currentFileContent = docxResult.text;
               } else if (extension === '.pdf') {
-                currentFileContent = await extractTextFromPdf(contentCopy);
+                const pdfResult = await extractTextFromPdf(contentCopy);
+                currentFileContent = pdfResult.text;
               } else {
                 currentFileContent = 'Type de fichier binaire non supporté';
               }

@@ -2298,7 +2298,7 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
     (nouveaux fichiers indexés, corrections, etc.).
     """
     t = translations.get(language, translations['en'])
-
+    
     # Amélioration: Organiser le contexte par pertinence et préserver les informations clés
     max_chunk_len = 2000  # Augmenté encore plus pour préserver le maximum de contexte
     contextual_docs: List[str] = []
@@ -3668,16 +3668,18 @@ async def index_directory():
             
             # Construire les métadonnées enrichies
             document_metadata = {
-                'fileName': file_data['fileName'],
+                    'fileName': file_data['fileName'],
                 'file_size': metadata_info.get('file_size', len(main_content)),
                 'word_count': metadata_info.get('wordCount'),
                 'page_count': metadata_info.get('pageCount'),
                 'has_scanned_content': metadata_info.get('hasScannedContent', False),
+                'scanned_pages': metadata_info.get('scannedPages'),  # Pages scannées (PDF)
+                'invoice_pages': metadata_info.get('invoicePages'),  # Pages de factures (PDF)
                 'has_images': has_images,
                 'images_count': len(images) if images else 0,
                 'images_ocr_processed': file_images_processed,
-                'indexed_at': datetime.utcnow().isoformat()
-            }
+                    'indexed_at': datetime.utcnow().isoformat()
+                }
             
             # Ajouter des métadonnées sur les images si disponibles
             if images:
@@ -4395,9 +4397,6 @@ def summarize_file_stream():
             error_msg = t.get('no_content_provided', 'No content provided')
             return jsonify({"error": error_msg}), 400
         
-        # Utiliser Mistral pour générer le résumé
-        client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=os.getenv("MISTRAL_API_KEY"))
-        
         # Build language-specific prompt
         lang_names = {'en': 'English', 'fr': 'French', 'es': 'Spanish'}
         lang_name = lang_names.get(language, language)
@@ -4415,7 +4414,24 @@ Content:
         
         def generate():
             try:
-                stream = client.chat.completions.create(
+                # Essayer Mistral d'abord, puis fallback vers OpenAI
+                mistral_api_key = os.getenv("MISTRAL_API_KEY")
+                openai_api_key = os.getenv("OPENAI_API_KEY")
+                
+                use_mistral = mistral_api_key and len(mistral_api_key.strip()) > 0
+                use_openai = openai_api_key and len(openai_api_key.strip()) > 0
+                
+                if not use_mistral and not use_openai:
+                    error_msg = "Aucune clé API configurée (ni Mistral ni OpenAI)"
+                    logger.error(f"❌ {error_msg}")
+                    yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
+                    return
+                
+                # Essayer Mistral d'abord si disponible
+                if use_mistral:
+                    try:
+                        mistral_client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=mistral_api_key)
+                        stream = mistral_client.chat.completions.create(
                     model="mistral-small",
                     messages=[
                         {"role": "system", "content": system_content},
@@ -4425,12 +4441,43 @@ Content:
                     temperature=0.3,
                     stream=True
                 )
+                        logger.info("✅ Utilisation de Mistral pour le résumé")
+                    except Exception as mistral_error:
+                        logger.warning(f"⚠️ Erreur Mistral ({mistral_error}), fallback vers OpenAI...")
+                        use_mistral = False
+                
+                # Fallback vers OpenAI si Mistral n'est pas disponible ou a échoué
+                if not use_mistral:
+                    if not use_openai:
+                        error_msg = "Mistral indisponible et OpenAI non configuré"
+                        logger.error(f"❌ {error_msg}")
+                        yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
+                        return
+                    
+                    try:
+                        from openai import OpenAI as OpenAIClient
+                        openai_client = OpenAIClient(api_key=openai_api_key)
+                        stream = openai_client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": system_content},
+                                {"role": "user", "content": prompt}
+                            ],
+                            max_tokens=200,
+                            temperature=0.3,
+                            stream=True
+                        )
+                        logger.info("✅ Utilisation d'OpenAI (fallback) pour le résumé")
+                    except Exception as openai_error:
+                        logger.error(f"❌ Erreur OpenAI: {openai_error}")
+                        yield f"data: {json.dumps({'error': f'Erreur API: {openai_error}', 'done': True})}\n\n"
+                        return
                 
                 accumulated_text = ""
                 line_count = 0
                 
                 for chunk in stream:
-                    if chunk.choices[0].delta.content:
+                    if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         accumulated_text += content
                         
@@ -4504,8 +4551,18 @@ def summarize_repository_stream():
         
         def generate():
             try:
-                # Utiliser Mistral pour générer le résumé
-                client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=os.getenv("MISTRAL_API_KEY"))
+                # Essayer Mistral d'abord, puis fallback vers OpenAI
+                mistral_api_key = os.getenv("MISTRAL_API_KEY")
+                openai_api_key = os.getenv("OPENAI_API_KEY")
+                
+                use_mistral = mistral_api_key and len(mistral_api_key.strip()) > 0
+                use_openai = openai_api_key and len(openai_api_key.strip()) > 0
+                
+                if not use_mistral and not use_openai:
+                    error_msg = "Aucune clé API configurée (ni Mistral ni OpenAI)"
+                    logger.error(f"❌ {error_msg}")
+                    yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
+                    return
                 
                 # Construire le prompt avec les informations du répertoire
                 file_names_text = '\n'.join([f"- {f.get('display_name', f.get('name', ''))}" for f in files_info[:10]])
@@ -4542,7 +4599,11 @@ def summarize_repository_stream():
 
 {summary_label}"""
                 
-                stream = client.chat.completions.create(
+                # Essayer Mistral d'abord si disponible
+                if use_mistral:
+                    try:
+                        mistral_client = OpenAI(base_url="https://api.mistral.ai/v1", api_key=mistral_api_key)
+                        stream = mistral_client.chat.completions.create(
                     model="mistral-small",
                     messages=[
                         {"role": "system", "content": system_content},
@@ -4552,9 +4613,40 @@ def summarize_repository_stream():
                     temperature=0.3,
                     stream=True
                 )
+                        logger.info("✅ Utilisation de Mistral pour le résumé du répertoire")
+                    except Exception as mistral_error:
+                        logger.warning(f"⚠️ Erreur Mistral ({mistral_error}), fallback vers OpenAI...")
+                        use_mistral = False
+                
+                # Fallback vers OpenAI si Mistral n'est pas disponible ou a échoué
+                if not use_mistral:
+                    if not use_openai:
+                        error_msg = "Mistral indisponible et OpenAI non configuré"
+                        logger.error(f"❌ {error_msg}")
+                        yield f"data: {json.dumps({'error': error_msg, 'done': True})}\n\n"
+                        return
+                    
+                    try:
+                        from openai import OpenAI as OpenAIClient
+                        openai_client = OpenAIClient(api_key=openai_api_key)
+                        stream = openai_client.chat.completions.create(
+                            model="gpt-3.5-turbo",
+                            messages=[
+                                {"role": "system", "content": system_content},
+                                {"role": "user", "content": prompt}
+                            ],
+                            max_tokens=400,
+                            temperature=0.3,
+                            stream=True
+                        )
+                        logger.info("✅ Utilisation d'OpenAI (fallback) pour le résumé du répertoire")
+                    except Exception as openai_error:
+                        logger.error(f"❌ Erreur OpenAI: {openai_error}")
+                        yield f"data: {json.dumps({'error': f'Erreur API: {openai_error}', 'done': True})}\n\n"
+                        return
                 
                 for chunk in stream:
-                    if chunk.choices[0].delta.content:
+                    if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
                         yield f"data: {json.dumps({'content': content, 'done': False})}\n\n"
                 
