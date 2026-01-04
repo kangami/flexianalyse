@@ -1799,10 +1799,10 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
         result = hybrid_retrieve_documents(
             vector_store=vector_store,
             query=user_query,
-            k_candidates=70,
-            k_final=20,
-            semantic_weight=0.60,
-            bm25_weight=0.30,
+            k_candidates=100,  # Increased for better recall
+            k_final=25,  # Increased from 20 to 25 for more comprehensive results
+            semantic_weight=0.55,  # Adjusted weights for better precision
+            bm25_weight=0.35,
             exact_weight=0.10,
         )
         if isinstance(result, tuple) and len(result) == 2:
@@ -3977,10 +3977,10 @@ async def handle_query():
                             file_first_docs, file_first_debug = hybrid_retrieve_documents(
                                 vector_store=session_vector_store,
                                 query=user_query,
-                                k_candidates=70,
-                                k_final=8,  # Résultats du fichier
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
+                                k_candidates=80,  # Increased for better recall within file
+                                k_final=10,  # Increased from 8 to 10
+                                semantic_weight=0.55,
+                                bm25_weight=0.35,
                                 exact_weight=0.10,
                                 preferred_sources=[file_name],
                             )
@@ -3992,10 +3992,10 @@ async def handle_query():
                             corpus_result = hybrid_retrieve_documents(
                                 vector_store=session_vector_store,
                                 query=user_query,
-                                k_candidates=100,
-                                k_final=12,  # Résultats du corpus
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
+                                k_candidates=120,  # Increased for better recall
+                                k_final=15,  # Increased from 12 to 15
+                                semantic_weight=0.55,
+                                bm25_weight=0.35,
                                 exact_weight=0.10,
                             )
                             if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
@@ -4298,10 +4298,10 @@ def handle_query_stream():
                             file_first_docs, _ = hybrid_retrieve_documents(
                                 vector_store=session_vector_store,
                                 query=user_query,
-                                k_candidates=70,
-                                k_final=8,
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
+                                k_candidates=80,
+                                k_final=10,
+                                semantic_weight=0.55,
+                                bm25_weight=0.35,
                                 exact_weight=0.10,
                                 preferred_sources=[file_name],
                             )
@@ -4327,10 +4327,10 @@ def handle_query_stream():
                             corpus_docs, _ = hybrid_retrieve_documents(
                                 vector_store=session_vector_store,
                                 query=user_query,
-                                k_candidates=100,
-                                k_final=12,
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
+                                k_candidates=120,
+                                k_final=15,
+                                semantic_weight=0.55,
+                                bm25_weight=0.35,
                                 exact_weight=0.10,
                             )
                             

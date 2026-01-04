@@ -138,10 +138,10 @@ def _minmax(values: List[float]) -> Tuple[float, float]:
 
 
 def _bm25_score(query_tokens: List[str], doc_tokens: List[str], df: Dict[str, int], N: int) -> float:
-    # BM25-ish with conservative constants (no external dep)
+    # BM25-ish with optimized constants for better precision
     if not query_tokens or not doc_tokens or N <= 0:
         return 0.0
-    k1 = 1.2
+    k1 = 1.5  # Increased from 1.2 to 1.5 for better term frequency sensitivity
     b = 0.75
     tf = Counter(doc_tokens)
     dl = len(doc_tokens)
@@ -162,10 +162,10 @@ def _bm25_score(query_tokens: List[str], doc_tokens: List[str], df: Dict[str, in
 def hybrid_retrieve_documents(
     vector_store: Any,
     query: str,
-    k_candidates: int = 60,
-    k_final: int = 12,
-    semantic_weight: float = 0.60,
-    bm25_weight: float = 0.30,
+    k_candidates: int = 100,  # Increased from 60 to 100 for better recall
+    k_final: int = 15,  # Increased from 12 to 15 for more results
+    semantic_weight: float = 0.55,  # Slightly reduced to give more weight to lexical/exact
+    bm25_weight: float = 0.35,  # Increased from 0.30 to 0.35 for better keyword matching
     exact_weight: float = 0.10,
     preferred_sources: Optional[List[str]] = None,
 ) -> Tuple[List[Document], Dict[str, Any]]:
@@ -231,16 +231,31 @@ def hybrid_retrieve_documents(
         bm25 = _bm25_score(query_tokens, doc_toks, df, N)
         bm25_scores.append(bm25)
 
-        # Exact-ish: keywords in filename + phrase presence
+        # Exact-ish: keywords in filename + phrase presence + phrase matching
         meta_name = (doc.metadata.get("fileName") or doc.metadata.get("file_name") or doc.metadata.get("source") or "")
         name_l = _normalize_text(meta_name)
         content_l = _normalize_text(doc.page_content)
         exact = 0.0
         if query_tokens:
+            # Exact matches in filename (higher weight)
             hits_name = sum(1 for t in query_tokens if t in name_l)
+            exact += min(hits_name * 0.20, 0.7)  # Increased from 0.15/0.6 to 0.20/0.7
+            
+            # Exact matches in content
             hits_content = sum(1 for t in query_tokens if t in content_l)
-            exact += min(hits_name * 0.15, 0.6)
-            exact += min(hits_content * 0.05, 0.4)
+            exact += min(hits_content * 0.08, 0.5)  # Increased from 0.05/0.4 to 0.08/0.5
+            
+            # Phrase matching bonus (check if query words appear in sequence)
+            query_phrase = " ".join(query_tokens[:3])  # Check first 3 tokens as phrase
+            if len(query_tokens) >= 2 and query_phrase in content_l:
+                exact += 0.3  # Significant boost for phrase matches
+            elif len(query_tokens) >= 2:
+                # Partial phrase match (2 consecutive words)
+                for i in range(len(query_tokens) - 1):
+                    phrase = f"{query_tokens[i]} {query_tokens[i+1]}"
+                    if phrase in content_l:
+                        exact += 0.15
+                        break
         # Evidence boosts (date/money)
         if is_date and _has_date_evidence(content_l):
             exact += 0.25
