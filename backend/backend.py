@@ -4007,25 +4007,32 @@ async def handle_query():
                                 corpus_debug = {}
                             logger.info(f"📚 Corpus: {len(corpus_docs)} résultats trouvés")
                         else:
-                            # No file selected: search directly in whole repository
-                            logger.info(f"📚 No file selected: Searching directly in whole repository...")
-                            corpus_result = hybrid_retrieve_documents(
-                                vector_store=session_vector_store,
-                                query=user_query,
-                                k_candidates=100,  # More candidates for comprehensive search
-                                k_final=20,  # More results to find meaningful answer
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
-                                exact_weight=0.10,
+                            # No file selected: use the advanced search_semantic_documents_sync
+                            # which includes person name filtering, function name search, filename matching, etc.
+                            logger.info(f"📚 No file selected: Using advanced search in whole repository...")
+                            directory_content = search_semantic_documents_sync(
+                                session_vector_store, 
+                                user_query, 
+                                session_id, 
+                                conversation_history
                             )
-                            if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
-                                corpus_docs, corpus_debug = corpus_result
-                                if not isinstance(corpus_debug, dict):
-                                    corpus_debug = {}
-                            else:
-                                corpus_docs = []
-                                corpus_debug = {}
-                            logger.info(f"📚 Repository search: {len(corpus_docs)} docs found")
+                            # Convert List[Dict] to List[Document] for consistency with file_first logic
+                            corpus_docs = []
+                            for doc_dict in directory_content:
+                                # Create a Document object from the dict
+                                from langchain.schema import Document
+                                doc = Document(
+                                    page_content=doc_dict.get('content', ''),
+                                    metadata={
+                                        'fileName': doc_dict.get('fileName', ''),
+                                        'file_name': doc_dict.get('fileName', ''),
+                                        'pageNumber': doc_dict.get('pageNumber'),
+                                        'is_page_chunk': doc_dict.get('isPageChunk', False)
+                                    }
+                                )
+                                corpus_docs.append(doc)
+                            corpus_debug = {}
+                            logger.info(f"📚 Advanced repository search: {len(corpus_docs)} docs found")
 
                         # Merge preserving order: file_first_docs first (if any), then corpus_docs
                         # Dedupe by (source, preview)
@@ -4060,20 +4067,28 @@ async def handle_query():
                         
                         # Ajout des documents pertinents au contexte avec métadonnées enrichies
                         # Éviter les doublons en utilisant un set de file_name + début du contenu
-                        seen_docs = set()
-                        for doc in relevant_docs:
-                            file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
-                            content_preview = doc.page_content[:100]  # Premier 100 chars pour détecter les doublons
-                            doc_key = f"{file_name_from_meta}:{content_preview}"
+                        if not directory_content:  # Only populate if not already filled by search_semantic_documents_sync
+                            seen_docs = set()
+                            for doc in relevant_docs:
+                                file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
+                                content_preview = doc.page_content[:100]  # Premier 100 chars pour détecter les doublons
+                                doc_key = f"{file_name_from_meta}:{content_preview}"
+                                
+                                if doc_key not in seen_docs:
+                                    seen_docs.add(doc_key)
+                                    page_number = doc.metadata.get("page_number")
+                                    result_dict = {
+                                        "fileName": file_name_from_meta, 
+                                        "content": doc.page_content[:2500]  # Augmenté à 2500 chars par chunk
+                                    }
+                                    if page_number is not None:
+                                        result_dict["pageNumber"] = page_number
+                                        result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
+                                    directory_content.append(result_dict)
                             
-                            if doc_key not in seen_docs:
-                                seen_docs.add(doc_key)
-                            directory_content.append({ 
-                                    "fileName": file_name_from_meta, 
-                                    "content": doc.page_content[:2500]  # Augmenté à 2500 chars par chunk
-                            })
-                        
-                        logger.info(f"📚 {len(seen_docs)} documents uniques ajoutés depuis le vector store de session")
+                            logger.info(f"📚 {len(directory_content)} documents uniques ajoutés depuis le vector store de session")
+                        else:
+                            logger.info(f"📚 {len(directory_content)} documents ajoutés via search_semantic_documents_sync")
                     
                 except Exception as e:
                     logger.warning(f"Erreur lors de la récupération depuis le vector store: {str(e)}")
@@ -4339,30 +4354,15 @@ def handle_query_stream():
                             
                             logger.info(f"📚 [Stream] Corpus: {len(corpus_results)} résultats")
                         else:
-                            # No file selected: search directly in whole repository
-                            logger.info(f"📚 [Stream] No file selected: Searching directly in whole repository...")
-                            corpus_docs, _ = hybrid_retrieve_documents(
-                                vector_store=session_vector_store,
-                                query=user_query,
-                                k_candidates=100,
-                                k_final=20,
-                                semantic_weight=0.60,
-                                bm25_weight=0.30,
-                                exact_weight=0.10,
+                            # No file selected: use the advanced search_semantic_documents_sync
+                            # which includes person name filtering, function name search, filename matching, etc.
+                            logger.info(f"📚 [Stream] No file selected: Using advanced search in whole repository...")
+                            corpus_results = search_semantic_documents_sync(
+                                session_vector_store, 
+                                user_query, 
+                                session_id, 
+                                conversation_history
                             )
-                            
-                            # Convert to directory_content format
-                            for doc in corpus_docs:
-                                file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
-                                page_number = doc.metadata.get("page_number")
-                                result_dict = {
-                                    "fileName": file_name_from_meta,
-                                    "content": doc.page_content[:2500]
-                                }
-                                if page_number is not None:
-                                    result_dict["pageNumber"] = page_number
-                                    result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
-                                corpus_results.append(result_dict)
                         
                         # Combine results: file_first first, then corpus
                         directory_content = file_first_results + corpus_results
