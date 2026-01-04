@@ -3963,61 +3963,99 @@ async def handle_query():
                         session_vector_store = session_store['store']
                         logger.info(f"🔍 Hybrid retrieval (semantic + lexical) dans le vector store session {session_id}")
 
-                        # Two-pass retrieval (requested):
-                        # 1) If a specific file is selected, retrieve from that file first
-                        # 2) Then retrieve from the whole directory/corpus
+                        # Hierarchical retrieval strategy:
+                        # 1) If a file is selected: search in that file first, then in whole repo if needed
+                        # 2) If no file selected: search directly in whole repo until meaningful answer
                         file_first_docs: List[Document] = []
                         file_first_debug: Dict[str, Any] = {}
+                        corpus_docs: List[Document] = []
+                        corpus_debug: Dict[str, Any] = {}
+                        
                         if file_name and file_name != "__DIRECTORY_CORPUS__":
+                            # STEP 1: Search in selected file first
+                            logger.info(f"📄 Recherche dans le fichier sélectionné '{file_name}'...")
                             file_first_docs, file_first_debug = hybrid_retrieve_documents(
                                 vector_store=session_vector_store,
                                 query=user_query,
                                 k_candidates=70,
-                                k_final=6,
+                                k_final=8,  # Résultats du fichier
                                 semantic_weight=0.60,
                                 bm25_weight=0.30,
                                 exact_weight=0.10,
                                 preferred_sources=[file_name],
                             )
-                        else:
-                            # Initialiser file_first_debug avec un dict vide si pas de fichier sélectionné
-                            file_first_debug = {}
-
-                        corpus_result = hybrid_retrieve_documents(
-                            vector_store=session_vector_store,
-                            query=user_query,
-                            k_candidates=70,
-                            k_final=12,
-                            semantic_weight=0.60,
-                            bm25_weight=0.30,
-                            exact_weight=0.10,
-                        )
-                        if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
-                            corpus_docs, corpus_debug = corpus_result
-                            if not isinstance(corpus_debug, dict):
+                            logger.info(f"📊 Fichier: {len(file_first_docs)} résultats trouvés")
+                            
+                            # STEP 2: Toujours chercher aussi dans le corpus pour compléter
+                            # Si l'info n'est pas dans le fichier, elle sera dans le corpus
+                            logger.info(f"📚 Recherche complémentaire dans le corpus du répertoire...")
+                            corpus_result = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=100,
+                                k_final=12,  # Résultats du corpus
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                            )
+                            if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
+                                corpus_docs, corpus_debug = corpus_result
+                                if not isinstance(corpus_debug, dict):
+                                    corpus_debug = {}
+                            else:
+                                corpus_docs = []
                                 corpus_debug = {}
+                            logger.info(f"📚 Corpus: {len(corpus_docs)} résultats trouvés")
                         else:
-                            corpus_docs = []
-                            corpus_debug = {}
+                            # No file selected: search directly in whole repository
+                            logger.info(f"📚 No file selected: Searching directly in whole repository...")
+                            corpus_result = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=100,  # More candidates for comprehensive search
+                                k_final=20,  # More results to find meaningful answer
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                            )
+                            if isinstance(corpus_result, tuple) and len(corpus_result) == 2:
+                                corpus_docs, corpus_debug = corpus_result
+                                if not isinstance(corpus_debug, dict):
+                                    corpus_debug = {}
+                            else:
+                                corpus_docs = []
+                                corpus_debug = {}
+                            logger.info(f"📚 Repository search: {len(corpus_docs)} docs found")
 
-                        # Merge preserving order, dedupe by (source, preview)
+                        # Merge preserving order: file_first_docs first (if any), then corpus_docs
+                        # Dedupe by (source, preview)
                         merged: List[Document] = []
                         seen = set()
-                        for d in (file_first_docs + corpus_docs):
+                        
+                        # Add file documents first (priority)
+                        for d in file_first_docs:
                             src = (d.metadata.get("source") or d.metadata.get("fileName") or d.metadata.get("file_name") or "").strip().lower()
                             key = (src, (d.page_content or "")[:120])
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            merged.append(d)
-                            if len(merged) >= 14:
-                                break
+                            if key not in seen:
+                                seen.add(key)
+                                merged.append(d)
+                        
+                        # Then add corpus documents (excluding duplicates)
+                        for d in corpus_docs:
+                            src = (d.metadata.get("source") or d.metadata.get("fileName") or d.metadata.get("file_name") or "").strip().lower()
+                            key = (src, (d.page_content or "")[:120])
+                            if key not in seen:
+                                seen.add(key)
+                                merged.append(d)
+                                # Limit total results
+                                if len(merged) >= 20:
+                                    break
 
                         relevant_docs = merged
                         logger.info(
-                            f"🎯 Hybrid two-pass selected {len(relevant_docs)} docs | "
-                            f"file_first={len(file_first_docs)} top={file_first_debug.get('top', []) if isinstance(file_first_debug, dict) else []} | "
-                            f"corpus_top={corpus_debug.get('top', []) if isinstance(corpus_debug, dict) else []}"
+                            f"🎯 Hierarchical search completed: {len(relevant_docs)} total docs | "
+                            f"from_file={len(file_first_docs)} | "
+                            f"from_corpus={len([d for d in merged if d not in file_first_docs])}"
                         )
                         
                         # Ajout des documents pertinents au contexte avec métadonnées enrichies
@@ -4225,7 +4263,7 @@ def handle_query_stream():
             if not file_name:
                 return jsonify({"error": "Mode local nécessite un file_name"}), 400
             
-            # Si le vector store backend est disponible, utiliser la recherche sémantique améliorée
+            # Si le vector store backend est disponible, utiliser la recherche sémantique améliorée avec stratégie hiérarchique
             if use_backend_vectorstore and session_id in vector_stores:
                 try:
                     session_store = vector_stores.get(session_id)
@@ -4234,9 +4272,101 @@ def handle_query_stream():
                     else:
                         session_vector_store = session_store['store']
                         
-                        # Utiliser la fonction helper synchrone pour la recherche sémantique (avec historique pour détecter les pronoms)
-                        directory_content = search_semantic_documents_sync(session_vector_store, user_query, session_id, conversation_history)
-                        logger.info(f"✅ {len(directory_content)} documents récupérés par recherche sémantique pour le streaming")
+                        # Hierarchical search strategy for streaming:
+                        # If file_name is provided and not __DIRECTORY_CORPUS__, search file first, then corpus
+                        file_first_results = []
+                        corpus_results = []
+                        
+                        if file_name and file_name != "__DIRECTORY_CORPUS__":
+                            # Step 1: Search in selected file first
+                            logger.info(f"📄 [Stream] Recherche dans le fichier sélectionné '{file_name}'...")
+                            file_first_docs, _ = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=70,
+                                k_final=8,
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                                preferred_sources=[file_name],
+                            )
+                            
+                            # Convert to directory_content format
+                            for doc in file_first_docs:
+                                file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
+                                page_number = doc.metadata.get("page_number")
+                                result_dict = {
+                                    "fileName": file_name_from_meta,
+                                    "content": doc.page_content[:2500]
+                                }
+                                if page_number is not None:
+                                    result_dict["pageNumber"] = page_number
+                                    result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
+                                file_first_results.append(result_dict)
+                            
+                            logger.info(f"📊 [Stream] Fichier: {len(file_first_results)} résultats")
+                            
+                            # Step 2: Always search in corpus to complement file results
+                            # If info not in file, it will be in corpus
+                            logger.info(f"📚 [Stream] Recherche complémentaire dans le corpus...")
+                            corpus_docs, _ = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=100,
+                                k_final=12,
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                            )
+                            
+                            # Convert and dedupe
+                            seen_keys = set()
+                            for doc in corpus_docs:
+                                file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
+                                content_preview = doc.page_content[:100]
+                                key = f"{file_name_from_meta}:{content_preview}"
+                                if key not in seen_keys:
+                                    seen_keys.add(key)
+                                    page_number = doc.metadata.get("page_number")
+                                    result_dict = {
+                                        "fileName": file_name_from_meta,
+                                        "content": doc.page_content[:2500]
+                                    }
+                                    if page_number is not None:
+                                        result_dict["pageNumber"] = page_number
+                                        result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
+                                    corpus_results.append(result_dict)
+                            
+                            logger.info(f"📚 [Stream] Corpus: {len(corpus_results)} résultats")
+                        else:
+                            # No file selected: search directly in whole repository
+                            logger.info(f"📚 [Stream] No file selected: Searching directly in whole repository...")
+                            corpus_docs, _ = hybrid_retrieve_documents(
+                                vector_store=session_vector_store,
+                                query=user_query,
+                                k_candidates=100,
+                                k_final=20,
+                                semantic_weight=0.60,
+                                bm25_weight=0.30,
+                                exact_weight=0.10,
+                            )
+                            
+                            # Convert to directory_content format
+                            for doc in corpus_docs:
+                                file_name_from_meta = doc.metadata.get("fileName") or doc.metadata.get("file_name") or "document_vectorstore"
+                                page_number = doc.metadata.get("page_number")
+                                result_dict = {
+                                    "fileName": file_name_from_meta,
+                                    "content": doc.page_content[:2500]
+                                }
+                                if page_number is not None:
+                                    result_dict["pageNumber"] = page_number
+                                    result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
+                                corpus_results.append(result_dict)
+                        
+                        # Combine results: file_first first, then corpus
+                        directory_content = file_first_results + corpus_results
+                        logger.info(f"✅ [Stream] {len(directory_content)} documents récupérés par recherche hiérarchique (file={len(file_first_results)}, corpus={len(corpus_results)})")
                 except Exception as e:
                     logger.warning(f"Erreur lors de la recherche sémantique en streaming: {str(e)}")
             
