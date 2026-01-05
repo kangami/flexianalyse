@@ -101,6 +101,13 @@ const translations: Record<Language, Record<string, string>> = {
     'status.indexing.on.server': 'Indexing on server ({count} files)...',
     'status.indexing.documents': 'Indexing documents...',
     
+    // Error messages
+    'error.page.limit.exceeded': '⚠️ The file "{fileName}" has {pageCount} pages. The limit is 100 pages per document.',
+    'error.page.limit.exceeded.ignored': '⚠️ The file "{fileName}" has {pageCount} pages. The limit is 100 pages per document. This file will be ignored.',
+    'error.page.limit.exceeded.generic': '⚠️ The file "{fileName}" exceeds the limit of 100 pages.',
+    'error.page.limit.exceeded.query': '⚠️ The file "{fileName}" has {pageCount} pages. The limit is 100 pages per document. Please select another file to ask questions.',
+    'error.page.limit.exceeded.query.generic': '⚠️ The file "{fileName}" exceeds the limit of 100 pages. Please select another file to ask questions.',
+    
     // Reasoning animation
     'reasoning.analyzing.question': '🧠 Analyzing your question...',
     'reasoning.analyzing.description': 'Understanding the context and requirements',
@@ -190,6 +197,13 @@ const translations: Record<Language, Record<string, string>> = {
     'status.indexing.processing': 'Traitement de {fileName} ({current}/{total})...',
     'status.indexing.on.server': 'Indexation sur le serveur ({count} fichiers)...',
     'status.indexing.documents': 'Indexation des documents en cours...',
+    
+    // Error messages
+    'error.page.limit.exceeded': '⚠️ Le fichier "{fileName}" a {pageCount} pages. La limite est de 100 pages par document.',
+    'error.page.limit.exceeded.ignored': '⚠️ Le fichier "{fileName}" a {pageCount} pages. La limite est de 100 pages par document. Ce fichier sera ignoré.',
+    'error.page.limit.exceeded.generic': '⚠️ Le fichier "{fileName}" dépasse la limite de 100 pages.',
+    'error.page.limit.exceeded.query': '⚠️ Le fichier "{fileName}" a {pageCount} pages. La limite est de 100 pages par document. Veuillez sélectionner un autre fichier pour poser des questions.',
+    'error.page.limit.exceeded.query.generic': '⚠️ Le fichier "{fileName}" dépasse la limite de 100 pages. Veuillez sélectionner un autre fichier pour poser des questions.',
     
     // Reasoning animation
     'reasoning.analyzing.question': '🧠 Analyse de votre question...',
@@ -281,6 +295,13 @@ const translations: Record<Language, Record<string, string>> = {
     'status.indexing.processing': 'Procesando {fileName} ({current}/{total})...',
     'status.indexing.on.server': 'Indexando en el servidor ({count} archivos)...',
     'status.indexing.documents': 'Indexando documentos...',
+    
+    // Error messages
+    'error.page.limit.exceeded': '⚠️ El archivo "{fileName}" tiene {pageCount} páginas. El límite es de 100 páginas por documento.',
+    'error.page.limit.exceeded.ignored': '⚠️ El archivo "{fileName}" tiene {pageCount} páginas. El límite es de 100 páginas por documento. Este archivo será ignorado.',
+    'error.page.limit.exceeded.generic': '⚠️ El archivo "{fileName}" excede el límite de 100 páginas.',
+    'error.page.limit.exceeded.query': '⚠️ El archivo "{fileName}" tiene {pageCount} páginas. El límite es de 100 páginas por documento. Por favor, seleccione otro archivo para hacer preguntas.',
+    'error.page.limit.exceeded.query.generic': '⚠️ El archivo "{fileName}" excede el límite de 100 páginas. Por favor, seleccione otro archivo para hacer preguntas.',
     
     // Reasoning animation
     'reasoning.analyzing.question': '🧠 Analizando tu pregunta...',

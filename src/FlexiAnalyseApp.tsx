@@ -242,7 +242,7 @@ const FlexiAnalyseApp: React.FC = () => {
     e.stopPropagation();
   }, []);
   
-  const apiUrl = 'https://flexianalyse.com'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
+  const apiUrl = 'http://127.0.0.1:5000'; // 'http://127.0.0.1:5000' 'https://flexianalyse.com';
 
   // Interface pour une page de document
   interface DocumentPage {
@@ -900,10 +900,29 @@ const FlexiAnalyseApp: React.FC = () => {
       // Afficher le statut d'extraction selon le type de fichier
       try {
       if (extension === '.pdf') {
+        // Vérifier la limite de pages AVANT l'extraction complète
+        const pageCheck = await checkPageLimit(file);
+        if (!pageCheck.isValid) {
+          const errorMessage = pageCheck.errorMessage || t('error.page.limit.exceeded.generic', { fileName: file.name });
+          console.warn(errorMessage);
+          showLimitInfoBubble(errorMessage);
+          setLoading(false);
+          setCurrentStatus('');
+          const messageId = Math.random().toString(36).substr(2, 9);
+          const errorMessageChat: ChatMessage = {
+            id: messageId,
+            userQuery: `📄 ${file.name}`,
+            aiResponse: errorMessage
+          };
+          setChatHistory((prev) => [...prev, errorMessageChat]);
+          return;
+        }
+        
         setCurrentStatus(t('status.extracting.pdf', { fileName: file.name }));
           const pdfResult = await extractTextFromPdf(content as ArrayBuffer, (progress) => {
             setCurrentStatus(`${t('status.extracting.pdf', { fileName: file.name })} - ${progress.message}`);
           });
+          
           fileContent = pdfResult?.text || '';
           if (!fileContent || fileContent.trim().length === 0) {
             console.warn(`Aucun texte extrait du PDF ${file.name}`);
@@ -914,6 +933,25 @@ const FlexiAnalyseApp: React.FC = () => {
           const docxResult = await extractTextFromDocx(content as ArrayBuffer, (progress) => {
             setCurrentStatus(`${t('status.extracting.docx', { fileName: file.name })} - ${progress.message}`);
           });
+          
+          // Vérifier la limite de 100 pages (pour DOCX, compter les pages dans le tableau pages)
+          const pageCount = docxResult.pages?.length || 0;
+          if (pageCount > 100) {
+            const errorMessage = t('error.page.limit.exceeded', { fileName: file.name, pageCount: pageCount.toString() });
+            console.warn(errorMessage);
+            showLimitInfoBubble(errorMessage);
+            setLoading(false);
+            setCurrentStatus('');
+            const messageId = Math.random().toString(36).substr(2, 9);
+            const errorMessageChat: ChatMessage = {
+              id: messageId,
+              userQuery: `📄 ${file.name}`,
+              aiResponse: errorMessage
+            };
+            setChatHistory((prev) => [...prev, errorMessageChat]);
+            return;
+          }
+          
           fileContent = docxResult?.text || '';
           if (!fileContent || fileContent.trim().length === 0) {
             console.warn(`Aucun texte extrait du DOCX ${file.name}`);
@@ -1519,6 +1557,46 @@ const FlexiAnalyseApp: React.FC = () => {
     }
   };
 
+  // Fonction pour vérifier rapidement le nombre de pages AVANT l'extraction complète
+  const checkPageLimit = async (file: File): Promise<{ isValid: boolean; pageCount: number; errorMessage?: string }> => {
+    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    if (extension === '.pdf') {
+      try {
+        // Pour PDF, on peut obtenir le nombre de pages rapidement sans extraire tout le texte
+        const arrayBuffer = await file.arrayBuffer();
+        const bufferCopy = arrayBuffer.slice(0);
+        const pdf = await pdfjslib.getDocument({ 
+          data: bufferCopy,
+          verbosity: 0,
+          stopAtErrors: false,
+        }).promise;
+        
+        const pageCount = pdf.numPages;
+        if (pageCount > 100) {
+          return {
+            isValid: false,
+            pageCount,
+            errorMessage: t('error.page.limit.exceeded.ignored', { fileName: file.name, pageCount: pageCount.toString() })
+          };
+        }
+        return { isValid: true, pageCount };
+      } catch (error) {
+        console.warn(`Erreur lors de la vérification du nombre de pages pour ${file.name}:`, error);
+        // En cas d'erreur, on continue quand même (la vérification n'est pas bloquante)
+        return { isValid: true, pageCount: 0 };
+      }
+    } else if (extension === '.docx') {
+      // Pour DOCX, on ne peut pas vraiment connaître le nombre de pages sans parser le fichier
+      // On va laisser passer et vérifier après extraction (mais on essaie de le faire rapidement)
+      // Pour l'instant, on retourne true pour ne pas bloquer
+      return { isValid: true, pageCount: 0 };
+    }
+    
+    // Pour les autres types de fichiers, pas de limite de pages
+    return { isValid: true, pageCount: 0 };
+  };
+
   // NOUVELLE FONCTION: Indexation côté backend avec support pour contenu structuré (images DOCX)
   const indexDirectoryContentOnBackend = async (files: File[]) => {
     try {
@@ -1555,6 +1633,16 @@ const FlexiAnalyseApp: React.FC = () => {
         const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         console.log(`Traitement du fichier ${i + 1}/${files.length}: ${file.name}`);
         
+        // Vérifier la limite de pages AVANT l'extraction complète (pour économiser les ressources)
+        const pageCheck = await checkPageLimit(file);
+        if (!pageCheck.isValid) {
+          console.warn(pageCheck.errorMessage);
+          if (pageCheck.errorMessage) {
+            showLimitInfoBubble(pageCheck.errorMessage);
+          }
+          continue; // Ignorer ce fichier et passer au suivant
+        }
+        
         // Utiliser le callback de progression pour mettre à jour le statut
         const progressCallback = (progress: { current: number; total: number; message: string }) => {
           const progressPercent = Math.round((progress.current / progress.total) * 100);
@@ -1571,24 +1659,14 @@ const FlexiAnalyseApp: React.FC = () => {
               progressCallback
             );
             
-            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
-              fileContents.push({
-                fileName: file.name,
-                content: structuredResult.text,
-                images: structuredResult.images,
-                hasImages: structuredResult.hasImages,
-                metadata: structuredResult.metadata
-              });
-              console.log(`✅ Fichier DOCX traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''})`);
-            } else {
-              console.log(`❌ Fichier DOCX ignoré: ${file.name} - contenu invalide`);
+            // Vérifier la limite de 100 pages (pour DOCX, compter les pages dans le tableau pages)
+            const pageCount = structuredResult.pages?.length || 0;
+            if (pageCount > 100) {
+              const errorMessage = t('error.page.limit.exceeded.ignored', { fileName: file.name, pageCount: pageCount.toString() });
+              console.warn(errorMessage);
+              showLimitInfoBubble(errorMessage);
+              continue; // Ignorer ce fichier et passer au suivant
             }
-          } else if (extension === '.pdf') {
-            // Utiliser l'extraction structurée pour PDF (inclut pages et images)
-            const structuredResult = await extractTextFromPdf(
-              await file.arrayBuffer(),
-              progressCallback
-            );
             
             if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
               fileContents.push({
@@ -1598,7 +1676,28 @@ const FlexiAnalyseApp: React.FC = () => {
                 hasImages: structuredResult.hasImages,
                 metadata: structuredResult.metadata
               });
-              console.log(`✅ Fichier PDF traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}, ${structuredResult.metadata?.pageCount || 0} page(s))`);
+              console.log(`✅ Fichier DOCX traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}${pageCount > 0 ? `, ${pageCount} page(s)` : ''})`);
+            } else {
+              console.log(`❌ Fichier DOCX ignoré: ${file.name} - contenu invalide`);
+            }
+          } else if (extension === '.pdf') {
+            // Utiliser l'extraction structurée pour PDF (inclut pages et images)
+            // Note: La vérification de pages a déjà été faite avec checkPageLimit() avant
+            const structuredResult = await extractTextFromPdf(
+              await file.arrayBuffer(),
+              progressCallback
+            );
+            
+            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
+              const pageCount = structuredResult.metadata?.pageCount || 0;
+              fileContents.push({
+                fileName: file.name,
+                content: structuredResult.text,
+                images: structuredResult.images,
+                hasImages: structuredResult.hasImages,
+                metadata: structuredResult.metadata
+              });
+              console.log(`✅ Fichier PDF traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}, ${pageCount} page(s))`);
             } else {
               console.log(`❌ Fichier PDF ignoré: ${file.name} - contenu invalide`);
             }
@@ -1719,12 +1818,70 @@ const FlexiAnalyseApp: React.FC = () => {
     loadDirectoryFiles();
   }, [directoryFiles, sessionId]);
 
+  // Fonction pour vérifier si le fichier sélectionné dépasse la limite de pages
+  const checkSelectedFilePageLimit = async (file: File | null): Promise<{ isValid: boolean; pageCount: number; errorMessage?: string }> => {
+    if (!file) {
+      return { isValid: true, pageCount: 0 };
+    }
+
+    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    if (extension === '.pdf') {
+      try {
+        // Pour PDF, on peut obtenir le nombre de pages rapidement
+        const arrayBuffer = await file.arrayBuffer();
+        const bufferCopy = arrayBuffer.slice(0);
+        const pdf = await pdfjslib.getDocument({ 
+          data: bufferCopy,
+          verbosity: 0,
+          stopAtErrors: false,
+        }).promise;
+        
+        const pageCount = pdf.numPages;
+        if (pageCount > 100) {
+          return {
+            isValid: false,
+            pageCount,
+            errorMessage: t('error.page.limit.exceeded.query', { fileName: file.name, pageCount: pageCount.toString() })
+          };
+        }
+        return { isValid: true, pageCount };
+      } catch (error) {
+        console.warn(`Erreur lors de la vérification du nombre de pages pour ${file.name}:`, error);
+        // En cas d'erreur, on continue quand même
+        return { isValid: true, pageCount: 0 };
+      }
+    } else if (extension === '.docx') {
+      // Pour DOCX, on doit extraire pour connaître le nombre de pages
+      // On va vérifier si le fichier a déjà été traité et stocker le nombre de pages
+      // Pour l'instant, on laisse passer et on vérifiera côté backend si nécessaire
+      return { isValid: true, pageCount: 0 };
+    }
+    
+    // Pour les autres types de fichiers, pas de limite de pages
+    return { isValid: true, pageCount: 0 };
+  };
+
   // Fonction principale de gestion des requêtes utilisateur
   const handleQuerySubmit = async (query: string, mode: 'online' | 'local') => {
     // Vérifier la limite de requêtes pour les utilisateurs non connectés
     if (!isAuthenticated && !checkQueryLimit()) {
       showLimitInfoBubble('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
       return;
+    }
+    
+    // Vérifier si le fichier sélectionné dépasse la limite de 100 pages (mode local uniquement)
+    if (mode === 'local' && selectedFile) {
+      const fileCheck = await checkSelectedFilePageLimit(selectedFile);
+      if (!fileCheck.isValid) {
+        const errorMessage = fileCheck.errorMessage || t('error.page.limit.exceeded.query.generic', { fileName: selectedFile.name });
+        showLimitInfoBubble(errorMessage);
+        // Retirer le message de l'historique s'il a été ajouté
+        setChatHistory((prev) => prev.slice(0, -1));
+        setLoading(false);
+        setCurrentStatus('');
+        return;
+      }
     }
     
     // Incrémenter le compteur de requêtes pour les non connectés

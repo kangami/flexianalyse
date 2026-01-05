@@ -3951,6 +3951,23 @@ async def handle_query():
                         "suggestion": "Sélectionnez un fichier, ou importez un répertoire pour l'indexer"
                     }), 400
             
+            # Vérifier si le fichier demandé dépasse 100 pages (il ne sera pas dans le vector store)
+            # Si un fichier spécifique est demandé et qu'il n'est pas dans le vector store, 
+            # c'est probablement qu'il dépasse 100 pages
+            if file_name and file_name != "__DIRECTORY_CORPUS__" and should_use_vectorstore and has_vector_store:
+                session_store = vector_stores.get(session_id)
+                if session_store and isinstance(session_store, dict) and 'store' in session_store:
+                    # Vérifier si le fichier est dans les fichiers indexés
+                    files_indexed = session_store.get('files_indexed', [])
+                    if files_indexed and file_name not in files_indexed:
+                        logger.warning(f"⚠️ Fichier {file_name} non trouvé dans les fichiers indexés (probablement >100 pages). La requête sera ignorée.")
+                        return jsonify({
+                            "error": f"Le fichier '{file_name}' dépasse la limite de 100 pages et ne peut pas être utilisé pour les questions. Veuillez sélectionner un autre fichier.",
+                            "mode": "local",
+                            "file_name": file_name,
+                            "suggestion": "Sélectionnez un autre fichier du répertoire qui ne dépasse pas 100 pages"
+                        }), 400
+            
             # NOUVELLE LOGIQUE: Recherche sémantique améliorée avec recherche hybride (sémantique + mots-clés)
             relevant_docs: List[Document] = []
             # Utiliser le vector store si disponible (que use_backend_vectorstore soit True ou False, si le store existe on l'utilise)
