@@ -10,6 +10,13 @@ export interface User {
   createdAt?: string;
 }
 
+export interface SignUpCredentials {
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+}
+
 export interface AuthState {
   isAuthenticated: boolean;
   user: User | null;
@@ -24,6 +31,7 @@ export interface LoginCredentials {
 
 export interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
+  signup: (credentials: SignUpCredentials) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   logout: () => void;
   clearError: () => void;

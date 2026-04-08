@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
 from flask.helpers import make_response
@@ -20,6 +21,11 @@ import logging
 import time
 import re
 from datetime import datetime
+
+# Load environment variables early (before importing modules that read env at import time)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv()
+
 from auth import register_auth_routes, init_database
 
 # Imports des modules refactorisés
@@ -27,7 +33,10 @@ from config import (
     AuthConfig, FlaskConfig, AIConfig,
     MODEL_CONFIG, DEFAULT_MODEL, MISTRAL_MODEL, OLLAMA_MODELS, OLLAMA_API_URL
 )
-from utils.file_utils import extract_text_from_docx, extract_text_from_pdf
+from utils.file_utils import (
+    extract_text_from_docx, extract_text_from_pdf,
+    extract_pages_from_pdf, extract_sections_from_docx,
+)
 from utils.translations import translations
 from services.api_clients import (
     call_openai_api, call_mistral_api, call_ollama_api, call_gemini_api,
@@ -37,12 +46,11 @@ from services.analysis_service import analyze_file_content, save_file_descriptio
 from services.search_service import perform_online_search, search_serpapi, rerank_documents_with_llm
 from services.hybrid_retrieval import hybrid_retrieve_documents
 from services.vector_store_service import (
-    vector_stores, embeddings, get_vector_store, 
-    create_vector_store, add_documents_to_vector_store
+    vector_stores, embeddings, get_vector_store,
+    create_vector_store, add_documents_to_vector_store,
+    compute_document_hash, get_index_path, save_faiss_index, load_faiss_index,
 )
-
-# Load environment variables
-load_dotenv()
+from services.aws_persistence import aws_persistence_service
 
 # Debug: Vérifier le chargement des variables d'environnement
 print(f"GOOGLE_CLIENT_ID chargé: {os.getenv('GOOGLE_CLIENT_ID')[:20] + '...' if os.getenv('GOOGLE_CLIENT_ID') else 'NON CHARGÉ'}")
@@ -54,6 +62,27 @@ vector_stores = {}
 # Logger setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _extract_user_email_from_auth_header() -> Optional[str]:
+    """Resolve authenticated user email from a Firebase/JWT bearer token if present."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+
+    try:
+        from auth import verify_auth_token
+
+        token = auth_header.replace('Bearer ', '', 1)
+        auth_result = verify_auth_token(token)
+        if not auth_result:
+            return None
+
+        user = auth_result.get('user', {})
+        return user.get('email')
+    except Exception as exc:
+        logger.warning(f"Impossible de résoudre l'utilisateur depuis le token: {str(exc)}")
+        return None
 
 # Configuration des modèles importée depuis config.models
 # MODEL_CONFIG, DEFAULT_MODEL, MISTRAL_MODEL, OLLAMA_MODELS, OLLAMA_API_URL sont maintenant importés
@@ -706,6 +735,94 @@ def _OLD_call_ollama_api(prompt, selected_model="llama3", max_retries=3):
     
     raise RuntimeError("[Ollama] Max retries exceeded")
 
+def _get_type_label(doc_type: str, language: str = 'en') -> str:
+    """Retourne un label lisible pour un type de document dans la langue donnée."""
+    labels = {
+        'fr': {
+            'cv_resume': 'CV / Résumé',
+            'facture_invoice': 'Facture',
+            'contrat_location': 'Contrat de location',
+            'contrat_travail': 'Contrat de travail',
+            'contrat_vente': 'Contrat de vente',
+            'contrat_generique': 'Contrat',
+            'contrat_prenuptial': 'Contrat de mariage',
+            'procuration_poa': 'Procuration',
+            'accord_confidentialite_nda': 'Accord de confidentialité',
+            'acte_propriete_immobiliere': 'Acte de propriété',
+            'testament': 'Testament',
+            'acte_notarie': 'Acte notarié',
+            'lettre': 'Lettre / Courrier',
+            'document_financier': 'Document financier',
+            'assurance_insurance': 'Assurance',
+            'jugement_decision_justice': 'Jugement / Décision',
+            'releve_bancaire': 'Relevé bancaire',
+            'certificat_attestation': 'Certificat / Attestation',
+            'contrat_pret_loan': 'Contrat de prêt',
+            'devis_estimation': 'Devis / Estimation',
+            'bon_commande_purchase_order': 'Bon de commande',
+            'proces_verbal': 'Procès-verbal',
+            'rapport_expertise': "Rapport d'expertise",
+            'permis_licence': 'Permis / Licence',
+            'document_generique': 'Document',
+        },
+        'en': {
+            'cv_resume': 'CV / Resume',
+            'facture_invoice': 'Invoice',
+            'contrat_location': 'Rental Contract',
+            'contrat_travail': 'Employment Contract',
+            'contrat_vente': 'Sale Contract',
+            'contrat_generique': 'Contract',
+            'contrat_prenuptial': 'Prenuptial Agreement',
+            'procuration_poa': 'Power of Attorney',
+            'accord_confidentialite_nda': 'NDA',
+            'acte_propriete_immobiliere': 'Real Estate Deed',
+            'testament': 'Will / Testament',
+            'acte_notarie': 'Notarial Act',
+            'lettre': 'Letter',
+            'document_financier': 'Financial Document',
+            'assurance_insurance': 'Insurance Policy',
+            'jugement_decision_justice': 'Court Decision',
+            'releve_bancaire': 'Bank Statement',
+            'certificat_attestation': 'Certificate',
+            'contrat_pret_loan': 'Loan Agreement',
+            'devis_estimation': 'Quote / Estimate',
+            'bon_commande_purchase_order': 'Purchase Order',
+            'proces_verbal': 'Meeting Minutes',
+            'rapport_expertise': 'Expert Report',
+            'permis_licence': 'Permit / License',
+            'document_generique': 'Document',
+        },
+        'es': {
+            'cv_resume': 'CV / Currículum',
+            'facture_invoice': 'Factura',
+            'contrat_location': 'Contrato de alquiler',
+            'contrat_travail': 'Contrato de trabajo',
+            'contrat_vente': 'Contrato de venta',
+            'contrat_generique': 'Contrato',
+            'contrat_prenuptial': 'Contrato prenupcial',
+            'procuration_poa': 'Poder notarial',
+            'accord_confidentialite_nda': 'Acuerdo de confidencialidad',
+            'acte_propriete_immobiliere': 'Escritura de propiedad',
+            'testament': 'Testamento',
+            'acte_notarie': 'Acta notarial',
+            'lettre': 'Carta',
+            'document_financier': 'Documento financiero',
+            'assurance_insurance': 'Póliza de seguro',
+            'jugement_decision_justice': 'Sentencia judicial',
+            'releve_bancaire': 'Extracto bancario',
+            'certificat_attestation': 'Certificado',
+            'contrat_pret_loan': 'Contrato de préstamo',
+            'devis_estimation': 'Presupuesto',
+            'bon_commande_purchase_order': 'Orden de compra',
+            'proces_verbal': 'Acta de reunión',
+            'rapport_expertise': 'Informe pericial',
+            'permis_licence': 'Permiso / Licencia',
+            'document_generique': 'Documento',
+        }
+    }
+    lang_labels = labels.get(language, labels['en'])
+    return lang_labels.get(doc_type, doc_type.replace('_', ' ').title())
+
 async def infer_corpus_actions(documents: List[Document], language: str = 'en') -> Dict[str, Any]:
     """
     Utilise un petit appel modèle pour deviner le type de corpus (CV, rapports annuels, etc.)
@@ -715,11 +832,19 @@ async def infer_corpus_actions(documents: List[Document], language: str = 'en') 
         # D'abord, détecter le type de document dominant dans le corpus (avec plus de contexte)
         document_types = {}
         document_details = {}  # Stocker plus d'infos par type
+        detection_confidences = {}  # Stocker les confiances par type
         
         for doc in documents[:30]:  # Analyser plus de documents
-            doc_content = doc.page_content[:4000] if len(doc.page_content) > 4000 else doc.page_content  # Plus de contenu pour une meilleure détection
-            doc_type = await detect_document_type(doc_content, doc.metadata.get('fileName', ''))
+            doc_content = doc.page_content[:4000] if len(doc.page_content) > 4000 else doc.page_content
+            detection_result = await detect_document_type_detailed(doc_content, doc.metadata.get('fileName', ''))
+            doc_type = detection_result['type']
+            doc_confidence = detection_result.get('confidence', 0.5)
+            
             document_types[doc_type] = document_types.get(doc_type, 0) + 1
+            
+            # Stocker la meilleure confiance par type
+            if doc_type not in detection_confidences or doc_confidence > detection_confidences[doc_type]:
+                detection_confidences[doc_type] = doc_confidence
             
             # Stocker les détails pour enrichir le prompt
             if doc_type not in document_details:
@@ -732,11 +857,12 @@ async def infer_corpus_actions(documents: List[Document], language: str = 'en') 
                 content_sample += " ... " + doc_content[mid_point:mid_point+500]
             document_details[doc_type].append({
                 'name': meta_name,
-                'snippet': content_sample.replace('\n', ' ').strip()[:1200]  # Plus de contexte
+                'snippet': content_sample.replace('\n', ' ').strip()[:1200]
             })
         
         # Trouver le type de document le plus fréquent
         dominant_type = max(document_types.items(), key=lambda x: x[1])[0] if document_types else 'document_generique'
+        dominant_confidence = detection_confidences.get(dominant_type, 0.5)
         
         # Construire un résumé enrichi du corpus pour le prompt
         sample_texts = []
@@ -879,7 +1005,91 @@ Actions spécifiques pour un acte de propriété immobilière/Real Estate Deed :
 4. "Vérifier les montants" - Liste le prix d'acquisition, taxes et frais associés
 5. "Vérifier les charges" - Détaille les servitudes, hypothèques et autres charges
 6. "Vérifier le bornage" - Identifie les limites et bornes de la propriété
-7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON"""
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'assurance_insurance': """
+Actions spécifiques pour un contrat/police d'assurance :
+1. "Vérifier l'assuré" - Identifie l'assuré et le souscripteur avec leurs coordonnées complètes
+2. "Vérifier la couverture" - Détaille les garanties, les risques couverts et les exclusions
+3. "Vérifier les montants" - Liste les primes, franchises, plafonds d'indemnisation
+4. "Vérifier les dates" - Extrait les dates de souscription, début, fin, renouvellement
+5. "Analyser les exclusions" - Identifie toutes les exclusions et limitations de garantie
+6. "Vérifier les sinistres" - Détaille les procédures de déclaration de sinistre et délais
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'jugement_decision_justice': """
+Actions spécifiques pour un jugement/décision de justice :
+1. "Vérifier les parties" - Identifie le demandeur, le défendeur et leurs avocats
+2. "Vérifier la juridiction" - Identifie le tribunal, la chambre, le(s) juge(s)
+3. "Vérifier les dates" - Extrait les dates d'audience, de délibéré et de prononcé
+4. "Analyser le dispositif" - Résume les décisions rendues (condamnation, débouté, etc.)
+5. "Analyser les motifs" - Résume les arguments retenus par le tribunal
+6. "Vérifier les voies de recours" - Identifie les possibilités d'appel et délais
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'releve_bancaire': """
+Actions spécifiques pour un relevé bancaire :
+1. "Vérifier le titulaire" - Identifie le titulaire du compte avec ses coordonnées
+2. "Vérifier le compte" - Extrait le numéro de compte, IBAN, BIC et type de compte
+3. "Vérifier la période" - Extrait la période couverte par le relevé
+4. "Vérifier les soldes" - Liste le solde initial, solde final et variations
+5. "Analyser les opérations" - Résume les opérations principales (virements, prélèvements, etc.)
+6. "Vérifier les frais" - Identifie tous les frais bancaires et commissions
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'certificat_attestation': """
+Actions spécifiques pour un certificat/attestation :
+1. "Vérifier l'émetteur" - Identifie l'organisme ou la personne qui délivre le certificat
+2. "Vérifier le bénéficiaire" - Identifie la personne concernée par le certificat
+3. "Vérifier l'objet" - Décrit précisément ce qui est certifié ou attesté
+4. "Vérifier les dates" - Extrait la date de délivrance et la durée de validité
+5. "Vérifier l'authenticité" - Identifie les éléments d'authenticité (cachet, signature, numéro)
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'contrat_pret_loan': """
+Actions spécifiques pour un contrat de prêt/crédit :
+1. "Vérifier les parties" - Identifie l'emprunteur et le prêteur avec leurs coordonnées
+2. "Vérifier les montants" - Détaille le capital emprunté, taux d'intérêt, TAEG, mensualités
+3. "Vérifier les dates" - Extrait les dates de signature, début, fin et échéances
+4. "Vérifier les garanties" - Liste les garanties exigées (hypothèque, caution, nantissement)
+5. "Analyser les conditions" - Détaille les conditions de remboursement anticipé et pénalités
+6. "Vérifier le tableau d'amortissement" - Résume le plan de remboursement
+7. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'devis_estimation': """
+Actions spécifiques pour un devis/estimation :
+1. "Vérifier les parties" - Identifie l'émetteur du devis et le client
+2. "Vérifier les articles" - Détaille tous les postes, quantités et prix unitaires
+3. "Vérifier les montants" - Liste le total HT, TVA, total TTC, remises éventuelles
+4. "Vérifier la validité" - Extrait la durée de validité du devis et conditions
+5. "Vérifier les conditions" - Détaille les conditions de paiement et de livraison
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'bon_commande_purchase_order': """
+Actions spécifiques pour un bon de commande :
+1. "Vérifier les parties" - Identifie le client et le fournisseur avec leurs coordonnées
+2. "Vérifier les articles" - Détaille les articles commandés, quantités et prix
+3. "Vérifier les dates" - Extrait la date de commande et la date de livraison prévue
+4. "Vérifier les conditions" - Détaille les conditions de livraison et de paiement
+5. "Vérifier les références" - Extrait les numéros de commande et références
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'proces_verbal': """
+Actions spécifiques pour un procès-verbal/compte-rendu :
+1. "Vérifier les participants" - Liste tous les participants, présents et absents
+2. "Vérifier les dates" - Extrait la date, l'heure et le lieu de la réunion
+3. "Vérifier l'ordre du jour" - Liste les points à l'ordre du jour traités
+4. "Analyser les décisions" - Résume toutes les décisions prises et votes effectués
+5. "Vérifier les actions" - Liste les actions décidées avec responsables et échéances
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'rapport_expertise': """
+Actions spécifiques pour un rapport d'expertise/audit :
+1. "Vérifier l'expert" - Identifie l'expert ou l'auditeur et ses qualifications
+2. "Vérifier l'objet" - Décrit la mission et le périmètre de l'expertise
+3. "Vérifier la méthodologie" - Résume la méthodologie utilisée
+4. "Analyser les conclusions" - Extrait les conclusions et constats principaux
+5. "Vérifier les recommandations" - Liste toutes les recommandations formulées
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON""",
+                'permis_licence': """
+Actions spécifiques pour un permis/licence/autorisation :
+1. "Vérifier le titulaire" - Identifie le titulaire du permis avec ses coordonnées
+2. "Vérifier l'autorité" - Identifie l'organisme émetteur du permis
+3. "Vérifier l'objet" - Décrit précisément ce qui est autorisé
+4. "Vérifier les dates" - Extrait la date de délivrance, d'expiration et de renouvellement
+5. "Vérifier les conditions" - Liste les conditions, restrictions et obligations
+6. "Extraire données structurées" - Extrait toutes les données dans un format structuré JSON"""
             },
             'en': {
                 'contrat_location': """
@@ -1002,7 +1212,91 @@ Specific actions for a Real Estate Deed:
 4. "Verify amounts" - Lists acquisition price, taxes and associated fees
 5. "Verify encumbrances" - Details easements, mortgages and other encumbrances
 6. "Verify boundaries" - Identifies property limits and boundaries
-7. "Extract structured data" - Extracts all data in a structured JSON format"""
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'assurance_insurance': """
+Specific actions for an insurance policy/contract:
+1. "Verify insured" - Identifies the insured and policyholder with their full contact details
+2. "Verify coverage" - Details guarantees, covered risks and exclusions
+3. "Verify amounts" - Lists premiums, deductibles, indemnity ceilings
+4. "Verify dates" - Extracts subscription, start, end and renewal dates
+5. "Analyze exclusions" - Identifies all exclusions and coverage limitations
+6. "Verify claims" - Details claim declaration procedures and deadlines
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'jugement_decision_justice': """
+Specific actions for a court judgment/decision:
+1. "Verify parties" - Identifies plaintiff, defendant and their lawyers
+2. "Verify jurisdiction" - Identifies the court, chamber, judge(s)
+3. "Verify dates" - Extracts hearing, deliberation and ruling dates
+4. "Analyze ruling" - Summarizes decisions rendered (conviction, dismissal, etc.)
+5. "Analyze reasoning" - Summarizes arguments retained by the court
+6. "Verify appeals" - Identifies appeal possibilities and deadlines
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'releve_bancaire': """
+Specific actions for a bank statement:
+1. "Verify account holder" - Identifies the account holder with contact details
+2. "Verify account" - Extracts account number, IBAN, BIC and account type
+3. "Verify period" - Extracts the period covered by the statement
+4. "Verify balances" - Lists opening balance, closing balance and variations
+5. "Analyze transactions" - Summarizes main transactions (transfers, debits, etc.)
+6. "Verify fees" - Identifies all bank fees and commissions
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'certificat_attestation': """
+Specific actions for a certificate/attestation:
+1. "Verify issuer" - Identifies the organization or person issuing the certificate
+2. "Verify beneficiary" - Identifies the person concerned by the certificate
+3. "Verify subject" - Describes precisely what is certified or attested
+4. "Verify dates" - Extracts issue date and validity period
+5. "Verify authenticity" - Identifies authenticity elements (stamp, signature, number)
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'contrat_pret_loan': """
+Specific actions for a loan/credit agreement:
+1. "Verify parties" - Identifies the borrower and lender with their contact details
+2. "Verify amounts" - Details borrowed capital, interest rate, APR, monthly payments
+3. "Verify dates" - Extracts signing, start, end and maturity dates
+4. "Verify collateral" - Lists required guarantees (mortgage, surety, pledge)
+5. "Analyze conditions" - Details early repayment conditions and penalties
+6. "Verify amortization" - Summarizes the repayment schedule
+7. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'devis_estimation': """
+Specific actions for a quote/estimate:
+1. "Verify parties" - Identifies the quote issuer and the client
+2. "Verify items" - Details all line items, quantities and unit prices
+3. "Verify amounts" - Lists net total, tax, gross total, any discounts
+4. "Verify validity" - Extracts quote validity period and conditions
+5. "Verify conditions" - Details payment and delivery conditions
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'bon_commande_purchase_order': """
+Specific actions for a purchase order:
+1. "Verify parties" - Identifies the client and supplier with their contact details
+2. "Verify items" - Details ordered items, quantities and prices
+3. "Verify dates" - Extracts order date and expected delivery date
+4. "Verify conditions" - Details delivery and payment conditions
+5. "Verify references" - Extracts order numbers and references
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'proces_verbal': """
+Specific actions for meeting minutes/official records:
+1. "Verify participants" - Lists all participants, present and absent
+2. "Verify dates" - Extracts date, time and location of the meeting
+3. "Verify agenda" - Lists agenda items discussed
+4. "Analyze decisions" - Summarizes all decisions made and votes taken
+5. "Verify action items" - Lists decided actions with responsible parties and deadlines
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'rapport_expertise': """
+Specific actions for an expert/audit report:
+1. "Verify expert" - Identifies the expert or auditor and their qualifications
+2. "Verify subject" - Describes the mission and scope of the expertise
+3. "Verify methodology" - Summarizes the methodology used
+4. "Analyze conclusions" - Extracts main conclusions and findings
+5. "Verify recommendations" - Lists all recommendations made
+6. "Extract structured data" - Extracts all data in a structured JSON format""",
+                'permis_licence': """
+Specific actions for a permit/license/authorization:
+1. "Verify holder" - Identifies the permit holder with their contact details
+2. "Verify authority" - Identifies the issuing authority
+3. "Verify subject" - Describes precisely what is authorized
+4. "Verify dates" - Extracts issue date, expiration date and renewal date
+5. "Verify conditions" - Lists conditions, restrictions and obligations
+6. "Extract structured data" - Extracts all data in a structured JSON format"""
             },
             'es': {
                 'contrat_location': """
@@ -1125,7 +1419,91 @@ Acciones específicas para un acta de propiedad inmobiliaria/Real Estate Deed:
 4. "Verificar montos" - Enumera el precio de adquisición, impuestos y honorarios asociados
 5. "Verificar cargas" - Detalla las servidumbres, hipotecas y otras cargas
 6. "Verificar límites" - Identifica los límites y linderos de la propiedad
-7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado"""
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'assurance_insurance': """
+Acciones específicas para un contrato/póliza de seguro:
+1. "Verificar asegurado" - Identifica al asegurado y al tomador con sus datos de contacto completos
+2. "Verificar cobertura" - Detalla las garantías, riesgos cubiertos y exclusiones
+3. "Verificar montos" - Enumera primas, franquicias, topes de indemnización
+4. "Verificar fechas" - Extrae las fechas de suscripción, inicio, fin y renovación
+5. "Analizar exclusiones" - Identifica todas las exclusiones y limitaciones de cobertura
+6. "Verificar siniestros" - Detalla los procedimientos de declaración de siniestro y plazos
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'jugement_decision_justice': """
+Acciones específicas para un fallo/decisión judicial:
+1. "Verificar partes" - Identifica al demandante, demandado y sus abogados
+2. "Verificar jurisdicción" - Identifica el tribunal, sala, juez(es)
+3. "Verificar fechas" - Extrae fechas de audiencia, deliberación y pronunciamiento
+4. "Analizar fallo" - Resume las decisiones dictadas (condena, desestimación, etc.)
+5. "Analizar fundamentos" - Resume los argumentos retenidos por el tribunal
+6. "Verificar recursos" - Identifica las posibilidades de apelación y plazos
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'releve_bancaire': """
+Acciones específicas para un extracto bancario:
+1. "Verificar titular" - Identifica al titular de la cuenta con sus datos de contacto
+2. "Verificar cuenta" - Extrae número de cuenta, IBAN, BIC y tipo de cuenta
+3. "Verificar período" - Extrae el período cubierto por el extracto
+4. "Verificar saldos" - Enumera saldo inicial, saldo final y variaciones
+5. "Analizar operaciones" - Resume las operaciones principales (transferencias, débitos, etc.)
+6. "Verificar comisiones" - Identifica todas las comisiones y cargos bancarios
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'certificat_attestation': """
+Acciones específicas para un certificado/atestación:
+1. "Verificar emisor" - Identifica el organismo o persona que emite el certificado
+2. "Verificar beneficiario" - Identifica la persona concernida por el certificado
+3. "Verificar objeto" - Describe precisamente lo que se certifica o atestigua
+4. "Verificar fechas" - Extrae la fecha de emisión y el período de validez
+5. "Verificar autenticidad" - Identifica elementos de autenticidad (sello, firma, número)
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'contrat_pret_loan': """
+Acciones específicas para un contrato de préstamo/crédito:
+1. "Verificar partes" - Identifica al prestatario y al prestamista con sus datos de contacto
+2. "Verificar montos" - Detalla capital prestado, tasa de interés, TAE, cuotas mensuales
+3. "Verificar fechas" - Extrae fechas de firma, inicio, fin y vencimientos
+4. "Verificar garantías" - Enumera las garantías exigidas (hipoteca, aval, prenda)
+5. "Analizar condiciones" - Detalla condiciones de reembolso anticipado y penalizaciones
+6. "Verificar amortización" - Resume el plan de reembolso
+7. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'devis_estimation': """
+Acciones específicas para un presupuesto/estimación:
+1. "Verificar partes" - Identifica al emisor del presupuesto y al cliente
+2. "Verificar artículos" - Detalla todas las partidas, cantidades y precios unitarios
+3. "Verificar montos" - Enumera total sin IVA, IVA, total con IVA, descuentos
+4. "Verificar validez" - Extrae el período de validez del presupuesto y condiciones
+5. "Verificar condiciones" - Detalla condiciones de pago y entrega
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'bon_commande_purchase_order': """
+Acciones específicas para una orden de compra:
+1. "Verificar partes" - Identifica al cliente y al proveedor con sus datos de contacto
+2. "Verificar artículos" - Detalla los artículos pedidos, cantidades y precios
+3. "Verificar fechas" - Extrae la fecha de pedido y la fecha de entrega prevista
+4. "Verificar condiciones" - Detalla las condiciones de entrega y pago
+5. "Verificar referencias" - Extrae números de pedido y referencias
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'proces_verbal': """
+Acciones específicas para un acta/minuta de reunión:
+1. "Verificar participantes" - Enumera todos los participantes, presentes y ausentes
+2. "Verificar fechas" - Extrae la fecha, hora y lugar de la reunión
+3. "Verificar orden del día" - Enumera los puntos del orden del día tratados
+4. "Analizar decisiones" - Resume todas las decisiones tomadas y votaciones realizadas
+5. "Verificar acciones" - Enumera las acciones decididas con responsables y plazos
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'rapport_expertise': """
+Acciones específicas para un informe de peritaje/auditoría:
+1. "Verificar perito" - Identifica al perito o auditor y sus cualificaciones
+2. "Verificar objeto" - Describe la misión y el perímetro del peritaje
+3. "Verificar metodología" - Resume la metodología utilizada
+4. "Analizar conclusiones" - Extrae las conclusiones y hallazgos principales
+5. "Verificar recomendaciones" - Enumera todas las recomendaciones formuladas
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado""",
+                'permis_licence': """
+Acciones específicas para un permiso/licencia/autorización:
+1. "Verificar titular" - Identifica al titular del permiso con sus datos de contacto
+2. "Verificar autoridad" - Identifica el organismo emisor del permiso
+3. "Verificar objeto" - Describe precisamente lo que está autorizado
+4. "Verificar fechas" - Extrae fecha de emisión, caducidad y renovación
+5. "Verificar condiciones" - Enumera condiciones, restricciones y obligaciones
+6. "Extraer datos estructurados" - Extrae todos los datos en un formato JSON estructurado"""
             }
         }
 
@@ -1254,6 +1632,12 @@ Retorna JSON ESTRICTO con exactamente esta forma:
         if not isinstance(actions, dict) or "suggested_actions" not in actions:
             raise ValueError("Invalid actions format")
 
+        # Enrichir avec les informations de détection
+        actions['detected_type'] = dominant_type
+        actions['detected_type_confidence'] = round(dominant_confidence, 2)
+        actions['type_distribution'] = document_types
+        actions['detected_type_label'] = _get_type_label(dominant_type, language)
+        
         return actions
     except Exception as e:
         logger.warning(f"⚠️  Unable to infer corpus actions: {e}")
@@ -1339,6 +1723,76 @@ Retorna JSON ESTRICTO con exactamente esta forma:
                     {"id": "verify_deductions", "title": "Vérifier déductions", "description": "Détaille toutes les déductions", "sample_prompt": "Détaille toutes les déductions mentionnées dans ce document financier : impôts, cotisations, autres déductions."},
                     {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce document financier : parties, période, montants, déductions, totaux."}
                 ],
+                'assurance_insurance': [
+                    {"id": "verify_insured", "title": "Vérifier l'assuré", "description": "Identifie l'assuré et le souscripteur", "sample_prompt": "Identifie l'assuré et le souscripteur de cette police d'assurance avec leurs coordonnées complètes."},
+                    {"id": "verify_coverage", "title": "Vérifier couverture", "description": "Détaille les garanties et exclusions", "sample_prompt": "Détaille les garanties couvertes, les risques couverts et les exclusions de cette police d'assurance."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste primes, franchises, plafonds", "sample_prompt": "Liste les montants : prime annuelle, franchise, plafond d'indemnisation de cette police d'assurance."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait les dates de souscription et échéance", "sample_prompt": "Extrais les dates importantes : souscription, effet, échéance, renouvellement de cette police d'assurance."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de cette police d'assurance : assuré, couverture, montants, dates."}
+                ],
+                'jugement_decision_justice': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie demandeur, défendeur et avocats", "sample_prompt": "Identifie les parties de ce jugement : demandeur, défendeur et leurs avocats respectifs."},
+                    {"id": "verify_jurisdiction", "title": "Vérifier juridiction", "description": "Identifie le tribunal et le juge", "sample_prompt": "Identifie le tribunal, la chambre et le(s) juge(s) ayant rendu cette décision."},
+                    {"id": "analyze_ruling", "title": "Analyser le dispositif", "description": "Résume la décision rendue", "sample_prompt": "Résume la décision rendue dans ce jugement : condamnations, montants, obligations."},
+                    {"id": "verify_appeals", "title": "Vérifier recours", "description": "Identifie les voies de recours", "sample_prompt": "Identifie les voies de recours possibles et les délais d'appel mentionnés dans ce jugement."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce jugement : parties, juridiction, décision, recours."}
+                ],
+                'releve_bancaire': [
+                    {"id": "verify_holder", "title": "Vérifier le titulaire", "description": "Identifie le titulaire du compte", "sample_prompt": "Identifie le titulaire du compte avec ses coordonnées complètes."},
+                    {"id": "verify_account", "title": "Vérifier le compte", "description": "Extrait numéro de compte, IBAN, BIC", "sample_prompt": "Extrais le numéro de compte, IBAN, BIC et type de compte de ce relevé bancaire."},
+                    {"id": "verify_balances", "title": "Vérifier les soldes", "description": "Liste solde initial, final et variations", "sample_prompt": "Liste le solde initial, le solde final, le total des débits et crédits de ce relevé bancaire."},
+                    {"id": "analyze_transactions", "title": "Analyser opérations", "description": "Résume les opérations principales", "sample_prompt": "Résume les opérations principales de ce relevé bancaire : virements, prélèvements, paiements."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce relevé bancaire : titulaire, compte, soldes, opérations."}
+                ],
+                'certificat_attestation': [
+                    {"id": "verify_issuer", "title": "Vérifier l'émetteur", "description": "Identifie l'organisme émetteur", "sample_prompt": "Identifie l'organisme ou la personne qui a émis ce certificat/attestation."},
+                    {"id": "verify_beneficiary", "title": "Vérifier bénéficiaire", "description": "Identifie la personne concernée", "sample_prompt": "Identifie la personne concernée par ce certificat/attestation avec ses coordonnées."},
+                    {"id": "verify_subject", "title": "Vérifier l'objet", "description": "Décrit ce qui est certifié", "sample_prompt": "Décris précisément ce qui est certifié ou attesté dans ce document."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait date d'émission et validité", "sample_prompt": "Extrais la date d'émission et la période de validité de ce certificat/attestation."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce certificat : émetteur, bénéficiaire, objet, dates."}
+                ],
+                'contrat_pret_loan': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie emprunteur et prêteur", "sample_prompt": "Identifie l'emprunteur et le prêteur de ce contrat de prêt avec leurs coordonnées."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Détaille capital, taux, mensualités", "sample_prompt": "Détaille les montants : capital emprunté, taux d'intérêt, TAEG, mensualités de ce contrat de prêt."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait dates de signature et échéances", "sample_prompt": "Extrais les dates : signature, début, fin, échéances de ce contrat de prêt."},
+                    {"id": "verify_guarantees", "title": "Vérifier garanties", "description": "Liste les garanties exigées", "sample_prompt": "Liste les garanties exigées dans ce contrat de prêt : hypothèque, caution, nantissement."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce contrat de prêt : parties, montants, dates, garanties."}
+                ],
+                'devis_estimation': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie émetteur et client", "sample_prompt": "Identifie l'émetteur du devis et le client avec leurs coordonnées."},
+                    {"id": "verify_items", "title": "Vérifier les postes", "description": "Détaille les postes et prix", "sample_prompt": "Détaille tous les postes du devis : description, quantités, prix unitaires et totaux."},
+                    {"id": "verify_amounts", "title": "Vérifier les montants", "description": "Liste total HT, TVA, TTC", "sample_prompt": "Liste les montants : total HT, TVA, total TTC, remises éventuelles de ce devis."},
+                    {"id": "verify_validity", "title": "Vérifier validité", "description": "Extrait la durée de validité", "sample_prompt": "Extrais la durée de validité et les conditions de ce devis."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce devis : parties, postes, montants, validité."}
+                ],
+                'bon_commande_purchase_order': [
+                    {"id": "verify_parties", "title": "Vérifier les parties", "description": "Identifie client et fournisseur", "sample_prompt": "Identifie le client et le fournisseur de ce bon de commande avec leurs coordonnées."},
+                    {"id": "verify_items", "title": "Vérifier les articles", "description": "Détaille articles, quantités, prix", "sample_prompt": "Détaille les articles commandés : références, descriptions, quantités et prix."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait date de commande et livraison", "sample_prompt": "Extrais la date de commande et la date de livraison prévue de ce bon de commande."},
+                    {"id": "verify_conditions", "title": "Vérifier conditions", "description": "Détaille conditions de livraison et paiement", "sample_prompt": "Détaille les conditions de livraison et de paiement de ce bon de commande."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce bon de commande : parties, articles, dates, conditions."}
+                ],
+                'proces_verbal': [
+                    {"id": "verify_participants", "title": "Vérifier participants", "description": "Liste présents et absents", "sample_prompt": "Liste tous les participants de ce procès-verbal : présents, absents et excusés."},
+                    {"id": "verify_dates", "title": "Vérifier date et lieu", "description": "Extrait date, heure et lieu", "sample_prompt": "Extrais la date, l'heure et le lieu de la réunion décrite dans ce procès-verbal."},
+                    {"id": "analyze_decisions", "title": "Analyser décisions", "description": "Résume les décisions prises", "sample_prompt": "Résume toutes les décisions prises et les votes réalisés dans ce procès-verbal."},
+                    {"id": "verify_actions", "title": "Vérifier actions", "description": "Liste les actions décidées", "sample_prompt": "Liste les actions décidées avec les responsables et les échéances mentionnés dans ce procès-verbal."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce procès-verbal : participants, décisions, actions, dates."}
+                ],
+                'rapport_expertise': [
+                    {"id": "verify_expert", "title": "Vérifier l'expert", "description": "Identifie l'expert et ses qualifications", "sample_prompt": "Identifie l'expert ou l'auditeur et ses qualifications dans ce rapport."},
+                    {"id": "verify_subject", "title": "Vérifier l'objet", "description": "Décrit la mission et le périmètre", "sample_prompt": "Décris la mission et le périmètre de l'expertise de ce rapport."},
+                    {"id": "analyze_conclusions", "title": "Analyser conclusions", "description": "Extrait les conclusions principales", "sample_prompt": "Extrais les conclusions et constats principaux de ce rapport d'expertise."},
+                    {"id": "verify_recommendations", "title": "Vérifier recommandations", "description": "Liste les recommandations", "sample_prompt": "Liste toutes les recommandations formulées dans ce rapport d'expertise."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce rapport : expert, objet, conclusions, recommandations."}
+                ],
+                'permis_licence': [
+                    {"id": "verify_holder", "title": "Vérifier le titulaire", "description": "Identifie le titulaire du permis", "sample_prompt": "Identifie le titulaire de ce permis/licence avec ses coordonnées complètes."},
+                    {"id": "verify_authority", "title": "Vérifier l'autorité", "description": "Identifie l'organisme émetteur", "sample_prompt": "Identifie l'autorité ou l'organisme qui a délivré ce permis/licence."},
+                    {"id": "verify_subject", "title": "Vérifier l'objet", "description": "Décrit ce qui est autorisé", "sample_prompt": "Décris précisément ce qui est autorisé par ce permis/licence."},
+                    {"id": "verify_dates", "title": "Vérifier les dates", "description": "Extrait dates de délivrance et expiration", "sample_prompt": "Extrais les dates de délivrance, d'expiration et de renouvellement de ce permis/licence."},
+                    {"id": "extract_structured", "title": "Extraire données structurées", "description": "Extrait toutes les données dans un format structuré", "sample_prompt": "Extrait toutes les données structurées de ce permis : titulaire, autorité, objet, dates, conditions."}
+                ],
                 'default': [
                     {"id": "summarize_all", "title": "Résumer documents", "description": "Génère un résumé global des documents", "sample_prompt": "Fournis un résumé clair et structuré de tous les documents uploadés, en mettant en évidence les thèmes principaux et les informations importantes. Adapte le résumé au type de document : pour un CV, concentre-toi sur l'expérience professionnelle, les compétences et les réalisations ; pour un document financier, mentionne les montants et chiffres pertinents ; pour un contrat, mentionne les parties et dates importantes. Ne mentionne PAS d'informations qui ne sont pas présentes dans les documents (par exemple, ne mentionne pas d'informations financières si le document est un CV)."},
                     {"id": "extract_key_points", "title": "Extraire points clés", "description": "Liste les points clés et entités", "sample_prompt": "Extrais les points clés, décisions importantes et entités nommées (personnes, entreprises, lieux) de tous les documents uploadés et organise-les en puces."},
@@ -1409,6 +1863,76 @@ Retorna JSON ESTRICTO con exactamente esta forma:
                     {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists all amounts and totals", "sample_prompt": "List all amounts mentioned in this financial document: income, deductions, taxes, totals."},
                     {"id": "verify_deductions", "title": "Verify deductions", "description": "Details all deductions", "sample_prompt": "Detail all deductions mentioned in this financial document: taxes, contributions, other deductions."},
                     {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this financial document: parties, period, amounts, deductions, totals."}
+                ],
+                'assurance_insurance': [
+                    {"id": "verify_insured", "title": "Verify insured", "description": "Identifies insured party and policyholder", "sample_prompt": "Identify the insured party and the policyholder of this insurance policy with their full contact details."},
+                    {"id": "verify_coverage", "title": "Verify coverage", "description": "Details guarantees and exclusions", "sample_prompt": "Detail the guarantees covered, risks covered and exclusions of this insurance policy."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists premiums, deductibles, ceilings", "sample_prompt": "List the amounts: annual premium, deductible, compensation ceiling of this insurance policy."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts subscription and expiry dates", "sample_prompt": "Extract the important dates: subscription, effective date, expiry, renewal of this insurance policy."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this insurance policy: insured, coverage, amounts, dates."}
+                ],
+                'jugement_decision_justice': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies plaintiff, defendant and lawyers", "sample_prompt": "Identify the parties in this court ruling: plaintiff, defendant and their respective lawyers."},
+                    {"id": "verify_jurisdiction", "title": "Verify jurisdiction", "description": "Identifies court and judge", "sample_prompt": "Identify the court, chamber and judge(s) who rendered this decision."},
+                    {"id": "analyze_ruling", "title": "Analyze ruling", "description": "Summarizes the decision", "sample_prompt": "Summarize the decision rendered in this ruling: convictions, amounts, obligations."},
+                    {"id": "verify_appeals", "title": "Verify appeals", "description": "Identifies appeal options", "sample_prompt": "Identify possible appeal options and deadlines mentioned in this ruling."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this ruling: parties, jurisdiction, decision, appeals."}
+                ],
+                'releve_bancaire': [
+                    {"id": "verify_holder", "title": "Verify holder", "description": "Identifies account holder", "sample_prompt": "Identify the account holder with their full contact details."},
+                    {"id": "verify_account", "title": "Verify account", "description": "Extracts account number, IBAN, BIC", "sample_prompt": "Extract the account number, IBAN, BIC and account type from this bank statement."},
+                    {"id": "verify_balances", "title": "Verify balances", "description": "Lists opening, closing balances and variations", "sample_prompt": "List the opening balance, closing balance, total debits and credits of this bank statement."},
+                    {"id": "analyze_transactions", "title": "Analyze transactions", "description": "Summarizes main transactions", "sample_prompt": "Summarize the main transactions in this bank statement: transfers, direct debits, payments."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this bank statement: holder, account, balances, transactions."}
+                ],
+                'certificat_attestation': [
+                    {"id": "verify_issuer", "title": "Verify issuer", "description": "Identifies issuing organization", "sample_prompt": "Identify the organization or person that issued this certificate/attestation."},
+                    {"id": "verify_beneficiary", "title": "Verify beneficiary", "description": "Identifies the person concerned", "sample_prompt": "Identify the person concerned by this certificate/attestation with their contact details."},
+                    {"id": "verify_subject", "title": "Verify subject", "description": "Describes what is certified", "sample_prompt": "Precisely describe what is certified or attested in this document."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts issue date and validity", "sample_prompt": "Extract the issue date and validity period of this certificate/attestation."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this certificate: issuer, beneficiary, subject, dates."}
+                ],
+                'contrat_pret_loan': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies borrower and lender", "sample_prompt": "Identify the borrower and lender of this loan agreement with their contact details."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Details principal, rate, installments", "sample_prompt": "Detail the amounts: principal borrowed, interest rate, APR, monthly installments of this loan agreement."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts signing dates and deadlines", "sample_prompt": "Extract the dates: signing, start, end, deadlines of this loan agreement."},
+                    {"id": "verify_guarantees", "title": "Verify guarantees", "description": "Lists required guarantees", "sample_prompt": "List the guarantees required in this loan agreement: mortgage, surety, pledge."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this loan agreement: parties, amounts, dates, guarantees."}
+                ],
+                'devis_estimation': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies issuer and client", "sample_prompt": "Identify the quote issuer and the client with their contact details."},
+                    {"id": "verify_items", "title": "Verify line items", "description": "Details items and prices", "sample_prompt": "Detail all line items in this quote: description, quantities, unit prices and totals."},
+                    {"id": "verify_amounts", "title": "Verify amounts", "description": "Lists subtotal, tax, total", "sample_prompt": "List the amounts: subtotal, tax, grand total, any discounts in this quote."},
+                    {"id": "verify_validity", "title": "Verify validity", "description": "Extracts validity period", "sample_prompt": "Extract the validity period and conditions of this quote."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this quote: parties, line items, amounts, validity."}
+                ],
+                'bon_commande_purchase_order': [
+                    {"id": "verify_parties", "title": "Verify parties", "description": "Identifies customer and supplier", "sample_prompt": "Identify the customer and supplier of this purchase order with their contact details."},
+                    {"id": "verify_items", "title": "Verify items", "description": "Details articles, quantities, prices", "sample_prompt": "Detail the ordered items: references, descriptions, quantities and prices."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts order and delivery dates", "sample_prompt": "Extract the order date and expected delivery date of this purchase order."},
+                    {"id": "verify_conditions", "title": "Verify conditions", "description": "Details delivery and payment conditions", "sample_prompt": "Detail the delivery and payment conditions of this purchase order."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this purchase order: parties, items, dates, conditions."}
+                ],
+                'proces_verbal': [
+                    {"id": "verify_participants", "title": "Verify participants", "description": "Lists attendees and absentees", "sample_prompt": "List all participants in these meeting minutes: attendees, absentees and excused."},
+                    {"id": "verify_dates", "title": "Verify date and venue", "description": "Extracts date, time and location", "sample_prompt": "Extract the date, time and location of the meeting described in these minutes."},
+                    {"id": "analyze_decisions", "title": "Analyze decisions", "description": "Summarizes decisions taken", "sample_prompt": "Summarize all decisions taken and votes conducted in these meeting minutes."},
+                    {"id": "verify_actions", "title": "Verify action items", "description": "Lists decided action items", "sample_prompt": "List the action items decided with owners and deadlines mentioned in these minutes."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from these minutes: participants, decisions, action items, dates."}
+                ],
+                'rapport_expertise': [
+                    {"id": "verify_expert", "title": "Verify expert", "description": "Identifies expert and qualifications", "sample_prompt": "Identify the expert or auditor and their qualifications in this report."},
+                    {"id": "verify_subject", "title": "Verify subject", "description": "Describes the mission and scope", "sample_prompt": "Describe the mission and scope of the expertise in this report."},
+                    {"id": "analyze_conclusions", "title": "Analyze conclusions", "description": "Extracts main conclusions", "sample_prompt": "Extract the main conclusions and findings from this expert report."},
+                    {"id": "verify_recommendations", "title": "Verify recommendations", "description": "Lists recommendations", "sample_prompt": "List all recommendations made in this expert report."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this report: expert, subject, conclusions, recommendations."}
+                ],
+                'permis_licence': [
+                    {"id": "verify_holder", "title": "Verify holder", "description": "Identifies permit holder", "sample_prompt": "Identify the holder of this permit/license with their full contact details."},
+                    {"id": "verify_authority", "title": "Verify authority", "description": "Identifies issuing body", "sample_prompt": "Identify the authority or body that issued this permit/license."},
+                    {"id": "verify_subject", "title": "Verify subject", "description": "Describes what is authorized", "sample_prompt": "Precisely describe what is authorized by this permit/license."},
+                    {"id": "verify_dates", "title": "Verify dates", "description": "Extracts issue and expiry dates", "sample_prompt": "Extract the issue date, expiry date and renewal of this permit/license."},
+                    {"id": "extract_structured", "title": "Extract structured data", "description": "Extracts all data in a structured format", "sample_prompt": "Extract all structured data from this permit: holder, authority, subject, dates, conditions."}
                 ],
                 'default': [
                     {"id": "summarize_all", "title": "Summarize documents", "description": "Generates a global summary of documents", "sample_prompt": "Provide a clear and structured summary of all uploaded documents, highlighting the main themes and important information. Adapt the summary to the document type: for a CV, focus on professional experience, skills and achievements; for a financial document, mention relevant amounts and figures; for a contract, mention important parties and dates. Do NOT mention information that is not present in the documents (for example, do not mention financial information if the document is a CV)."},
@@ -1481,6 +2005,76 @@ Retorna JSON ESTRICTO con exactamente esta forma:
                     {"id": "verify_deductions", "title": "Verificar deducciones", "description": "Detalla todas las deducciones", "sample_prompt": "Detalla todas las deducciones mencionadas en este documento financiero: impuestos, cotizaciones, otras deducciones."},
                     {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este documento financiero: partes, período, montos, deducciones, totales."}
                 ],
+                'assurance_insurance': [
+                    {"id": "verify_insured", "title": "Verificar asegurado", "description": "Identifica al asegurado y al tomador", "sample_prompt": "Identifica al asegurado y al tomador de esta póliza de seguro con sus datos de contacto completos."},
+                    {"id": "verify_coverage", "title": "Verificar cobertura", "description": "Detalla garantías y exclusiones", "sample_prompt": "Detalla las garantías cubiertas, los riesgos cubiertos y las exclusiones de esta póliza de seguro."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera primas, franquicias, topes", "sample_prompt": "Enumera los montos: prima anual, franquicia, tope de indemnización de esta póliza de seguro."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae fechas de suscripción y vencimiento", "sample_prompt": "Extrae las fechas importantes: suscripción, efecto, vencimiento, renovación de esta póliza de seguro."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de esta póliza de seguro: asegurado, cobertura, montos, fechas."}
+                ],
+                'jugement_decision_justice': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica demandante, demandado y abogados", "sample_prompt": "Identifica las partes de esta sentencia: demandante, demandado y sus respectivos abogados."},
+                    {"id": "verify_jurisdiction", "title": "Verificar jurisdicción", "description": "Identifica el tribunal y el juez", "sample_prompt": "Identifica el tribunal, la sala y el/los juez/jueces que dictaron esta decisión."},
+                    {"id": "analyze_ruling", "title": "Analizar fallo", "description": "Resume la decisión dictada", "sample_prompt": "Resume la decisión dictada en esta sentencia: condenas, montos, obligaciones."},
+                    {"id": "verify_appeals", "title": "Verificar recursos", "description": "Identifica vías de recurso", "sample_prompt": "Identifica las vías de recurso posibles y los plazos de apelación mencionados en esta sentencia."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de esta sentencia: partes, jurisdicción, decisión, recursos."}
+                ],
+                'releve_bancaire': [
+                    {"id": "verify_holder", "title": "Verificar titular", "description": "Identifica al titular de la cuenta", "sample_prompt": "Identifica al titular de la cuenta con sus datos de contacto completos."},
+                    {"id": "verify_account", "title": "Verificar cuenta", "description": "Extrae número de cuenta, IBAN, BIC", "sample_prompt": "Extrae el número de cuenta, IBAN, BIC y tipo de cuenta de este extracto bancario."},
+                    {"id": "verify_balances", "title": "Verificar saldos", "description": "Enumera saldo inicial, final y variaciones", "sample_prompt": "Enumera el saldo inicial, el saldo final, el total de débitos y créditos de este extracto bancario."},
+                    {"id": "analyze_transactions", "title": "Analizar operaciones", "description": "Resume las operaciones principales", "sample_prompt": "Resume las operaciones principales de este extracto bancario: transferencias, domiciliaciones, pagos."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este extracto bancario: titular, cuenta, saldos, operaciones."}
+                ],
+                'certificat_attestation': [
+                    {"id": "verify_issuer", "title": "Verificar emisor", "description": "Identifica al organismo emisor", "sample_prompt": "Identifica al organismo o persona que emitió este certificado/atestación."},
+                    {"id": "verify_beneficiary", "title": "Verificar beneficiario", "description": "Identifica a la persona concernida", "sample_prompt": "Identifica a la persona concernida por este certificado/atestación con sus datos de contacto."},
+                    {"id": "verify_subject", "title": "Verificar objeto", "description": "Describe lo que se certifica", "sample_prompt": "Describe precisamente lo que se certifica o atestigua en este documento."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae fecha de emisión y validez", "sample_prompt": "Extrae la fecha de emisión y el período de validez de este certificado/atestación."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este certificado: emisor, beneficiario, objeto, fechas."}
+                ],
+                'contrat_pret_loan': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica prestatario y prestamista", "sample_prompt": "Identifica al prestatario y al prestamista de este contrato de préstamo con sus datos de contacto."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Detalla capital, tasa, cuotas", "sample_prompt": "Detalla los montos: capital prestado, tasa de interés, TAE, cuotas mensuales de este contrato de préstamo."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae fechas de firma y vencimientos", "sample_prompt": "Extrae las fechas: firma, inicio, fin, vencimientos de este contrato de préstamo."},
+                    {"id": "verify_guarantees", "title": "Verificar garantías", "description": "Enumera las garantías exigidas", "sample_prompt": "Enumera las garantías exigidas en este contrato de préstamo: hipoteca, aval, prenda."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este contrato de préstamo: partes, montos, fechas, garantías."}
+                ],
+                'devis_estimation': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica emisor y cliente", "sample_prompt": "Identifica al emisor del presupuesto y al cliente con sus datos de contacto."},
+                    {"id": "verify_items", "title": "Verificar partidas", "description": "Detalla partidas y precios", "sample_prompt": "Detalla todas las partidas del presupuesto: descripción, cantidades, precios unitarios y totales."},
+                    {"id": "verify_amounts", "title": "Verificar montos", "description": "Enumera subtotal, IVA, total", "sample_prompt": "Enumera los montos: subtotal, IVA, total, descuentos eventuales de este presupuesto."},
+                    {"id": "verify_validity", "title": "Verificar validez", "description": "Extrae el período de validez", "sample_prompt": "Extrae el período de validez y las condiciones de este presupuesto."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este presupuesto: partes, partidas, montos, validez."}
+                ],
+                'bon_commande_purchase_order': [
+                    {"id": "verify_parties", "title": "Verificar partes", "description": "Identifica cliente y proveedor", "sample_prompt": "Identifica al cliente y al proveedor de esta orden de compra con sus datos de contacto."},
+                    {"id": "verify_items", "title": "Verificar artículos", "description": "Detalla artículos, cantidades, precios", "sample_prompt": "Detalla los artículos pedidos: referencias, descripciones, cantidades y precios."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae fecha de pedido y entrega", "sample_prompt": "Extrae la fecha de pedido y la fecha de entrega prevista de esta orden de compra."},
+                    {"id": "verify_conditions", "title": "Verificar condiciones", "description": "Detalla condiciones de entrega y pago", "sample_prompt": "Detalla las condiciones de entrega y de pago de esta orden de compra."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de esta orden de compra: partes, artículos, fechas, condiciones."}
+                ],
+                'proces_verbal': [
+                    {"id": "verify_participants", "title": "Verificar participantes", "description": "Enumera presentes y ausentes", "sample_prompt": "Enumera todos los participantes de este acta: presentes, ausentes y excusados."},
+                    {"id": "verify_dates", "title": "Verificar fecha y lugar", "description": "Extrae fecha, hora y lugar", "sample_prompt": "Extrae la fecha, hora y lugar de la reunión descrita en este acta."},
+                    {"id": "analyze_decisions", "title": "Analizar decisiones", "description": "Resume las decisiones tomadas", "sample_prompt": "Resume todas las decisiones tomadas y las votaciones realizadas en este acta."},
+                    {"id": "verify_actions", "title": "Verificar acciones", "description": "Enumera las acciones decididas", "sample_prompt": "Enumera las acciones decididas con los responsables y los plazos mencionados en este acta."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este acta: participantes, decisiones, acciones, fechas."}
+                ],
+                'rapport_expertise': [
+                    {"id": "verify_expert", "title": "Verificar experto", "description": "Identifica al experto y sus cualificaciones", "sample_prompt": "Identifica al experto o auditor y sus cualificaciones en este informe."},
+                    {"id": "verify_subject", "title": "Verificar objeto", "description": "Describe la misión y el alcance", "sample_prompt": "Describe la misión y el alcance de la peritación de este informe."},
+                    {"id": "analyze_conclusions", "title": "Analizar conclusiones", "description": "Extrae las conclusiones principales", "sample_prompt": "Extrae las conclusiones y hallazgos principales de este informe pericial."},
+                    {"id": "verify_recommendations", "title": "Verificar recomendaciones", "description": "Enumera las recomendaciones", "sample_prompt": "Enumera todas las recomendaciones formuladas en este informe pericial."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este informe: experto, objeto, conclusiones, recomendaciones."}
+                ],
+                'permis_licence': [
+                    {"id": "verify_holder", "title": "Verificar titular", "description": "Identifica al titular del permiso", "sample_prompt": "Identifica al titular de este permiso/licencia con sus datos de contacto completos."},
+                    {"id": "verify_authority", "title": "Verificar autoridad", "description": "Identifica al organismo emisor", "sample_prompt": "Identifica la autoridad u organismo que otorgó este permiso/licencia."},
+                    {"id": "verify_subject", "title": "Verificar objeto", "description": "Describe lo que se autoriza", "sample_prompt": "Describe precisamente lo que se autoriza mediante este permiso/licencia."},
+                    {"id": "verify_dates", "title": "Verificar fechas", "description": "Extrae fechas de emisión y expiración", "sample_prompt": "Extrae las fechas de emisión, expiración y renovación de este permiso/licencia."},
+                    {"id": "extract_structured", "title": "Extraer datos estructurados", "description": "Extrae todos los datos en un formato estructurado", "sample_prompt": "Extrae todos los datos estructurados de este permiso: titular, autoridad, objeto, fechas, condiciones."}
+                ],
                 'default': [
                     {"id": "summarize_all", "title": "Resumir documentos", "description": "Genera un resumen global de los documentos", "sample_prompt": "Proporciona un resumen claro y estructurado de todos los documentos cargados, destacando los temas principales y la información importante. Adapta el resumen al tipo de documento: para un CV, concéntrate en la experiencia profesional, habilidades y logros; para un documento financiero, menciona montos y cifras relevantes; para un contrato, menciona partes y fechas importantes. NO menciones información que no esté presente en los documentos (por ejemplo, no menciones información financiera si el documento es un CV)."},
                     {"id": "extract_key_points", "title": "Extraer puntos clave", "description": "Enumera los puntos clave y entidades", "sample_prompt": "Extrae los puntos clave, decisiones importantes y entidades nombradas (personas, empresas, lugares) de todos los documentos cargados y organízalos en viñetas."},
@@ -1495,7 +2089,11 @@ Retorna JSON ESTRICTO con exactamente esta forma:
         
         return {
             "domain": doc_type,
-            "suggested_actions": actions_list
+            "suggested_actions": actions_list,
+            "detected_type": doc_type,
+            "detected_type_label": _get_type_label(doc_type, language),
+            "detected_type_confidence": 0.5,
+            "type_distribution": {doc_type: 1}
         }
 
 # save_file_description est maintenant importé depuis services.analysis_service
@@ -1640,6 +2238,8 @@ async def upload_files():
     files = request.files.getlist('files')
     selected_model = request.form.get('model', DEFAULT_MODEL)  # Use GPT-3.5-Turbo as default
     language = request.form.get('language', 'en')
+    session_id = request.headers.get('Session-ID', 'default')
+    user_email = _extract_user_email_from_auth_header()
     results, texts = [], []
 
     # Validate model
@@ -1651,25 +2251,141 @@ async def upload_files():
         file_name = file.filename
         extension = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else ''
         is_binary = extension in ['docx', 'pdf']
+        chunk_store_result = None
 
-        file_content = (extract_text_from_docx(file) if extension == 'docx' else
-                        extract_text_from_pdf(file) if extension == 'pdf' else
-                        file.read().decode('utf-8', errors='ignore'))
+        raw_bytes = file.read()
+        doc_hash = compute_document_hash(raw_bytes)
+
+        # --- Page-aware extraction ---
+        chunk_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+        if extension == 'pdf':
+            pages = extract_pages_from_pdf(raw_bytes)
+            file_content = "\n".join(p["text"] for p in pages)
+            page_sections = pages
+        elif extension == 'docx':
+            page_sections = extract_sections_from_docx(raw_bytes)
+            file_content = extract_text_from_docx(BytesIO(raw_bytes))
+        else:
+            file_content = raw_bytes.decode('utf-8', errors='ignore')
+            page_sections = [{"page": 1, "text": file_content}]
+
+        # Build flat chunk list with per-chunk metadata
+        chunks_with_meta = []
+        global_chunk_idx = 0
+        for section in page_sections:
+            section_chunks = chunk_splitter.create_documents([section["text"]])
+            for chunk_doc in section_chunks:
+                if chunk_doc.page_content.strip():
+                    chunks_with_meta.append({
+                        "text": chunk_doc.page_content,
+                        "page": section["page"],
+                        "chunk_id": f"chunk_{global_chunk_idx}",
+                        "chunk_index": global_chunk_idx,
+                    })
+                    global_chunk_idx += 1
 
         description = await analyze_file_content(file_content, file_name, is_binary, extension, selected_model, language)
         await save_file_description(file_name, description)
         if not description.startswith("Error"):
             texts.append(description)
+        persist_result = aws_persistence_service.persist_document(
+            file_name=file_name,
+            content=file_content,
+            raw_bytes=raw_bytes,
+            mime_type=file.mimetype,
+            metadata={
+                'extension': extension,
+                'is_binary': is_binary,
+                'language': language,
+                'model_used': selected_model,
+                'description_excerpt': (description or '')[:500],
+            },
+            user_email=user_email,
+            session_id=session_id,
+            source='upload',
+        )
+
+        if persist_result.get('stored') and persist_result.get('document_id') and persist_result.get('organization_id'):
+            chunk_texts = [c["text"] for c in chunks_with_meta]
+            per_chunk_meta = [
+                {
+                    "document_id": persist_result['document_id'],
+                    "file_name": file_name,
+                    "page": c["page"],
+                    "chunk_id": c["chunk_id"],
+                    "session_id": session_id,
+                    "model_used": selected_model,
+                    "source": "upload",
+                }
+                for c in chunks_with_meta
+            ]
+
+            if chunk_texts:
+                try:
+                    loop = asyncio.get_event_loop()
+                    chunk_embeddings = await loop.run_in_executor(None, embeddings.embed_documents, chunk_texts)
+                    chunk_store_result = aws_persistence_service.persist_document_chunks(
+                        document_id=persist_result['document_id'],
+                        organization_id=persist_result['organization_id'],
+                        chunks=chunk_texts,
+                        embeddings=chunk_embeddings,
+                        per_chunk_metadata=per_chunk_meta,
+                    )
+                except Exception as exc:
+                    logger.error("Failed to generate/store pgvector chunks for %s: %s", file_name, exc)
+                    chunk_store_result = {"stored": False, "reason": "embedding_error", "error": str(exc)}
+        elif not persist_result.get('stored'):
+            logger.warning("AWS persistence skipped for %s: %s", file_name, persist_result)
+
+        # --- FAISS index: load from cache or build from chunks ---
+        index_path = get_index_path(doc_hash)
+        cached_vs = load_faiss_index(index_path)
+        faiss_docs = [
+            Document(
+                page_content=c["text"],
+                metadata={
+                    "document_id": file_name,
+                    "file_name": file_name,
+                    "page": c["page"],
+                    "chunk_id": c["chunk_id"],
+                    "session_id": session_id,
+                }
+            )
+            for c in chunks_with_meta
+        ]
+
+        global vector_store
+        if cached_vs is not None:
+            logger.info("📂 Reusing cached FAISS index for %s (hash=%s)", file_name, doc_hash[:12])
+            if vector_store is None:
+                vector_store = cached_vs
+            else:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, vector_store.merge_from, cached_vs)
+        elif faiss_docs:
+            if vector_store is None:
+                vector_store = FAISS.from_documents(faiss_docs, embeddings)
+            else:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, vector_store.add_documents, faiss_docs)
+            per_doc_vs = FAISS.from_documents(faiss_docs, embeddings)
+            save_faiss_index(per_doc_vs, index_path)
+            logger.info("✅ FAISS index built and saved for %s (%d chunks)", file_name, len(faiss_docs))
+
         results.append({
-            "file_name": file_name, 
+            "file_name": file_name,
             "description": description,
-            "model_used": selected_model
+            "model_used": selected_model,
+            "storage": persist_result,
+            "chunks": chunk_store_result,
+            "pages_indexed": len(page_sections),
+            "chunks_indexed": len(chunks_with_meta),
+            "cache_hit": cached_vs is not None,
         })
 
     if texts:
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
         docs = [doc for text in texts for doc in splitter.create_documents([text])]
-        global vector_store
         if vector_store is None:
             vector_store = FAISS.from_documents(docs, embeddings)
         else:
@@ -2314,20 +3030,29 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         if raw_content is None:
             raw_content = ''
         page_number = doc.get('pageNumber')  # Extraire le numéro de page si disponible
+        chunk_id = doc.get('chunkId')
         
         if file_label not in docs_by_file:
             docs_by_file[file_label] = []
-        docs_by_file[file_label].append((raw_content, page_number))
+        docs_by_file[file_label].append((raw_content, page_number, chunk_id))
     
     # Construire un résumé structuré par fichier (les premiers sont les plus pertinents)
     # IMPORTANT: Préserver le maximum de contenu pour capturer les informations comme les adresses
     for idx, (file_label, contents_with_pages) in enumerate(docs_by_file.items(), 1):
-        # Extraire les contenus et pages
-        contents = [c[0] for c in contents_with_pages]
+        # Annoter chaque chunk avec son numéro de page AVANT de les combiner
+        # Ainsi le modèle peut identifier exactement quelle page contient quelle information
+        annotated_chunks = []
+        for raw_content, page_number, chunk_id in contents_with_pages:
+            if page_number is not None:
+                prefix = f"[p.{page_number}] "
+            else:
+                prefix = ""
+            annotated_chunks.append(f"{prefix}{raw_content}")
+
         pages = [c[1] for c in contents_with_pages if c[1] is not None]
         
         # Combiner les chunks du même fichier avec un séparateur clair
-        combined_content = "\n---\n".join(contents)
+        combined_content = "\n---\n".join(annotated_chunks)
         
         # Créer un label avec les informations de page
         page_info = ""
@@ -2471,9 +3196,16 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         f"3. Les documents marqués ⭐ sont les plus pertinents selon la recherche sémantique - commence par ceux-là.\n"
         f"4. Ne conclus JAMAIS qu'une information est absente avant d'avoir analysé TOUS les documents fournis.\n"
         f"5. Si tu trouves l'information dans un autre document, cite explicitement le nom du fichier source.\n"
-        f"6. IMPORTANT: Si un document a un numéro de page (📄 Page X), cite aussi la page dans ta réponse.\n"
-        f"   Format de citation: 'Document X, page Y' ou '[Document X, page Y]'.\n"
-        f"7. Si l'information est dans plusieurs documents, mentionne tous les fichiers concernés avec leurs pages si disponibles.\n\n"
+        f"6. 📌 CITATION DE SOURCE OBLIGATOIRE: Chaque élément factuel de ta réponse DOIT être accompagné de sa source.\n"
+        f"   Format OBLIGATOIRE: **[Nom du fichier, p.X]** (exemple: **[rapport_2024.pdf, p.12]**).\n"
+        f"   Les chunks de contexte sont préfixés par [p.X] pour indiquer leur page d'origine.\n"
+        f"   Si un chunk n'a pas de préfixe de page, indique uniquement le nom du fichier: **[Nom du fichier]**.\n"
+        f"7. Si l'information est dans plusieurs documents, mentionne tous les fichiers concernés avec leurs pages.\n"
+        f"8. CITATION EXACTE OBLIGATOIRE: Quand tu cites une information spécifique trouvée dans un document, "
+        f"entoure l'extrait EXACT (texte verbatim du document, entre 5 et 50 mots) avec les marqueurs spéciaux 【extrait exact】. "
+        f"Exemple: Le contrat stipule que 【le salaire mensuel brut est fixé à 3 500 euros】. "
+        f"N'invente JAMAIS de citation - utilise UNIQUEMENT le texte tel qu'il apparaît dans le document. "
+        f"Cela permet à l'utilisateur de cliquer sur la citation pour la retrouver dans le document original.\n\n"
         f"- Les documents sont classés par pertinence sémantique: les premiers sont les plus liés à ta question.\n"
         f"- Mais même les documents moins pertinents peuvent contenir l'information recherchée - ne les ignore pas.\n"
         f"{t['missing_info_clarify']}\n"
@@ -2736,195 +3468,377 @@ async def execute_model_query_with_fallback(prompt: str, selected_model: str, us
     else:
         raise RuntimeError("Tous les modèles de fallback ont échoué")
 
-async def execute_model_query(prompt: str, selected_model: str) -> str:
+async def execute_model_query(prompt: str, selected_model: str, conversation_history: list = None) -> str:
     """
     Exécute la requête sur le modèle sélectionné (version simple, sans fallback)
     """
     try:
         if selected_model.lower() in ["gpt-3.5-turbo", "gpt-4o"]:
-            result = call_openai_api(prompt, selected_model)
+            result = call_openai_api(prompt, selected_model, conversation_history=conversation_history)
         elif selected_model.lower() in ["gpt-5", "gpt-5-mini", "gpt-5-nano"]:
-            result = call_openai_api(prompt, selected_model)
+            result = call_openai_api(prompt, selected_model, conversation_history=conversation_history)
         elif selected_model.lower() == "openai":
-            result = call_openai_api(prompt, "openai")
+            result = call_openai_api(prompt, "openai", conversation_history=conversation_history)
         elif selected_model.lower() == "mistral":
-            result = call_mistral_api(prompt)
+            # Pour Mistral, intégrer l'historique dans le prompt si disponible
+            if conversation_history and isinstance(conversation_history, list):
+                history_text = "\n\n".join([
+                    f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
+                    for msg in conversation_history
+                ])
+                full_prompt = f"{history_text}\n\nUser: {prompt}\n\nAssistant:"
+            else:
+                full_prompt = prompt
+            result = call_mistral_api(full_prompt)
         elif selected_model.lower().startswith("gemini") or selected_model.lower() in ["gemini-3-flash", "gemini-pro"]:
             result = call_gemini_api(prompt, selected_model)
         elif selected_model.lower() in OLLAMA_MODELS or selected_model.lower() == "llama3":
             result = call_ollama_api(prompt, selected_model)
         else:
             logger.warning(f"Modèle inconnu {selected_model}, utilisation du modèle par défaut {DEFAULT_MODEL}")
-            result = call_openai_api(prompt, DEFAULT_MODEL)
+            result = call_openai_api(prompt, DEFAULT_MODEL, conversation_history=conversation_history)
         
         return result
     except Exception as e:
         raise e
 
+def _score_document_type(content_lower: str, file_name_lower: str, keywords: list, indicators: list,
+                         keyword_weight: float = 3.0, indicator_weight: float = 1.0,
+                         filename_weight: float = 5.0, header_boost: float = 2.0) -> float:
+    """
+    Calcule un score pondéré pour un type de document.
+    - Les mots-clés dans le nom du fichier ont le poids le plus élevé
+    - Les mots-clés dans les premiers 800 chars du contenu ont un boost
+    - Les indicateurs dans le contenu complet contribuent proportionnellement
+    """
+    score = 0.0
+    header = content_lower[:800]
+    
+    # Score des mots-clés dans le nom du fichier (très fort signal)
+    for kw in keywords:
+        if kw in file_name_lower:
+            score += filename_weight
+    
+    # Score des mots-clés dans l'en-tête du document (fort signal)
+    for kw in keywords:
+        if kw in header:
+            score += keyword_weight * header_boost
+        elif kw in content_lower:
+            score += keyword_weight
+    
+    # Score des indicateurs contextuels
+    for ind in indicators:
+        if ind in content_lower:
+            score += indicator_weight
+    
+    return score
+
+# Liste complète de tous les types de documents valides
+ALL_VALID_DOCUMENT_TYPES = [
+    'cv_resume', 'facture_invoice', 'contrat_location', 'contrat_travail',
+    'contrat_vente', 'contrat_generique', 'contrat_prenuptial', 'procuration_poa',
+    'accord_confidentialite_nda', 'acte_propriete_immobiliere', 'testament',
+    'acte_notarie', 'lettre', 'document_financier',
+    'assurance_insurance', 'jugement_decision_justice', 'releve_bancaire',
+    'certificat_attestation', 'contrat_pret_loan', 'devis_estimation',
+    'bon_commande_purchase_order', 'proces_verbal', 'rapport_expertise',
+    'permis_licence',
+    'document_generique'
+]
+
 async def detect_document_type(file_content: str, file_name: str) -> str:
     """
     Détecte le type de document de manière précise en utilisant une approche hybride:
-    1. Analyse basée sur des patterns (règles)
-    2. Analyse LLM pour les cas complexes
+    1. Scoring pondéré basé sur des patterns (règles) — rapide et fiable
+    2. Analyse LLM pour les cas complexes (fallback)
+    Retourne le type de document (str) pour compatibilité ascendante.
+    Utiliser detect_document_type_detailed() pour obtenir le score de confiance.
     """
-    content_lower = file_content[:5000].lower()  # Augmenter la fenêtre d'analyse
+    result = await detect_document_type_detailed(file_content, file_name)
+    return result['type']
+
+async def detect_document_type_detailed(file_content: str, file_name: str) -> Dict[str, Any]:
+    """
+    Détecte le type de document avec scoring de confiance.
+    Retourne: { 'type': str, 'confidence': float (0-1), 'method': 'pattern'|'llm'|'fallback', 'scores': dict }
+    """
+    content_lower = file_content[:5000].lower()
     file_name_lower = file_name.lower()
-    content_sample = file_content[:1500]  # Échantillon pour l'analyse LLM si nécessaire
+    content_sample = file_content[:1500]
     
-    # ============ DÉTECTION PAR PATTERNS (FAST PATH) ============
+    # ============ DÉFINITION DES TYPES AVEC PATTERNS PONDÉRÉS ============
     
-    # Détection CV/Resume (très spécifique)
-    cv_keywords = ['curriculum vitae', 'cv', 'resume', 'résumé professionnel', 'professional summary']
-    cv_indicators = ['expérience professionnelle', 'professional experience', 'compétences', 'skills', 
-                     'formation', 'education', 'emploi', 'job', 'poste', 'position',
-                     'langues', 'languages', 'certifications', 'réalisations', 'achievements']
-    if any(word in file_name_lower for word in cv_keywords) or \
-       (any(word in content_lower[:800] for word in cv_keywords) and 
-        sum(1 for word in cv_indicators if word in content_lower) >= 3):
-        return 'cv_resume'
+    type_definitions = {
+        'cv_resume': {
+            'keywords': ['curriculum vitae', 'cv', 'resume', 'résumé professionnel', 'professional summary'],
+            'indicators': ['expérience professionnelle', 'professional experience', 'compétences', 'skills',
+                          'formation', 'education', 'emploi', 'job', 'poste', 'position',
+                          'langues', 'languages', 'certifications', 'réalisations', 'achievements',
+                          'références', 'references', 'profil', 'profile', 'objectif', 'objective'],
+            'threshold': 8.0
+        },
+        'facture_invoice': {
+            'keywords': ['facture', 'invoice', 'bill', 'reçu', 'receipt', 'quittance', 'nota fiscal'],
+            'indicators': ['montant total', 'total amount', 'tva', 'tax', 'date d\'émission', 'issue date',
+                          'numéro de facture', 'invoice number', 'client', 'customer', 'paiement', 'payment',
+                          'montant ht', 'net amount', 'montant ttc', 'gross amount', 'échéance', 'due date',
+                          'bon de commande', 'purchase order', 'référence', 'reference'],
+            'threshold': 7.0
+        },
+        'devis_estimation': {
+            'keywords': ['devis', 'quote', 'quotation', 'estimation', 'estimate', 'proforma', 'pro forma',
+                        'offre de prix', 'price offer', 'proposition commerciale', 'commercial proposal'],
+            'indicators': ['prix unitaire', 'unit price', 'quantité', 'quantity', 'total ht', 'total hors taxe',
+                          'validité', 'validity', 'durée de validité', 'conditions de paiement', 'payment terms',
+                          'remise', 'discount', 'livraison', 'delivery', 'délai', 'deadline',
+                          'sous-total', 'subtotal', 'main d\'oeuvre', 'labor'],
+            'threshold': 7.0
+        },
+        'bon_commande_purchase_order': {
+            'keywords': ['bon de commande', 'purchase order', 'order form', 'commande', 'order',
+                        'bon de livraison', 'delivery note', 'bordereau'],
+            'indicators': ['numéro de commande', 'order number', 'fournisseur', 'supplier', 'vendor',
+                          'quantité commandée', 'ordered quantity', 'date de livraison', 'delivery date',
+                          'référence article', 'article reference', 'prix unitaire', 'unit price',
+                          'conditions de livraison', 'delivery terms', 'adresse de livraison', 'shipping address'],
+            'threshold': 7.0
+        },
+        'assurance_insurance': {
+            'keywords': ['assurance', 'insurance', 'police d\'assurance', 'insurance policy', 'avenant',
+                        'contrat d\'assurance', 'insurance contract', 'assureur', 'insurer',
+                        'garantie d\'assurance', 'insurance coverage', 'souscription'],
+            'indicators': ['prime', 'premium', 'franchise', 'deductible', 'sinistre', 'claim',
+                          'couverture', 'coverage', 'assuré', 'insured', 'bénéficiaire', 'beneficiary',
+                          'indemnisation', 'indemnity', 'risque', 'risk', 'exclusion', 'exclusion',
+                          'déclaration de sinistre', 'claim declaration', 'plafond', 'ceiling',
+                          'responsabilité civile', 'civil liability', 'tiers', 'third party'],
+            'threshold': 8.0
+        },
+        'jugement_decision_justice': {
+            'keywords': ['jugement', 'judgment', 'arrêt', 'ruling', 'ordonnance', 'order',
+                        'décision de justice', 'court decision', 'sentence', 'verdict',
+                        'tribunal', 'court', 'cour d\'appel', 'court of appeal'],
+            'indicators': ['attendu que', 'whereas', 'par ces motifs', 'for these reasons',
+                          'condamne', 'condemns', 'déboute', 'dismisses', 'juge', 'judge',
+                          'demandeur', 'plaintiff', 'défendeur', 'defendant', 'partie civile',
+                          'greffier', 'clerk', 'audience', 'hearing', 'chambre', 'chamber',
+                          'code civil', 'civil code', 'code pénal', 'penal code',
+                          'article', 'pourvoi', 'appeal', 'cassation'],
+            'threshold': 8.0
+        },
+        'releve_bancaire': {
+            'keywords': ['relevé bancaire', 'bank statement', 'relevé de compte', 'account statement',
+                        'extrait de compte', 'account extract', 'relevé mensuel', 'monthly statement'],
+            'indicators': ['solde', 'balance', 'débit', 'debit', 'crédit', 'credit',
+                          'virement', 'transfer', 'retrait', 'withdrawal', 'dépôt', 'deposit',
+                          'numéro de compte', 'account number', 'iban', 'bic', 'swift',
+                          'intérêts', 'interest', 'frais bancaires', 'bank fees',
+                          'solde initial', 'opening balance', 'solde final', 'closing balance',
+                          'date valeur', 'value date', 'libellé', 'description'],
+            'threshold': 7.0
+        },
+        'certificat_attestation': {
+            'keywords': ['certificat', 'certificate', 'attestation', 'certification',
+                        'acte de naissance', 'birth certificate', 'acte de mariage', 'marriage certificate',
+                        'acte de décès', 'death certificate', 'attestation de domicile', 'proof of residence',
+                        'attestation d\'emploi', 'employment certificate', 'attestation de scolarité'],
+            'indicators': ['certifie', 'certify', 'atteste', 'attest', 'déclare', 'declare',
+                          'fait à', 'done at', 'le soussigné', 'the undersigned', 'en foi de quoi',
+                          'in witness whereof', 'cachet', 'stamp', 'sceau', 'seal',
+                          'délivré à', 'issued to', 'valable', 'valid', 'authentique', 'authentic'],
+            'threshold': 7.0
+        },
+        'contrat_pret_loan': {
+            'keywords': ['contrat de prêt', 'loan agreement', 'prêt', 'loan', 'crédit', 'credit',
+                        'emprunt', 'borrowing', 'financement', 'financing',
+                        'prêt immobilier', 'mortgage loan', 'prêt personnel', 'personal loan',
+                        'contrat de crédit', 'credit agreement'],
+            'indicators': ['taux d\'intérêt', 'interest rate', 'mensualité', 'monthly payment',
+                          'amortissement', 'amortization', 'capital', 'principal',
+                          'emprunteur', 'borrower', 'prêteur', 'lender', 'échéance', 'maturity',
+                          'remboursement', 'repayment', 'garantie', 'collateral',
+                          'taux annuel', 'annual rate', 'taeg', 'apr', 'durée du prêt', 'loan term',
+                          'hypothèque', 'mortgage', 'cautionnement', 'surety'],
+            'threshold': 8.0
+        },
+        'proces_verbal': {
+            'keywords': ['procès-verbal', 'procès verbal', 'pv', 'minutes', 'compte-rendu', 'compte rendu',
+                        'minutes of meeting', 'meeting minutes', 'rapport de réunion', 'meeting report'],
+            'indicators': ['réunion', 'meeting', 'assemblée', 'assembly', 'séance', 'session',
+                          'ordre du jour', 'agenda', 'participants', 'attendees', 'présents', 'present',
+                          'absents', 'absent', 'décision', 'decision', 'vote', 'résolution', 'resolution',
+                          'secrétaire', 'secretary', 'président', 'chairman', 'quorum',
+                          'approbation', 'approval', 'adopté', 'adopted', 'unanimité', 'unanimity'],
+            'threshold': 7.0
+        },
+        'rapport_expertise': {
+            'keywords': ['rapport', 'report', 'expertise', 'audit', 'diagnostic',
+                        'rapport d\'expertise', 'expert report', 'rapport d\'audit', 'audit report',
+                        'rapport médical', 'medical report', 'bilan', 'assessment'],
+            'indicators': ['conclusion', 'findings', 'recommandation', 'recommendation',
+                          'analyse', 'analysis', 'observation', 'observation', 'constat', 'finding',
+                          'expert', 'évaluation', 'evaluation', 'méthodologie', 'methodology',
+                          'résultat', 'result', 'annexe', 'appendix', 'synthèse', 'summary',
+                          'périmètre', 'scope', 'mission', 'objectif', 'objective'],
+            'threshold': 7.0
+        },
+        'permis_licence': {
+            'keywords': ['permis', 'permit', 'licence', 'license', 'autorisation', 'authorization',
+                        'agrément', 'approval', 'habilitation', 'accreditation',
+                        'permis de construire', 'building permit', 'permis de conduire', 'driving license',
+                        'licence professionnelle', 'professional license'],
+            'indicators': ['autorisé', 'authorized', 'titulaire', 'holder', 'délivré par', 'issued by',
+                          'date d\'expiration', 'expiration date', 'date de délivrance', 'issue date',
+                          'numéro de permis', 'permit number', 'numéro de licence', 'license number',
+                          'conditions', 'restrictions', 'catégorie', 'category',
+                          'renouvellement', 'renewal', 'validité', 'validity'],
+            'threshold': 7.0
+        },
+        'lettre': {
+            'keywords': ['lettre', 'letter', 'correspondance', 'correspondence', 'courrier', 'mail'],
+            'indicators': ['soutien', 'support', 'recommandation', 'recommendation', 'demande', 'request',
+                          'cher monsieur', 'dear sir', 'madame', 'madam', 'monsieur', 'sir',
+                          'veuillez agréer', 'yours sincerely', 'cordialement', 'best regards',
+                          'objet:', 'subject:', 'référence:', 'reference:',
+                          'pièce jointe', 'attachment', 'ci-joint', 'enclosed'],
+            'threshold': 7.0
+        },
+        'document_financier': {
+            'keywords': ['t4', 't-4', 't4a', 't4a-', 'relevé', 'statement', 'payroll', 'paie',
+                        'salaire', 'salary', 'revenu', 'income', 'impôt', 'tax', 'déduction', 'deduction',
+                        'feuillet', 'slip', 'relevé fiscal', 'tax statement', 'avis de cotisation', 'notice of assessment'],
+            'indicators': ['revenus bruts', 'gross income', 'revenus nets', 'net income', 'impôt retenu', 'tax withheld',
+                          'année', 'year', 'période', 'period', 'numéro d\'assurance sociale', 'social insurance number',
+                          'cotisation', 'contribution', 'déclaration', 'declaration', 'fiscal', 'fiscal'],
+            'threshold': 7.0
+        },
+        'contrat_location': {
+            'keywords': ['contrat de location', 'rental contract', 'bail', 'lease', 'contrat de bail'],
+            'indicators': ['location', 'rental', 'loyer', 'rent', 'locataire', 'tenant',
+                          'bailleur', 'landlord', 'propriétaire', 'owner', 'garant', 'guarantor',
+                          'charges locatives', 'maintenance fees', 'caution', 'deposit',
+                          'état des lieux', 'inventory', 'préavis', 'notice period'],
+            'threshold': 7.0
+        },
+        'contrat_travail': {
+            'keywords': ['contrat de travail', 'employment contract', 'employment agreement'],
+            'indicators': ['travail', 'employment', 'employé', 'employee', 'employeur', 'employer',
+                          'salaire', 'salary', 'rémunération', 'remuneration', 'poste', 'position',
+                          'période d\'essai', 'probation', 'cdi', 'cdd', 'contract duration',
+                          'congé', 'leave', 'licenciement', 'termination', 'démission', 'resignation'],
+            'threshold': 7.0
+        },
+        'contrat_vente': {
+            'keywords': ['contrat de vente', 'sale contract', 'sale agreement', 'compromis de vente'],
+            'indicators': ['vente', 'sale', 'achat', 'purchase', 'acheteur', 'buyer', 'vendeur', 'seller',
+                          'prix', 'price', 'livraison', 'delivery', 'garantie', 'warranty',
+                          'transfert de propriété', 'transfer of ownership', 'clause résolutoire'],
+            'threshold': 7.0
+        },
+        'contrat_generique': {
+            'keywords': ['contrat', 'contract', 'agreement', 'convention', 'accord'],
+            'indicators': ['parties', 'obligation', 'clause', 'signature', 'durée', 'duration',
+                          'résiliation', 'termination', 'litige', 'dispute', 'juridiction', 'jurisdiction'],
+            'threshold': 5.0
+        },
+        'testament': {
+            'keywords': ['testament', 'will', 'testamentaire', 'testamentary', 'dernières volontés', 'last will'],
+            'indicators': ['héritier', 'heir', 'bénéficiaire', 'beneficiary', 'legs', 'bequest', 'legataire', 'legatee',
+                          'exécuteur', 'executor', 'succession', 'inheritance', 'révocation', 'revocation',
+                          'olographe', 'holographic', 'codicille', 'codicil'],
+            'threshold': 7.0
+        },
+        'contrat_prenuptial': {
+            'keywords': ['contrat de mariage', 'prenuptial agreement', 'prenup', 'contrat prénuptial',
+                        'marriage contract', 'convention matrimoniale', 'marital agreement'],
+            'indicators': ['régime matrimonial', 'matrimonial regime', 'biens', 'property', 'séparation de biens',
+                          'separation of property', 'communauté', 'community', 'époux', 'spouse', 'mariage', 'marriage',
+                          'dot', 'dowry', 'donation entre époux', 'spousal donation'],
+            'threshold': 7.0
+        },
+        'procuration_poa': {
+            'keywords': ['procuration', 'power of attorney', 'power-of-attorney', 'mandat', 'mandate', 'poa'],
+            'indicators': ['mandant', 'principal', 'mandataire', 'agent', 'attorney-in-fact', 'pouvoir', 'authority',
+                          'représenter', 'represent', 'agir au nom', 'act on behalf', 'signer', 'sign',
+                          'délégation', 'delegation', 'irrévocable', 'irrevocable'],
+            'threshold': 7.0
+        },
+        'accord_confidentialite_nda': {
+            'keywords': ['accord de confidentialité', 'non-disclosure agreement', 'nda', 'n.d.a.',
+                        'confidentiality agreement', 'accord de non-divulgation'],
+            'indicators': ['confidentiel', 'confidential', 'secret', 'proprietary', 'propriétaire',
+                          'divulgation', 'disclosure', 'révéler', 'reveal', 'informations confidentielles',
+                          'pénalité', 'penalty', 'durée de confidentialité', 'confidentiality period'],
+            'threshold': 7.0
+        },
+        'acte_propriete_immobiliere': {
+            'keywords': ['acte de propriété', 'real estate deed', 'property deed', 'acte de vente immobilière',
+                        'deed of sale', 'title deed', 'titre de propriété'],
+            'indicators': ['propriétaire', 'owner', 'propriété immobilière', 'real estate', 'bien immobilier',
+                          'property', 'parcelle', 'lot', 'cadastre', 'cadastral', 'superficie', 'area',
+                          'adresse', 'address', 'bornage', 'boundary', 'hypothèque', 'mortgage'],
+            'threshold': 7.0
+        },
+        'acte_notarie': {
+            'keywords': ['acte notarié', 'notarial act', 'acte authentique', 'authentic act', 'acte sous seing privé'],
+            'indicators': ['notaire', 'notary', 'étude notariale', 'notary office', 'minute',
+                          'authentification', 'signature authentique', 'répertoire des minutes',
+                          'en présence de', 'in the presence of'],
+            'threshold': 7.0
+        },
+    }
     
-    # Détection facture/Invoice (très spécifique)
-    invoice_keywords = ['facture', 'invoice', 'bill', 'reçu', 'receipt', 'quittance']
-    invoice_indicators = ['montant total', 'total amount', 'tva', 'tax', 'date d\'émission', 'issue date',
-                          'numéro de facture', 'invoice number', 'client', 'customer', 'paiement', 'payment']
-    if any(word in file_name_lower for word in invoice_keywords) or \
-       (any(word in content_lower[:800] for word in invoice_keywords) and 
-        sum(1 for word in invoice_indicators if word in content_lower) >= 2):
-        return 'facture_invoice'
+    # ============ SCORING DE TOUS LES TYPES ============
+    scores = {}
+    for doc_type, definition in type_definitions.items():
+        score = _score_document_type(
+            content_lower, file_name_lower,
+            definition['keywords'], definition['indicators']
+        )
+        if score > 0:
+            scores[doc_type] = score
     
-    # Détection des lettres (doit être fait tôt pour éviter les faux positifs)
-    letter_keywords = ['lettre', 'letter', 'correspondance', 'correspondence', 'courrier', 'mail']
-    letter_context = ['soutien', 'support', 'recommandation', 'recommendation', 'demande', 'request', 
-                     'attestation', 'certificate', 'certificat', 'justificatif', 'justification',
-                     'cher monsieur', 'dear sir', 'madame', 'madam', 'monsieur', 'sir']
-    if any(word in file_name_lower for word in letter_keywords) or \
-       (any(word in content_lower[:500] for word in letter_keywords) and 
-        (any(word in content_lower for word in letter_context) or 
-         'objet:' in content_lower[:300] or 'subject:' in content_lower[:300])):
-        return 'lettre'
+    # Trier par score décroissant
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     
-    # Détection des documents financiers/fiscaux (améliorée)
-    financial_keywords = ['t4', 't-4', 't4a', 't4a-', 'relevé', 'statement', 'payroll', 'paie', 
-                          'salaire', 'salary', 'revenu', 'income', 'impôt', 'tax', 'déduction', 'deduction',
-                          'feuillet', 'slip', 'relevé fiscal', 'tax statement', 'avis de cotisation', 'notice of assessment']
-    financial_indicators = ['revenus bruts', 'gross income', 'revenus nets', 'net income', 'impôt retenu', 'tax withheld',
-                           'année', 'year', 'période', 'period', 'numéro d\'assurance sociale', 'social insurance number']
-    if any(word in file_name_lower for word in financial_keywords) or \
-       (any(word in content_lower[:800] for word in financial_keywords) and 
-        sum(1 for word in financial_indicators if word in content_lower) >= 2):
-        return 'document_financier'
-    
-    # Détection des contrats (améliorée avec plus de contexte)
-    contract_keywords = ['contrat', 'contract', 'agreement', 'convention', 'accord']
-    if any(word in content_lower or word in file_name_lower for word in contract_keywords):
-        # Contrat de location
-        rental_indicators = ['location', 'rental', 'bail', 'loyer', 'rent', 'locataire', 'tenant', 
-                            'bailleur', 'landlord', 'propriétaire', 'owner', 'garant', 'guarantor',
-                            'charges locatives', 'maintenance fees', 'caution', 'deposit']
-        if sum(1 for word in rental_indicators if word in content_lower) >= 3:
-            return 'contrat_location'
+    if sorted_scores:
+        best_type, best_score = sorted_scores[0]
+        threshold = type_definitions[best_type]['threshold']
         
-        # Contrat de travail
-        employment_indicators = ['travail', 'employment', 'employé', 'employee', 'employeur', 'employer',
-                                'salaire', 'salary', 'rémunération', 'remuneration', 'poste', 'position',
-                                'période d\'essai', 'probation', 'cde', 'cdi', 'cdd', 'contract duration']
-        if sum(1 for word in employment_indicators if word in content_lower) >= 3:
-            return 'contrat_travail'
+        # Calculer la confiance (0-1) basée sur le score vs threshold et la marge avec le 2nd
+        raw_confidence = min(best_score / (threshold * 2), 1.0)  # Normaliser
         
-        # Contrat de vente
-        sale_indicators = ['vente', 'sale', 'achat', 'purchase', 'acheteur', 'buyer', 'vendeur', 'seller',
-                          'prix', 'price', 'livraison', 'delivery', 'garantie', 'warranty', 'garant', 'guarantee']
-        if sum(1 for word in sale_indicators if word in content_lower) >= 3:
-            return 'contrat_vente'
+        # Bonus si la marge avec le 2ème est grande
+        if len(sorted_scores) >= 2:
+            second_score = sorted_scores[1][1]
+            margin = (best_score - second_score) / best_score if best_score > 0 else 0
+            raw_confidence = min(raw_confidence + margin * 0.2, 1.0)
         
-        # Contrat générique
-        return 'contrat_generique'
-    
-    # Détection des testaments
-    will_keywords = ['testament', 'will', 'testamentaire', 'testamentary']
-    will_indicators = ['héritier', 'heir', 'bénéficiaire', 'beneficiary', 'legs', 'bequest', 'legataire', 'legatee',
-                      'exécuteur', 'executor', 'succession', 'inheritance']
-    if any(word in content_lower or word in file_name_lower for word in will_keywords) or \
-       (any(word in will_keywords for word in file_name_lower) and 
-        sum(1 for word in will_indicators if word in content_lower) >= 2):
-        return 'testament'
-    
-    # Détection des contrats de mariage/prénuptiaux (Prenuptial Agreement)
-    prenuptial_keywords = ['contrat de mariage', 'prenuptial agreement', 'prenup', 'contrat prénuptial', 
-                          'marriage contract', 'convention matrimoniale', 'marital agreement']
-    prenuptial_indicators = ['régime matrimonial', 'matrimonial regime', 'biens', 'property', 'séparation de biens',
-                            'separation of property', 'communauté', 'community', 'époux', 'spouse', 'mariage', 'marriage']
-    if any(phrase in content_lower or phrase in file_name_lower for phrase in prenuptial_keywords) or \
-       (any(word in file_name_lower for word in ['prenup', 'prenuptial', 'marriage contract', 'contrat mariage']) and 
-        sum(1 for word in prenuptial_indicators if word in content_lower) >= 2):
-        return 'contrat_prenuptial'
-    
-    # Détection des procurations (Power Of Attorney)
-    poa_keywords = ['procuration', 'power of attorney', 'power-of-attorney', 'mandat', 'mandate', 'poa']
-    poa_indicators = ['mandant', 'principal', 'mandataire', 'agent', 'attorney-in-fact', 'pouvoir', 'authority',
-                     'représenter', 'represent', 'agir au nom', 'act on behalf', 'signer', 'sign']
-    if any(word in content_lower or word in file_name_lower for word in poa_keywords) or \
-       (any(word in file_name_lower for word in ['poa', 'power attorney', 'procuration']) and 
-        sum(1 for word in poa_indicators if word in content_lower) >= 2):
-        return 'procuration_poa'
-    
-    # Détection des accords de confidentialité (NDA)
-    nda_keywords = ['accord de confidentialité', 'non-disclosure agreement', 'nda', 'n.d.a.', 
-                   'confidentiality agreement', 'accord de non-divulgation']
-    nda_indicators = ['confidentiel', 'confidential', 'secret', 'secret information', 'proprietary', 'propriétaire',
-                     'divulgation', 'disclosure', 'révéler', 'reveal', 'informations confidentielles']
-    if any(phrase in content_lower or phrase in file_name_lower for phrase in nda_keywords) or \
-       (any(word in file_name_lower for word in ['nda', 'non-disclosure', 'confidentiality']) and 
-        sum(1 for word in nda_indicators if word in content_lower) >= 2):
-        return 'accord_confidentialite_nda'
-    
-    # Détection des actes de propriété immobilière (Real Estate Deed)
-    deed_keywords = ['acte de propriété', 'real estate deed', 'property deed', 'acte de vente immobilière',
-                    'deed of sale', 'acte notarié', 'notarial deed', 'title deed', 'titre de propriété']
-    deed_indicators = ['propriétaire', 'owner', 'propriété immobilière', 'real estate', 'bien immobilier',
-                      'property', 'parcelle', 'lot', 'cadastre', 'cadastral', 'superficie', 'area',
-                      'adresse', 'address', 'bornage', 'boundary', 'hypothèque', 'mortgage']
-    if any(phrase in content_lower or phrase in file_name_lower for phrase in deed_keywords) or \
-       (any(word in file_name_lower for word in ['deed', 'acte propriété', 'titre propriété']) and 
-        sum(1 for word in deed_indicators if word in content_lower) >= 3):
-        return 'acte_propriete_immobiliere'
-    
-    # Détection des actes notariés (améliorée)
-    notary_keywords = ['acte notarié', 'notarial act', 'acte authentique', 'authentic act', 'acte sous seing privé']
-    notary_context = ['notaire', 'notary', 'étude notariale', 'notary office', 'minute', 
-                     'authentification', 'authentification', 'signature authentique', 'répertoire des minutes']
-    
-    has_acte = any(word in content_lower or word in file_name_lower for word in ['acte', 'deed'])
-    has_notary = any(word in content_lower for word in notary_context) or \
-                 any(phrase in content_lower for phrase in notary_keywords)
-    
-    if has_acte and has_notary:
-        return 'acte_notarie'
-    
-    # Détection bail/lease (séparé des contrats de location)
-    if any(word in content_lower or word in file_name_lower for word in ['bail', 'lease']) and \
-       'contrat' not in content_lower[:500]:  # Si c'est mentionné comme bail mais pas comme contrat
-        return 'contrat_location'  # Normaliser vers contrat_location
+        if best_score >= threshold:
+            # Résoudre les ambiguïtés contrat spécifique vs contrat_generique
+            if best_type == 'contrat_generique' and len(sorted_scores) >= 2:
+                second_type, second_score = sorted_scores[1]
+                if second_type.startswith('contrat_') and second_score >= type_definitions[second_type]['threshold'] * 0.8:
+                    return {
+                        'type': second_type,
+                        'confidence': raw_confidence,
+                        'method': 'pattern',
+                        'scores': dict(sorted_scores[:5])
+                    }
+            
+            logger.info(f"📋 Document type detected: {best_type} (score={best_score:.1f}, confidence={raw_confidence:.2f})")
+            return {
+                'type': best_type,
+                'confidence': raw_confidence,
+                'method': 'pattern',
+                'scores': dict(sorted_scores[:5])
+            }
     
     # ============ DÉTECTION PAR LLM POUR CAS COMPLEXES ============
-    # Si aucun pattern n'a matché, utiliser un LLM pour une détection plus fine
     try:
+        types_list = '\n'.join(f'- {t}' for t in ALL_VALID_DOCUMENT_TYPES)
         detection_prompt = f"""Analyze this document sample and identify its type. Return ONLY one of these exact types:
-- cv_resume
-- facture_invoice
-- contrat_location
-- contrat_travail
-- contrat_vente
-- contrat_generique
-- contrat_prenuptial
-- procuration_poa
-- accord_confidentialite_nda
-- acte_propriete_immobiliere
-- testament
-- acte_notarie
-- lettre
-- document_financier
-- document_generique
+{types_list}
 
 File name: {file_name}
 Content sample (first 1500 chars): {content_sample}
@@ -2933,18 +3847,27 @@ Return ONLY the type identifier, nothing else:"""
         
         detected_type = call_mistral_api(detection_prompt).strip().lower()
         
-        # Valider que le type détecté est valide
-        valid_types = ['cv_resume', 'facture_invoice', 'contrat_location', 'contrat_travail', 
-                      'contrat_vente', 'contrat_generique', 'contrat_prenuptial', 'procuration_poa',
-                      'accord_confidentialite_nda', 'acte_propriete_immobiliere', 'testament', 
-                      'acte_notarie', 'lettre', 'document_financier', 'document_generique']
-        if detected_type in valid_types:
-            return detected_type
+        # Nettoyer le résultat (enlever ponctuation, espaces, markdown)
+        detected_type = re.sub(r'[^a-z0-9_]', '', detected_type.replace('-', '_'))
+        
+        if detected_type in ALL_VALID_DOCUMENT_TYPES:
+            logger.info(f"📋 Document type detected via LLM: {detected_type}")
+            return {
+                'type': detected_type,
+                'confidence': 0.6,
+                'method': 'llm',
+                'scores': {}
+            }
     except Exception as e:
         logger.warning(f"LLM document type detection failed: {e}")
     
     # Fallback
-    return 'document_generique'
+    return {
+        'type': 'document_generique',
+        'confidence': 0.1,
+        'method': 'fallback',
+        'scores': dict(sorted_scores[:5]) if sorted_scores else {}
+    }
 
 async def extract_structured_data(file_content: str, file_name: str, document_type: str, 
                                   selected_model: str = DEFAULT_MODEL, language: str = 'fr') -> Dict[str, Any]:
@@ -3139,6 +4062,306 @@ Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
   "conditions": [
     "conditions particulières"
   ]
+}""",
+
+        'assurance_insurance': """Tu dois extraire toutes les informations structurées de ce contrat/police d'assurance.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Contrat d'assurance",
+  "assureur": {
+    "nom": "nom de la compagnie d'assurance",
+    "adresse": "adresse complète",
+    "numero_police": "numéro de police"
+  },
+  "assure": {
+    "nom": "nom complet de l'assuré",
+    "adresse": "adresse complète",
+    "qualite": "souscripteur, bénéficiaire, etc."
+  },
+  "couverture": {
+    "type_assurance": "auto, habitation, vie, santé, etc.",
+    "garanties": ["liste des garanties couvertes"],
+    "exclusions": ["liste des exclusions"]
+  },
+  "montants": [
+    {"type": "Prime annuelle", "valeur": null, "devise": "EUR"},
+    {"type": "Franchise", "valeur": null, "devise": "EUR"},
+    {"type": "Plafond d'indemnisation", "valeur": null, "devise": "EUR"}
+  ],
+  "dates_importantes": [
+    {"type": "Date de souscription", "valeur": "date"},
+    {"type": "Date d'effet", "valeur": "date"},
+    {"type": "Date d'échéance", "valeur": "date"},
+    {"type": "Date de renouvellement", "valeur": "date"}
+  ],
+  "conditions_particulieres": ["conditions ou clauses spécifiques"]
+}""",
+
+        'jugement_decision_justice': """Tu dois extraire toutes les informations structurées de ce jugement/décision de justice.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Jugement/Décision de justice",
+  "juridiction": {
+    "tribunal": "nom du tribunal",
+    "chambre": "chambre si mentionnée",
+    "juge": "nom du/des juge(s)",
+    "greffier": "nom du greffier si mentionné"
+  },
+  "parties": [
+    {"nom": "nom complet", "role": "demandeur/défendeur/partie civile", "avocat": "nom de l'avocat si mentionné"}
+  ],
+  "dates_importantes": [
+    {"type": "Date d'audience", "valeur": "date"},
+    {"type": "Date de délibéré", "valeur": "date"},
+    {"type": "Date de prononcé", "valeur": "date"}
+  ],
+  "dispositif": {
+    "decision": "résumé de la décision rendue",
+    "condamnations": ["liste des condamnations"],
+    "montants": [{"type": "type", "valeur": null, "devise": "EUR"}]
+  },
+  "voies_de_recours": {
+    "appel_possible": true,
+    "delai": "délai d'appel",
+    "juridiction_appel": "cour d'appel compétente"
+  },
+  "references_juridiques": ["articles de loi cités"]
+}""",
+
+        'releve_bancaire': """Tu dois extraire toutes les informations structurées de ce relevé bancaire.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Relevé bancaire",
+  "banque": {
+    "nom": "nom de la banque",
+    "agence": "agence si mentionnée"
+  },
+  "titulaire": {
+    "nom": "nom complet du titulaire",
+    "adresse": "adresse si disponible"
+  },
+  "compte": {
+    "numero": "numéro de compte",
+    "iban": "IBAN si disponible",
+    "bic": "BIC si disponible",
+    "type": "courant, épargne, etc."
+  },
+  "periode": {
+    "debut": "date de début",
+    "fin": "date de fin"
+  },
+  "soldes": {
+    "solde_initial": {"valeur": null, "devise": "EUR"},
+    "solde_final": {"valeur": null, "devise": "EUR"},
+    "total_debits": {"valeur": null, "devise": "EUR"},
+    "total_credits": {"valeur": null, "devise": "EUR"}
+  },
+  "operations_principales": [
+    {"date": "date", "libelle": "description", "montant": null, "type": "débit/crédit"}
+  ],
+  "frais_bancaires": [{"type": "type de frais", "montant": null}]
+}""",
+
+        'certificat_attestation': """Tu dois extraire toutes les informations structurées de ce certificat/attestation.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Certificat/Attestation",
+  "type_certificat": "type précis (naissance, mariage, domicile, emploi, scolarité, etc.)",
+  "emetteur": {
+    "nom": "organisme ou personne émettrice",
+    "qualite": "qualité/fonction",
+    "adresse": "adresse si disponible"
+  },
+  "beneficiaire": {
+    "nom": "nom complet de la personne concernée",
+    "adresse": "adresse si disponible",
+    "date_naissance": "date si disponible"
+  },
+  "objet": "ce qui est certifié ou attesté",
+  "dates_importantes": [
+    {"type": "Date de délivrance", "valeur": "date"},
+    {"type": "Date de validité", "valeur": "date si disponible"}
+  ],
+  "elements_authenticite": {
+    "numero": "numéro de certificat si disponible",
+    "cachet": true,
+    "signature": true
+  },
+  "informations_complementaires": ["informations supplémentaires"]
+}""",
+
+        'contrat_pret_loan': """Tu dois extraire toutes les informations structurées de ce contrat de prêt/crédit.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Contrat de prêt",
+  "type_pret": "immobilier, personnel, auto, professionnel, etc.",
+  "preteur": {
+    "nom": "nom de l'établissement prêteur",
+    "adresse": "adresse complète"
+  },
+  "emprunteur": {
+    "nom": "nom complet de l'emprunteur",
+    "adresse": "adresse complète"
+  },
+  "montants": {
+    "capital_emprunte": {"valeur": null, "devise": "EUR"},
+    "taux_interet": "taux en %",
+    "taeg": "TAEG en % si disponible",
+    "mensualite": {"valeur": null, "devise": "EUR"},
+    "cout_total_credit": {"valeur": null, "devise": "EUR"}
+  },
+  "dates_importantes": [
+    {"type": "Date de signature", "valeur": "date"},
+    {"type": "Date de début", "valeur": "date"},
+    {"type": "Date de fin", "valeur": "date"},
+    {"type": "Durée", "valeur": "durée en mois/années"}
+  ],
+  "garanties": ["liste des garanties (hypothèque, caution, etc.)"],
+  "conditions_remboursement_anticipe": "conditions si mentionnées",
+  "assurance_emprunteur": "détails si mentionnés"
+}""",
+
+        'devis_estimation': """Tu dois extraire toutes les informations structurées de ce devis/estimation.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Devis/Estimation",
+  "emetteur": {
+    "nom": "nom de l'entreprise",
+    "adresse": "adresse complète",
+    "siret": "SIRET si disponible"
+  },
+  "client": {
+    "nom": "nom du client",
+    "adresse": "adresse si disponible"
+  },
+  "numero_devis": "numéro du devis",
+  "articles": [
+    {"description": "description", "quantite": null, "prix_unitaire": null, "total": null}
+  ],
+  "montants": {
+    "total_ht": {"valeur": null, "devise": "EUR"},
+    "tva": {"valeur": null, "taux": "taux en %"},
+    "total_ttc": {"valeur": null, "devise": "EUR"},
+    "remise": {"valeur": null, "devise": "EUR"}
+  },
+  "dates_importantes": [
+    {"type": "Date d'émission", "valeur": "date"},
+    {"type": "Date de validité", "valeur": "date"}
+  ],
+  "conditions": {
+    "paiement": "conditions de paiement",
+    "livraison": "conditions de livraison",
+    "delai": "délai d'exécution"
+  }
+}""",
+
+        'bon_commande_purchase_order': """Tu dois extraire toutes les informations structurées de ce bon de commande.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Bon de commande",
+  "client": {
+    "nom": "nom du client",
+    "adresse": "adresse complète",
+    "reference_client": "référence si disponible"
+  },
+  "fournisseur": {
+    "nom": "nom du fournisseur",
+    "adresse": "adresse complète"
+  },
+  "numero_commande": "numéro de commande",
+  "articles": [
+    {"reference": "ref", "description": "description", "quantite": null, "prix_unitaire": null, "total": null}
+  ],
+  "montants": {
+    "total_ht": {"valeur": null, "devise": "EUR"},
+    "tva": {"valeur": null},
+    "total_ttc": {"valeur": null, "devise": "EUR"}
+  },
+  "dates_importantes": [
+    {"type": "Date de commande", "valeur": "date"},
+    {"type": "Date de livraison prévue", "valeur": "date"}
+  ],
+  "conditions_livraison": "conditions de livraison",
+  "conditions_paiement": "conditions de paiement"
+}""",
+
+        'proces_verbal': """Tu dois extraire toutes les informations structurées de ce procès-verbal/compte-rendu.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Procès-verbal/Compte-rendu",
+  "type_reunion": "assemblée générale, conseil d'administration, réunion de travail, etc.",
+  "lieu": "lieu de la réunion",
+  "date_heure": "date et heure de la réunion",
+  "participants": {
+    "presents": [{"nom": "nom", "qualite": "rôle/fonction"}],
+    "absents": [{"nom": "nom", "qualite": "rôle/fonction"}],
+    "excuses": [{"nom": "nom"}]
+  },
+  "president_seance": "nom du président de séance",
+  "secretaire": "nom du secrétaire",
+  "ordre_du_jour": ["liste des points à l'ordre du jour"],
+  "decisions": [
+    {"sujet": "sujet de la décision", "decision": "décision prise", "vote": "résultat du vote si applicable"}
+  ],
+  "actions_decidees": [
+    {"action": "description", "responsable": "nom", "echeance": "date"}
+  ],
+  "prochaine_reunion": "date si mentionnée"
+}""",
+
+        'rapport_expertise': """Tu dois extraire toutes les informations structurées de ce rapport d'expertise/audit.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Rapport d'expertise/Audit",
+  "type_expertise": "type précis (immobilier, médical, technique, financier, etc.)",
+  "expert": {
+    "nom": "nom de l'expert/auditeur",
+    "qualifications": "qualifications/agréments",
+    "organisme": "organisme si applicable"
+  },
+  "commanditaire": {
+    "nom": "nom du commanditaire",
+    "qualite": "qualité"
+  },
+  "objet": "objet et périmètre de l'expertise",
+  "dates_importantes": [
+    {"type": "Date de la mission", "valeur": "date"},
+    {"type": "Date du rapport", "valeur": "date"}
+  ],
+  "methodologie": "résumé de la méthodologie utilisée",
+  "constats": ["liste des constats principaux"],
+  "conclusions": ["liste des conclusions"],
+  "recommandations": ["liste des recommandations"],
+  "annexes": ["liste des annexes si mentionnées"]
+}""",
+
+        'permis_licence': """Tu dois extraire toutes les informations structurées de ce permis/licence/autorisation.
+Retourne UNIQUEMENT un JSON valide avec cette structure exacte:
+{
+  "type_document": "Permis/Licence/Autorisation",
+  "type_permis": "type précis (construire, conduire, exploitation, etc.)",
+  "titulaire": {
+    "nom": "nom complet du titulaire",
+    "adresse": "adresse complète"
+  },
+  "autorite_emettrice": {
+    "nom": "organisme émetteur",
+    "adresse": "adresse si disponible"
+  },
+  "numero_permis": "numéro du permis/licence",
+  "objet": "ce qui est autorisé précisément",
+  "dates_importantes": [
+    {"type": "Date de délivrance", "valeur": "date"},
+    {"type": "Date d'expiration", "valeur": "date"},
+    {"type": "Date de renouvellement", "valeur": "date si applicable"}
+  ],
+  "conditions": ["liste des conditions et restrictions"],
+  "categorie": "catégorie si applicable",
+  "elements_authenticite": {
+    "cachet": true,
+    "signature": true,
+    "numero_enregistrement": "numéro si disponible"
+  }
 }""",
 
         'document_generique': """Tu dois extraire les informations structurées de ce document.
@@ -3452,7 +4675,8 @@ async def analyze_query_need_for_search(user_query: str, selected_model: str, la
         }
     
 async def query_model_online_mode(user_query: str, selected_model: str = DEFAULT_MODEL, 
-                                 language: str = 'en', enable_auto_online_search: bool = True) -> str:
+                                 language: str = 'en', enable_auto_online_search: bool = True,
+                                 conversation_history: list = None) -> str:
     """
     Mode ONLINE: Réponse du modèle enrichie avec des données actuelles si nécessaire (comme SearchGPT)
     Avec recherche automatique si l'information n'est pas trouvée dans les connaissances du modèle
@@ -3477,8 +4701,8 @@ async def query_model_online_mode(user_query: str, selected_model: str = DEFAULT
     )
 
     try:
-        # Réponse initiale du modèle
-        initial_response = await execute_model_query(initial_prompt, selected_model)
+        # Réponse initiale du modèle avec historique de conversation
+        initial_response = await execute_model_query(initial_prompt, selected_model, conversation_history)
         
         # ÉTAPE 2: Analyse automatique du besoin de recherche
         search_analysis = await analyze_query_need_for_search(user_query, selected_model, language)
@@ -3581,6 +4805,7 @@ async def index_directory():
         data = request.get_json()
         files = data.get('files', [])
         session_id = request.headers.get('Session-ID', 'default')
+        user_email = _extract_user_email_from_auth_header()
         language = data.get('language', 'en')
 
         if not files:
@@ -3741,6 +4966,15 @@ async def index_directory():
                 page_content=main_content,
                 metadata=document_metadata
             ))
+
+            aws_persistence_service.persist_document(
+                file_name=file_data['fileName'],
+                content=main_content,
+                metadata=document_metadata,
+                user_email=user_email,
+                session_id=session_id,
+                source='index-directory',
+            )
         if not documents:
             return jsonify({
                 "error": "Aucun fichier valide à indexer",
@@ -3827,6 +5061,10 @@ async def index_directory():
             'vector_store_ready': True,
             'suggested_actions': inferred_actions.get('suggested_actions', []),
             'corpus_domain': inferred_actions.get('domain', 'unknown'),
+            'detected_type': inferred_actions.get('detected_type', 'document_generique'),
+            'detected_type_label': inferred_actions.get('detected_type_label', 'Document'),
+            'detected_type_confidence': inferred_actions.get('detected_type_confidence', 0),
+            'type_distribution': inferred_actions.get('type_distribution', {}),
             'images_ocr_processed': images_processed_count,
             'ocr_enabled': ocr_enabled
         }), 200
@@ -3872,7 +5110,10 @@ async def infer_corpus_actions_endpoint():
         return jsonify({
             'success': True,
             'suggested_actions': inferred_actions.get('suggested_actions', []),
-            'domain': inferred_actions.get('domain', 'unknown')
+            'domain': inferred_actions.get('domain', 'unknown'),
+            'detected_type': inferred_actions.get('detected_type', 'document_generique'),
+            'detected_type_label': inferred_actions.get('detected_type_label', 'Document'),
+            'detected_type_confidence': inferred_actions.get('detected_type_confidence', 0),
         }), 200
         
     except Exception as e:
@@ -4093,14 +5334,16 @@ async def handle_query():
                                 
                                 if doc_key not in seen_docs:
                                     seen_docs.add(doc_key)
-                                    page_number = doc.metadata.get("page_number")
+                                    page_number = doc.metadata.get("page") or doc.metadata.get("page_number")
+                                    chunk_id = doc.metadata.get("chunk_id")
                                     result_dict = {
-                                        "fileName": file_name_from_meta, 
-                                        "content": doc.page_content[:2500]  # Augmenté à 2500 chars par chunk
+                                        "fileName": file_name_from_meta,
+                                        "content": doc.page_content[:2500]
                                     }
                                     if page_number is not None:
                                         result_dict["pageNumber"] = page_number
-                                        result_dict["isPageChunk"] = doc.metadata.get("is_page_chunk", False)
+                                    if chunk_id is not None:
+                                        result_dict["chunkId"] = chunk_id
                                     directory_content.append(result_dict)
                             
                             logger.info(f"📚 {len(directory_content)} documents uniques ajoutés depuis le vector store de session")
@@ -4146,10 +5389,17 @@ async def handle_query():
                         relevant_docs = top_docs
                     
                     for doc in relevant_docs:
-                        directory_content.append({ 
-                            "fileName": doc.metadata.get("file_name", "document_vectorstore"), 
+                        result_dict = {
+                            "fileName": doc.metadata.get("file_name", "document_vectorstore"),
                             "content": doc.page_content[:2000]
-                        })
+                        }
+                        page_number = doc.metadata.get("page") or doc.metadata.get("page_number")
+                        chunk_id = doc.metadata.get("chunk_id")
+                        if page_number is not None:
+                            result_dict["pageNumber"] = page_number
+                        if chunk_id is not None:
+                            result_dict["chunkId"] = chunk_id
+                        directory_content.append(result_dict)
                     logger.info(f"📚 {len(relevant_docs)} documents ajoutés depuis le vector store global")
                 except Exception as e:
                     logger.warning(f"Erreur lors de la récupération depuis le vector store global: {str(e)}")
@@ -4199,11 +5449,13 @@ async def handle_query():
             logger.info(f"🌐 Mode ONLINE activé pour la requête: {user_query[:50]}...")
             
             enable_auto_search = data.get('enable_auto_online_search', True)  # Activé par défaut
+            conversation_history = data.get('conversation_history', [])
             response = await query_model_online_mode(
                 user_query=user_query,
                 selected_model=selected_model,
                 language=language,
-                enable_auto_online_search=enable_auto_search
+                enable_auto_online_search=enable_auto_search,
+                conversation_history=conversation_history
             )
             
             return jsonify({
@@ -4261,6 +5513,7 @@ def handle_query_stream():
         # MODE ONLINE
         if research_mode == 'online' or data.get('enable_online_search'):
             t = translations.get(language, translations['en'])
+            conversation_history = data.get('conversation_history', [])
             
             prompt = (
                 f"{t['online_mode_title']}\n"
@@ -4274,7 +5527,7 @@ def handle_query_stream():
             )
             
             return Response(
-                stream_with_context(stream_response(prompt, selected_model)),
+                stream_with_context(stream_response(prompt, selected_model, conversation_history)),
                 mimetype='text/event-stream',
                 headers={
                     'Cache-Control': 'no-cache',
@@ -4869,25 +6122,154 @@ def test_endpoints():
 @app.route('/users/me', methods=['GET'])
 def get_current_user():
     """Récupère les informations de l'utilisateur connecté"""
-    from auth import verify_jwt_token
+    from auth import verify_auth_token
     
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
         return jsonify({'error': 'Token manquant'}), 401
     
     token = auth_header.replace('Bearer ', '')
-    payload = verify_jwt_token(token)
+    auth_result = verify_auth_token(token)
     
-    if not payload:
+    if not auth_result:
         return jsonify({'error': 'Token invalide'}), 401
+
+    if auth_result['auth_type'] == 'firebase':
+        return jsonify({
+            'user': auth_result['user']
+        }), 200
     
     return jsonify({
         'user': {
-            'id': payload['user_id'],
-            'email': payload['email'],
-            'name': payload['name']
+            'id': auth_result['payload']['user_id'],
+            'email': auth_result['payload']['email'],
+            'name': auth_result['payload']['name']
         }
     }), 200
+
+
+@app.route('/users/me/recent-documents', methods=['GET'])
+def get_recent_documents_for_user():
+    """Return the most recent persisted documents for the authenticated user."""
+    from auth import verify_auth_token, _get_pg_connection
+
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Token manquant'}), 401
+
+    token = auth_header.replace('Bearer ', '')
+    auth_result = verify_auth_token(token)
+
+    if not auth_result or not auth_result.get('user'):
+        return jsonify({'error': 'Token invalide'}), 401
+
+    user_id = auth_result['user'].get('id')
+    if not user_id:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+
+    try:
+        requested_limit = int(request.args.get('limit', 5))
+    except (TypeError, ValueError):
+        requested_limit = 5
+    limit = max(1, min(requested_limit, 20))
+
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''
+                    SELECT
+                        id::text,
+                        file_name,
+                        mime_type,
+                        size_bytes,
+                        status,
+                        created_at,
+                        processed_at
+                    FROM documents
+                    WHERE uploaded_by_user_id = %s::uuid
+                    ORDER BY COALESCE(processed_at, created_at) DESC
+                    LIMIT %s
+                    ''',
+                    (user_id, limit)
+                )
+                rows = cursor.fetchall()
+
+        recent_documents = []
+        for row in rows:
+            recent_documents.append({
+                'id': row[0],
+                'file_name': row[1],
+                'mime_type': row[2],
+                'size_bytes': row[3],
+                'status': row[4],
+                'created_at': row[5].isoformat() if row[5] else None,
+                'processed_at': row[6].isoformat() if row[6] else None,
+            })
+
+        return jsonify({'documents': recent_documents}), 200
+    except Exception as exc:
+        logger.error(f"Erreur récupération documents récents: {str(exc)}")
+        return jsonify({'error': 'Impossible de charger les documents récents'}), 500
+
+
+@app.route('/users/me/documents/<document_id>/content', methods=['GET'])
+def get_document_content_for_user(document_id):
+    """Return the raw content of a user's document stored in S3 as base64."""
+    from auth import verify_auth_token, _get_pg_connection
+
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return jsonify({'error': 'Token manquant'}), 401
+
+    token = auth_header.replace('Bearer ', '')
+    auth_result = verify_auth_token(token)
+
+    if not auth_result or not auth_result.get('user'):
+        return jsonify({'error': 'Token invalide'}), 401
+
+    user_id = auth_result['user'].get('id')
+    if not user_id:
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
+
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''
+                    SELECT file_name, mime_type, s3_bucket, s3_key
+                    FROM documents
+                    WHERE id = %s::uuid
+                      AND uploaded_by_user_id = %s::uuid
+                    LIMIT 1
+                    ''',
+                    (document_id, user_id)
+                )
+                row = cursor.fetchone()
+
+        if not row:
+            return jsonify({'error': 'Document introuvable'}), 404
+
+        file_name, mime_type, s3_bucket, s3_key = row
+        if not s3_bucket or not s3_key:
+            return jsonify({'error': 'Contenu du document indisponible'}), 404
+
+        if not aws_persistence_service.enabled or not aws_persistence_service._s3:
+            return jsonify({'error': 'Stockage AWS indisponible'}), 503
+
+        s3_object = aws_persistence_service._s3.get_object(Bucket=s3_bucket, Key=s3_key)
+        file_bytes = s3_object['Body'].read()
+        content_base64 = base64.b64encode(file_bytes).decode('ascii')
+
+        return jsonify({
+            'id': document_id,
+            'file_name': file_name,
+            'mime_type': mime_type,
+            'content_base64': content_base64,
+        }), 200
+    except Exception as exc:
+        logger.error(f"Erreur récupération contenu document: {str(exc)}")
+        return jsonify({'error': 'Impossible de charger le contenu du document'}), 500
 
 # Route pour tester la configuration Google (DEBUG)
 @app.route('/debug/google-config', methods=['GET'])

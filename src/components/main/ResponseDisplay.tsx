@@ -39,6 +39,7 @@ interface ResponseDisplayProps {
   // Props pour QueryForm
   onQuerySubmit?: (query: string, mode: 'online' | 'local') => void;
   selectedModel?: string;
+  setSelectedModel?: (model: string) => void;
   researchMode?: 'online' | 'local';
   setResearchMode?: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
   suggestedActions?: SuggestedAction[];
@@ -49,6 +50,7 @@ interface ResponseDisplayProps {
   // Props pour le bouton Select File sur mobile
   isMobile?: boolean;
   onFileSelect?: (file: File, details: { content: string | ArrayBuffer; description: string }) => void;
+  detectedDocType?: { type: string; label: string; confidence: number } | null;
 }
 
 const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
@@ -62,6 +64,7 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
   currentStatus = '',
   onQuerySubmit,
   selectedModel,
+  setSelectedModel,
   researchMode,
   setResearchMode,
   suggestedActions = [],
@@ -70,7 +73,8 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
   setIsFileContentVisible,
   language = 'en',
   isMobile = false,
-  onFileSelect
+  onFileSelect,
+  detectedDocType = null
 }) => {
   const { t } = useLanguage();
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -519,11 +523,13 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
             onQuerySubmit={onQuerySubmit}
             loading={loading || false}
             selectedModel={selectedModel || 'auto'}
+            setSelectedModel={setSelectedModel || (() => {})}
             researchMode={researchMode || 'online'}
             setResearchMode={setResearchMode || (() => {})}
             suggestedActions={suggestedActions}
             onSuggestedActionClick={onSuggestedActionClick}
             language={language}
+            detectedDocType={detectedDocType}
           />
         </div>
       )}

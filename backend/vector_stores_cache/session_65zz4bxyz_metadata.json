@@ -1,0 +1,56 @@
+{
+  "created_at": "2026-01-04T16:33:30.296255",
+  "files_count": 1,
+  "chunks_count": 40,
+  "files_indexed": [
+    "RH_-_LSNA_-_Karim_Gatien_NGAMI_TEUMI_-_contrat_de_travail_CDI.docx (1).pdf"
+  ],
+  "auto_actions": {
+    "domain": "contrat_generique",
+    "suggested_actions": [
+      {
+        "id": "verify_parties",
+        "title": "Vérifier les parties",
+        "description": "Identifie toutes les parties",
+        "sample_prompt": "Identifie toutes les parties de ce contrat avec leurs noms complets et coordonnées."
+      },
+      {
+        "id": "verify_dates",
+        "title": "Vérifier les dates",
+        "description": "Extrait toutes les dates importantes",
+        "sample_prompt": "Extrais toutes les dates importantes de ce contrat : signature, échéances, dates de paiement."
+      },
+      {
+        "id": "verify_amounts",
+        "title": "Vérifier les montants",
+        "description": "Liste tous les montants et modalités",
+        "sample_prompt": "Liste tous les montants mentionnés dans ce contrat et leurs modalités de paiement."
+      },
+      {
+        "id": "verify_object",
+        "title": "Vérifier l'objet",
+        "description": "Décrit précisément l'objet du contrat",
+        "sample_prompt": "Décris précisément l'objet de ce contrat en une phrase claire."
+      },
+      {
+        "id": "analyze_risky_clauses",
+        "title": "Analyser clauses à risque",
+        "description": "Identifie les clauses problématiques",
+        "sample_prompt": "Analyse ce contrat et identifie les clauses potentiellement problématiques ou désavantageuses."
+      },
+      {
+        "id": "verify_obligations",
+        "title": "Vérifier les obligations",
+        "description": "Liste les obligations de chaque partie",
+        "sample_prompt": "Liste toutes les obligations de chaque partie mentionnées dans ce contrat."
+      },
+      {
+        "id": "extract_structured",
+        "title": "Extraire données structurées",
+        "description": "Extrait toutes les données dans un format structuré",
+        "sample_prompt": "Extrait toutes les données structurées de ce contrat : parties, dates, montants, objet, obligations, clauses importantes."
+      }
+    ]
+  },
+  "session_id": "65zz4bxyz"
+}

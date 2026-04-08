@@ -5,6 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../auth/AuthProvider';
 import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
+import { auth } from '../../lib/firebase';
 
 interface FileDescription {
   file_name: string;
@@ -33,6 +34,23 @@ interface ModelInfo {
   is_default?: boolean;
 }
 
+interface RecentDocument {
+  id: string;
+  file_name: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  status?: string | null;
+  created_at?: string | null;
+  processed_at?: string | null;
+}
+
+interface RecentDocumentContent {
+  id: string;
+  file_name: string;
+  mime_type?: string | null;
+  content_base64: string;
+}
+
 interface SidebarProps {
   onFileSelect: (file: File, details: FileDetails) => void;
   getRepoStructure: (structureFn: () => string, files: File[]) => void;
@@ -42,6 +60,7 @@ interface SidebarProps {
   toggleSidebar: () => void;
   addFileToSidebar?: (file: File) => void;
   onDirectorySelect?: (files: File[]) => void;
+  onLogout?: () => void;
 }
 
 // Cache configuration
@@ -107,8 +126,35 @@ class AIBackendService {
   private baseURL: string;
   private uploadQueue: Set<string> = new Set();
 
-  constructor(baseURL = 'https://flexianalyse.com') {
+  constructor(baseURL = import.meta.env.VITE_API_URL || 'https://flexianalyse.com') {
     this.baseURL = baseURL;
+  }
+
+  private getOrCreateClientSessionId(): string {
+    const key = 'bugmentor_session_id';
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      return existing;
+    }
+
+    const generated = `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(key, generated);
+    return generated;
+  }
+
+  private async buildAuthHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {
+      'Session-ID': this.getOrCreateClientSessionId(),
+    };
+
+    const firebaseUser = auth.currentUser;
+    if (firebaseUser) {
+      const token = await firebaseUser.getIdToken();
+      headers.Authorization = `Bearer ${token}`;
+      headers['Session-ID'] = firebaseUser.uid;
+    }
+
+    return headers;
   }
 
   async getAvailableModels(): Promise<{ models: ModelInfo[]; default_model: string }> {
@@ -198,8 +244,11 @@ class AIBackendService {
       formData.append('model', selectedModel);
       formData.append('language', language);
 
+      const headers = await this.buildAuthHeaders();
+
       const response = await fetch(`${this.baseURL}/upload`, {
         method: 'POST',
+        headers,
         body: formData
       });
 
@@ -252,6 +301,53 @@ class AIBackendService {
       return result;
     }
   }
+
+  async getRecentDocuments(limit = 5): Promise<RecentDocument[]> {
+    try {
+      const headers = await this.buildAuthHeaders();
+      if (!headers.Authorization) {
+        return [];
+      }
+
+      const response = await fetch(`${this.baseURL}/users/me/recent-documents?limit=${limit}`, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return Array.isArray(data.documents) ? data.documents : [];
+    } catch (error) {
+      console.warn('Error fetching recent documents:', error);
+      return [];
+    }
+  }
+
+  async getRecentDocumentContent(documentId: string): Promise<RecentDocumentContent | null> {
+    try {
+      const headers = await this.buildAuthHeaders();
+      if (!headers.Authorization) {
+        return null;
+      }
+
+      const response = await fetch(`${this.baseURL}/users/me/documents/${documentId}/content`, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.warn('Error fetching document content:', error);
+      return null;
+    }
+  }
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -262,11 +358,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   setSelectedModel,
   isSidebarOpen, 
   toggleSidebar,
-  addFileToSidebar
+  addFileToSidebar,
+  onLogout
 }) => {
   const { t } = useLanguage();
   const { theme } = useTheme();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const [files, setFiles] = useState<FileNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isMobileFileDropdownOpen, setIsMobileFileDropdownOpen] = useState<boolean>(false);
@@ -278,6 +375,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [modelStatus, setModelStatus] = useState<{ [key: string]: boolean }>({});
   const [isLoadingModels, setIsLoadingModels] = useState<boolean>(true);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   
   // États pour les sections expandables
   const [isExplorerExpanded, setIsExplorerExpanded] = useState<boolean>(true);
@@ -430,6 +528,20 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
     });
   }, [availableModels, modelStatus, testModelOnDemand]);
+
+  useEffect(() => {
+    const loadRecentDocuments = async () => {
+      if (!isAuthenticated || !user) {
+        setRecentDocuments([]);
+        return;
+      }
+
+      const docs = await apiService.getRecentDocuments(5);
+      setRecentDocuments(docs);
+    };
+
+    loadRecentDocuments();
+  }, [apiService, isAuthenticated, user]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -883,6 +995,52 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [onFileSelect, pendingFiles, apiService, selectedModel]);
 
+  const decodeBase64ToArrayBuffer = useCallback((base64: string): ArrayBuffer => {
+    const binary = window.atob(base64);
+    const buffer = new ArrayBuffer(binary.length);
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return buffer;
+  }, []);
+
+  const handleRecentDocumentClick = useCallback(async (doc: RecentDocument) => {
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const contentPayload = await apiService.getRecentDocumentContent(doc.id);
+      if (!contentPayload?.content_base64) {
+        throw new Error('Missing content payload');
+      }
+
+      const fileBuffer = decodeBase64ToArrayBuffer(contentPayload.content_base64);
+      const fileName = contentPayload.file_name || doc.file_name;
+      const mimeType = contentPayload.mime_type || doc.mime_type || 'application/octet-stream';
+      const reconstructedFile = new File([fileBuffer], fileName, { type: mimeType });
+
+      setFiles(prevFiles => {
+        const allCurrentFiles = extractAllFiles(prevFiles);
+        const alreadyExists = allCurrentFiles.some(
+          existing => existing.name === reconstructedFile.name && existing.size === reconstructedFile.size,
+        );
+        if (alreadyExists) {
+          return prevFiles;
+        }
+        return buildFileTree([...allCurrentFiles, reconstructedFile]);
+      });
+
+      await handleFileClick(reconstructedFile);
+    } catch (error) {
+      console.error('Error opening recent document:', error);
+      setError('Failed to open recent document');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [apiService, buildFileTree, decodeBase64ToArrayBuffer, extractAllFiles, handleFileClick]);
+
   const renderFileTree = useCallback((nodes: FileNode[]): React.ReactElement[] => {
     return nodes.map((node, index) => (
       <li key={index}>
@@ -1228,89 +1386,28 @@ const Sidebar: React.FC<SidebarProps> = ({
                 
               </div>
 
-              {/* Model dropdown */}
+              {/* Connector dropdown */}
               <div className="relative" ref={modelDropdownRef}>
                 <button
-                  onClick={() => handleMobileModelDropdownOpen()}
+                  onClick={() => setIsMobileModelDropdownOpen(prev => !prev)}
                   className={`w-full flex items-center justify-between p-3 text-left ${theme === 'white' ? 'bg-gray-50 hover:bg-gray-100' : theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-blue-900 hover:bg-blue-800'} rounded-lg transition-colors`}
                 >
                   <div className="flex items-center space-x-3">
                     <svg className={`w-5 h-5 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                     </svg>
-                    <span className={`font-medium ${getThemeClasses().text}`}>{t('sidebar.model')}</span>
+                    <span className={`font-medium ${getThemeClasses().text}`}>Connect</span>
                   </div>
                   <svg className={`w-4 h-4 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
                 
-                {isMobileModelDropdownOpen  && (
-                  <div className={`mt-2 ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} ${getThemeClasses().border} rounded-lg shadow-lg max-h-80 overflow-y-auto`}>
-                    {isLoadingModels ? (
-                      <div className="px-4 py-6 text-center">
-                        <div className="flex items-center justify-center space-x-2">
-                          <div className={`w-4 h-4 border-2 ${theme === 'white' ? 'border-blue-500' : 'border-blue-300'} border-t-transparent rounded-full animate-spin`}></div>
-                          <span className={`text-sm ${getThemeClasses().textSecondary}`}>Loading models...</span>
-                        </div>
-                      </div>
-                    ) : (
-                      availableModels.map((model) => (
-                        <button
-                          key={model.id}
-                          onClick={() => {
-                            setSelectedModel(model.id);
-                            setIsMobileModelDropdownOpen(false);
-                          }}
-                          className={`w-full text-left px-4 py-3 ${theme === 'white' ? 'hover:bg-gray-50' : theme === 'dark' ? 'hover:bg-gray-600' : 'hover:bg-blue-800'} ${getThemeClasses().border} border-b last:border-b-0 ${
-                            selectedModel === model.id ? (theme === 'white' ? 'bg-blue-50 border-blue-200' : theme === 'dark' ? 'bg-gray-600 border-gray-500' : 'bg-blue-800 border-blue-700') : ''
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center space-x-2">
-                                <img 
-                                  src={getModelLogo(model)} 
-                                  alt={`${model.provider} logo`}
-                                  className="w-5 h-5 flex-shrink-0"
-                                  onError={(e) => {
-                                    // Fallback to a default icon if image fails to load
-                                    (e.target as HTMLImageElement).style.display = 'none';
-                                  }}
-                                />
-                                <p className={`text-sm font-medium truncate ${
-                                  selectedModel === model.id 
-                                    ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')
-                                    : getThemeClasses().text
-                                }`}>
-                                  {model.name}
-                                </p>
-                                {getModelStatusIcon(model.id)}
-                              </div>
-                              <p className={`text-xs truncate ${
-                                selectedModel === model.id 
-                                  ? (theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300')
-                                  : getThemeClasses().textSecondary
-                              }`}>
-                                {model.provider}
-                              </p>
-                            </div>
-                            {selectedModel === model.id && (
-                              <svg className={`w-5 h-5 ${theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300'}`} fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                              </svg>
-                            )}
-                          </div>
-                          {model.id === 'gpt-5' && (
-                            <div className="flex space-x-1 mt-2">
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                Latest
-                              </span>
-                            </div>
-                          )}
-                        </button>
-                      ))
-                    )}
+                {isMobileModelDropdownOpen && (
+                  <div className={`mt-2 ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} ${getThemeClasses().border} rounded-lg shadow-lg overflow-hidden`}>
+                    <div className={`px-4 py-4 text-center ${getThemeClasses().textSecondary} text-sm`}>
+                      No connectors available yet.
+                    </div>
                   </div>
                 )}
               </div>
@@ -1354,6 +1451,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <ul className="text-sm text-gray-600">
                       {renderFileTree(files)}
                     </ul>
+                  ) : recentDocuments.length > 0 ? (
+                    <div className="space-y-1">
+                      {recentDocuments.map((doc) => (
+                        <button
+                          key={doc.id}
+                          onClick={() => handleRecentDocumentClick(doc)}
+                          className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-500 hover:underline hover:bg-gray-100 truncate"
+                          title={doc.file_name}
+                        >
+                          {doc.file_name}
+                        </button>
+                      ))}
+                    </div>
                   ) : (
                     <p className="text-gray-500 text-sm py-2">
                       {t('sidebar.noFiles')}
@@ -1433,6 +1543,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                           Provider: {user.provider}
                         </div>
                       )}
+                      <button
+                        onClick={() => {
+                          setFiles([]);
+                          setPendingFiles([]);
+                          setRecentDocuments([]);
+                          setError(null);
+                          if (onLogout) onLogout();
+                          else logout();
+                        }}
+                        className="text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
+                      >
+                        Disconnect
+                      </button>
                     </div>
                   ) : (
                     <div className="space-y-2">
@@ -1592,25 +1715,26 @@ const Sidebar: React.FC<SidebarProps> = ({
               </svg>
               <span className="text-xs">{t('sidebar.export')}</span>
             </div>
-          )}
+          )
+        }
         </a>
 
-        {/* Enhanced Model dropdown */}
+        {/* Connector dropdown */}
         <div className="relative" ref={desktopModelDropdownRef}>
           <a
             href="#"
-            onClick={(e) =>{
+            onClick={(e) => {
               e.preventDefault();
-              handleDesktopModelDropdownOpen();
+              setIsDesktopModelDropdownOpen(prev => !prev);
             }}
             className={`${getThemeClasses().text} ${theme !== 'white' ? 'hover:text-blue-300' : 'hover:text-blue-500'} ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : 'flex items-center space-x-2'}`}
           >
             {isSidebarOpen ? (
               <div className="flex items-center space-x-2">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
-                <span className="text-sm font-medium truncate max-w-40">{t('sidebar.model')}</span>
+                <span className={`text-sm font-medium truncate max-w-40`}>Connector</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
                 </svg>
@@ -1618,81 +1742,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             ) : (
               <div className="flex items-center space-x-1">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                 </svg>
-                <span className="text-xs">{t('sidebar.model')}</span>
+                <span className="text-xs">Connector</span>
               </div>
             )}
           </a>
           
-          {isDesktopModelDropdownOpen  && (
-            <div className={`absolute ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} shadow-lg ${getThemeClasses().border} rounded-md z-50 max-h-80 overflow-y-auto ${isSidebarOpen ? 'right-0 top-full w-56 mt-2' : 'left-full top-0 w-64 ml-2'}`}>
-              {isLoadingModels ? (
-                <div className="px-4 py-3 text-center">
-                  <div className="flex items-center justify-center space-x-2">
-                    <div className={`w-4 h-4 border-2 ${theme === 'white' ? 'border-blue-500' : 'border-blue-300'} border-t-transparent rounded-full animate-spin`}></div>
-                    <span className={`text-sm ${getThemeClasses().textSecondary}`}>Loading models...</span>
-                  </div>
-                </div>
-              ) : (
-                availableModels.map((model) => (
-                  <a
-                    key={model.id}
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setSelectedModel(model.id);
-                      setIsDesktopModelDropdownOpen(false);
-                    }}
-                    className={`block w-full text-left px-4 py-3 ${theme === 'white' ? 'hover:bg-gray-50' : theme === 'dark' ? 'hover:bg-gray-600' : 'hover:bg-blue-800'} ${getThemeClasses().border} border-b last:border-b-0 ${
-                      selectedModel === model.id ? (theme === 'white' ? 'bg-blue-50 border-blue-200' : theme === 'dark' ? 'bg-gray-600 border-gray-500' : 'bg-blue-800 border-blue-700') : ''
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2">
-                          <img 
-                            src={getModelLogo(model)} 
-                            alt={`${model.provider} logo`}
-                            className="w-5 h-5 flex-shrink-0"
-                            onError={(e) => {
-                              // Fallback to a default icon if image fails to load
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                          <p className={`text-sm font-medium truncate ${
-                            selectedModel === model.id 
-                              ? (theme === 'white' ? 'text-blue-900' : theme === 'dark' ? 'text-blue-300' : 'text-blue-200')
-                              : getThemeClasses().text
-                          }`}>
-                            {model.name}
-                          </p>
-                          {getModelStatusIcon(model.id)}
-                        </div>
-                        <p className={`text-xs truncate ${
-                          selectedModel === model.id 
-                            ? (theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300')
-                            : getThemeClasses().textSecondary
-                        }`}>
-                          {model.provider}
-                        </p>
-                      </div>
-                      {selectedModel === model.id && (
-                        <svg className={`w-5 h-5 ${theme === 'white' ? 'text-blue-600' : theme === 'dark' ? 'text-blue-400' : 'text-blue-300'}`} fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      )}
-                    </div>
-                    {model.id === 'gpt-5' && (
-                      <div className="flex space-x-1 mt-2">
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Latest
-                        </span>
-                      </div>
-                    )}
-                  </a>
-                ))
-              )}
+          {isDesktopModelDropdownOpen && (
+            <div className={`absolute ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} shadow-lg ${getThemeClasses().border} rounded-md z-50 overflow-hidden ${isSidebarOpen ? 'right-0 top-full w-56 mt-2' : 'left-full top-0 w-56 ml-2'}`}>
+              <div className={`px-4 py-4 text-center ${getThemeClasses().textSecondary} text-sm`}>
+                No connectors available yet.
+              </div>
             </div>
           )}
         </div>
@@ -1737,6 +1798,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <ul className={`text-sm ${getThemeClasses().textSecondary}`}>
                   {renderFileTree(files)}
                 </ul>
+              ) : recentDocuments.length > 0 ? (
+                <div className="space-y-1">
+                  {recentDocuments.map((doc) => (
+                    <button
+                      key={doc.id}
+                      onClick={() => handleRecentDocumentClick(doc)}
+                      className={`w-full text-left px-2 py-1.5 rounded text-sm hover:underline truncate ${getThemeClasses().textSecondary} ${getThemeClasses().hover}`}
+                      title={doc.file_name}
+                    >
+                      {doc.file_name}
+                    </button>
+                  ))}
+                </div>
               ) : (
                 <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
                   {t('sidebar.noFiles')}
@@ -1820,6 +1894,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                       Provider: {user.provider}
                     </div>
                   )}
+                  <button
+                    onClick={() => {
+                      setFiles([]);
+                      setPendingFiles([]);
+                      setRecentDocuments([]);
+                      setError(null);
+                      if (onLogout) onLogout();
+                      else logout();
+                    }}
+                    className="text-xs text-red-500 hover:text-red-600 underline underline-offset-2"
+                  >
+                    Disconnect
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -1844,7 +1931,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </ExpandableSection>
         )}
       </div>
-      
+
       {/* Login Modal - Rendu seulement si le modal d'inscription n'est pas ouvert */}
       {!isSignUpModalOpen && (
         <LoginModal
@@ -1852,7 +1939,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           onClose={() => setIsLoginModalOpen(false)}
           onSwitchToSignUp={() => {
             setIsLoginModalOpen(false);
-            // Délai pour permettre l'animation de sortie avant d'ouvrir l'autre modal
             setTimeout(() => {
               setIsSignUpModalOpen(true);
             }, 300);
@@ -1867,7 +1953,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           onClose={() => setIsSignUpModalOpen(false)}
           onSwitchToLogin={() => {
             setIsSignUpModalOpen(false);
-            // Délai pour permettre l'animation de sortie avant d'ouvrir l'autre modal
             setTimeout(() => {
               setIsLoginModalOpen(true);
             }, 300);
@@ -1896,8 +1981,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </svg>
       </div>
     </div>
-  </>
-);
+  </>);
 };
 
 export default Sidebar;

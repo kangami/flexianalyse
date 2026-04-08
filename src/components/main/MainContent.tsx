@@ -18,6 +18,7 @@ interface EditableFile {
 interface MainContentProps {
   responses: { query: string; answer: string }[];
   selectedModel: string;
+  setSelectedModel: (model: string) => void;
   isFileContentVisible: boolean;
   setIsFileContentVisible: (visible: boolean) => void;
   onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -43,7 +44,7 @@ interface Response {
   answer: string;
 }
 
-const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isFileContentVisible, setIsFileContentVisible, onQuerySubmit, loading, researchMode, chatHistory, setResearchMode, suggestedActions = [], onSuggestedActionClick, editableFiles = [], onTextSelect, getEditableFiles, isSearchingOnline = false}) => {
+const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, setSelectedModel, isFileContentVisible, setIsFileContentVisible, onQuerySubmit, loading, researchMode, chatHistory, setResearchMode, suggestedActions = [], onSuggestedActionClick, editableFiles = [], onTextSelect, getEditableFiles, isSearchingOnline = false}) => {
   // State for animated chat messages
   const [animatedChatHistory, setAnimatedChatHistory] = useState<ChatMessage[]>([]);
   // Typing animation effect for aiResponse
@@ -140,6 +141,7 @@ const MainContent: React.FC<MainContentProps> = ({ responses, selectedModel, isF
             onQuerySubmit={handleQuerySubmit}
             loading={loading}
             selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
             researchMode={researchMode}
             setResearchMode={setResearchMode}
             suggestedActions={suggestedActions}

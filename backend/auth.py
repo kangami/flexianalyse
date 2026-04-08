@@ -2,70 +2,285 @@
 import os
 import jwt
 import json
-import sqlite3
 import logging
 from datetime import datetime, timedelta
 from flask import request, jsonify
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from google.oauth2 import id_token
 from google.auth.transport.requests import Request
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+try:
+    import psycopg
+except Exception:  # pragma: no cover - optional dependency
+    psycopg = None
+from services.aws_persistence import aws_persistence_service
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-DATABASE_PATH = 'flexianalyse_users.db'
+DATABASE_URL = os.getenv('DATABASE_URL', '')
 JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key-change-in-production')
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
+EMBEDDING_DIMENSION = int(os.getenv('EMBEDDING_DIMENSION', '1536'))
+
+_firebase_initialized = False
+
+def _get_pg_connection():
+    database_url = os.getenv('DATABASE_URL', DATABASE_URL)
+    if psycopg is None:
+        raise RuntimeError("psycopg is required for PostgreSQL persistence")
+    if not database_url:
+        raise ValueError("DATABASE_URL is required for PostgreSQL persistence")
+    return psycopg.connect(database_url)
+
+def _ensure_user_context(conn, user_id, email, name):
+    """Ensure the user has an organization membership and an active plan."""
+    cursor = conn.cursor()
+
+    cursor.execute(
+        '''
+        SELECT o.id::text
+        FROM organizations o
+        JOIN user_organizations uo ON uo.organization_id = o.id
+        WHERE uo.user_id = %s
+        ORDER BY uo.joined_at ASC
+        LIMIT 1
+        ''',
+        (user_id,)
+    )
+    row = cursor.fetchone()
+
+    if row:
+        organization_id = row[0]
+    else:
+        org_name = f"{(name or email.split('@')[0])}'s Organization"
+        cursor.execute(
+            '''
+            INSERT INTO organizations (name, owner_user_id)
+            VALUES (%s, %s)
+            RETURNING id::text
+            ''',
+            (org_name, user_id)
+        )
+        organization_id = cursor.fetchone()[0]
+
+        cursor.execute(
+            '''
+            INSERT INTO user_organizations (user_id, organization_id, role)
+            VALUES (%s, %s, 'owner')
+            ON CONFLICT (user_id, organization_id) DO NOTHING
+            ''',
+            (user_id, organization_id)
+        )
+
+    cursor.execute(
+        '''
+        SELECT plan_code
+        FROM plans
+        WHERE organization_id = %s
+          AND status IN ('active', 'trialing')
+        ORDER BY started_at DESC
+        LIMIT 1
+        ''',
+        (organization_id,)
+    )
+    plan_row = cursor.fetchone()
+    if plan_row:
+        plan_code = plan_row[0]
+    else:
+        cursor.execute(
+            '''
+            INSERT INTO plans (organization_id, plan_code, status)
+            VALUES (%s, 'free', 'active')
+            RETURNING plan_code
+            ''',
+            (organization_id,)
+        )
+        plan_code = cursor.fetchone()[0]
+
+    cursor.execute(
+        '''
+        INSERT INTO licenses (organization_id, license_key, seats_total, seats_used, status)
+        VALUES (%s, %s, 1, 1, 'active')
+        ON CONFLICT (organization_id, license_key) DO NOTHING
+        ''',
+        (organization_id, f"LIC-{organization_id[:8]}-FREE")
+    )
+
+    return organization_id, plan_code
+
+def init_firebase_admin():
+    """Initialise Firebase Admin SDK si la configuration est disponible."""
+    global _firebase_initialized
+
+    if _firebase_initialized:
+        return True
+
+    if firebase_admin._apps:
+        _firebase_initialized = True
+        return True
+
+    service_account_path = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH')
+    service_account_json = os.getenv('FIREBASE_SERVICE_ACCOUNT_JSON')
+
+    try:
+        cred = None
+        if service_account_json:
+            try:
+                cred = credentials.Certificate(json.loads(service_account_json))
+            except Exception as json_exc:
+                logger.warning(f"FIREBASE_SERVICE_ACCOUNT_JSON invalide, tentative de fallback vers le fichier: {str(json_exc)}")
+
+        if cred is None and service_account_path and os.path.exists(service_account_path):
+            cred = credentials.Certificate(service_account_path)
+
+        if cred is None:
+            logger.warning("Firebase Admin non configuré: FIREBASE_SERVICE_ACCOUNT_PATH ou FIREBASE_SERVICE_ACCOUNT_JSON manquant")
+            return False
+
+        firebase_admin.initialize_app(cred)
+        _firebase_initialized = True
+        logger.info("Firebase Admin initialisé avec succès")
+        return True
+    except Exception as e:
+        logger.error(f"Erreur initialisation Firebase Admin: {str(e)}")
+        return False
 
 def init_database():
-    """Initialise la base de données SQLite"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
-    # Table des utilisateurs
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            name TEXT,
-            provider TEXT DEFAULT 'email',
-            google_id TEXT,
-            password_hash TEXT,
-            plan TEXT DEFAULT 'free',
-            phone TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP
-        )
-    ''')
-    
-    # Ajouter la colonne plan si elle n'existe pas (pour les bases existantes)
+    """Initialise la base PostgreSQL (Phase 2)."""
     try:
-        cursor.execute('ALTER TABLE users ADD COLUMN plan TEXT DEFAULT "free"')
-    except sqlite3.OperationalError:
-        pass  # La colonne existe déjà
-    
-    # Ajouter la colonne phone si elle n'existe pas
-    try:
-        cursor.execute('ALTER TABLE users ADD COLUMN phone TEXT')
-    except sqlite3.OperationalError:
-        pass  # La colonne existe déjà
-    
-    # Table pour les emails marketing
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS marketing_emails (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            name TEXT,
-            provider TEXT DEFAULT 'email',
-            source TEXT DEFAULT 'flexianalyse_signup',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_subscribed BOOLEAN DEFAULT 1
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    logger.info("Base de données initialisée")
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('CREATE EXTENSION IF NOT EXISTS pgcrypto')
+                cursor.execute('CREATE EXTENSION IF NOT EXISTS vector')
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        firebase_uid TEXT UNIQUE,
+                        email TEXT UNIQUE NOT NULL,
+                        name TEXT,
+                        provider TEXT DEFAULT 'email',
+                        phone TEXT,
+                        status TEXT DEFAULT 'active',
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ DEFAULT now(),
+                        last_login_at TIMESTAMPTZ
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS organizations (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        name TEXT NOT NULL,
+                        owner_user_id UUID REFERENCES users(id),
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS user_organizations (
+                        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+                        role TEXT NOT NULL DEFAULT 'member',
+                        joined_at TIMESTAMPTZ DEFAULT now(),
+                        PRIMARY KEY (user_id, organization_id)
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS plans (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+                        plan_code TEXT NOT NULL DEFAULT 'free',
+                        status TEXT NOT NULL DEFAULT 'active',
+                        started_at TIMESTAMPTZ DEFAULT now(),
+                        ends_at TIMESTAMPTZ,
+                        limits_json JSONB DEFAULT '{}'::jsonb
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS licenses (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+                        license_key TEXT NOT NULL,
+                        seats_total INT NOT NULL DEFAULT 1,
+                        seats_used INT NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'active',
+                        expires_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        UNIQUE (organization_id, license_key)
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS documents (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+                        uploaded_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                        file_name TEXT NOT NULL,
+                        mime_type TEXT,
+                        size_bytes BIGINT,
+                        s3_bucket TEXT,
+                        s3_key TEXT,
+                        etag TEXT,
+                        status TEXT DEFAULT 'uploaded',
+                        metadata JSONB DEFAULT '{}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        processed_at TIMESTAMPTZ
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    f'''
+                    CREATE TABLE IF NOT EXISTS document_chunks (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
+                        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+                        chunk_index INT NOT NULL,
+                        content TEXT NOT NULL,
+                        embedding vector({EMBEDDING_DIMENSION}) NOT NULL,
+                        metadata JSONB DEFAULT '{{}}'::jsonb,
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    '''
+                )
+
+                cursor.execute(
+                    '''
+                    CREATE TABLE IF NOT EXISTS marketing_emails (
+                        email TEXT PRIMARY KEY,
+                        name TEXT,
+                        provider TEXT DEFAULT 'email',
+                        source TEXT DEFAULT 'flexianalyse_signup',
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        is_subscribed BOOLEAN DEFAULT true
+                    )
+                    '''
+                )
+
+            conn.commit()
+
+        logger.info("PostgreSQL schema initialized successfully")
+    except Exception as e:
+        logger.error(f"Erreur initialisation base PostgreSQL: {str(e)}")
+        raise
 
 def create_jwt_token(user_data):
     """Crée un token JWT pour l'utilisateur"""
@@ -87,267 +302,230 @@ def verify_jwt_token(token):
     except jwt.InvalidTokenError:
         return None
 
+def verify_firebase_token(token):
+    """Vérifie un Firebase ID token."""
+    if not init_firebase_admin():
+        return None
+
+    try:
+        decoded_token = firebase_auth.verify_id_token(token)
+        return decoded_token
+    except Exception as e:
+        logger.warning(f"Token Firebase invalide: {str(e)}")
+        return None
+
+def get_or_create_firebase_user(firebase_payload):
+    """Récupère ou crée un utilisateur PostgreSQL à partir d'un token Firebase."""
+
+    email = firebase_payload.get('email')
+    firebase_uid = firebase_payload.get('uid')
+    name = firebase_payload.get('name') or (email.split('@')[0] if email else 'User')
+    provider = 'google' if any(identity.endswith('google.com') for identity in firebase_payload.get('firebase', {}).get('sign_in_provider', '').split(',')) else 'email'
+
+    if not email:
+        return None
+
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''
+                    SELECT id::text, email, name, provider, phone
+                    FROM users
+                    WHERE firebase_uid = %s OR email = %s
+                    LIMIT 1
+                    ''',
+                    (firebase_uid, email)
+                )
+                user = cursor.fetchone()
+
+                if user:
+                    user_id = user[0]
+                    cursor.execute(
+                        '''
+                        UPDATE users
+                        SET name = COALESCE(NULLIF(%s, ''), name),
+                            provider = COALESCE(NULLIF(%s, ''), provider),
+                            firebase_uid = COALESCE(NULLIF(%s, ''), firebase_uid),
+                            updated_at = now(),
+                            last_login_at = now()
+                        WHERE id = %s::uuid
+                        ''',
+                        (name, provider, firebase_uid, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        '''
+                        INSERT INTO users (email, name, provider, firebase_uid, created_at, updated_at, last_login_at)
+                        VALUES (%s, %s, %s, %s, now(), now(), now())
+                        RETURNING id::text
+                        ''',
+                        (email, name, provider, firebase_uid)
+                    )
+                    user_id = cursor.fetchone()[0]
+
+                cursor.execute(
+                    '''
+                    SELECT id::text, email, COALESCE(name, email), COALESCE(provider, %s), phone
+                    FROM users
+                    WHERE id = %s::uuid
+                    ''',
+                    (provider, user_id)
+                )
+                saved_user = cursor.fetchone()
+
+                if not saved_user:
+                    return None
+
+                organization_id, plan_code = _ensure_user_context(
+                    conn,
+                    saved_user[0],
+                    saved_user[1],
+                    saved_user[2],
+                )
+
+            conn.commit()
+
+        user_data = {
+            'id': saved_user[0],
+            'email': saved_user[1],
+            'name': saved_user[2] or saved_user[1].split('@')[0],
+            'provider': saved_user[3] or provider,
+            'plan': plan_code or 'free',
+            'phone': saved_user[4],
+            'firebase_uid': firebase_uid,
+            'organization_id': organization_id,
+        }
+
+        aws_persistence_service.persist_user_profile(user_data, firebase_payload)
+        return user_data
+    except Exception as exc:
+        logger.error(f"Erreur lors de la synchronisation utilisateur PostgreSQL: {str(exc)}")
+        return None
+
+def verify_auth_token(token):
+    """Vérifie un token Firebase puis JWT en fallback."""
+    firebase_payload = verify_firebase_token(token)
+    if firebase_payload:
+        user = get_or_create_firebase_user(firebase_payload)
+        if not user:
+            return None
+        return {
+            'auth_type': 'firebase',
+            'user': user,
+            'payload': firebase_payload,
+        }
+
+    jwt_payload = verify_jwt_token(token)
+    if jwt_payload:
+        return {
+            'auth_type': 'jwt',
+            'user': {
+                'id': jwt_payload['user_id'],
+                'email': jwt_payload['email'],
+                'name': jwt_payload['name'],
+            },
+            'payload': jwt_payload,
+        }
+
+    return None
+
 def save_marketing_email(email, name, provider):
     """Sauvegarde l'email pour le marketing"""
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR REPLACE INTO marketing_emails (email, name, provider, created_at)
-            VALUES (?, ?, ?, ?)
-        ''', (email, name, provider, datetime.utcnow()))
-        
-        conn.commit()
-        conn.close()
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''
+                    INSERT INTO marketing_emails (email, name, provider, created_at)
+                    VALUES (%s, %s, %s, now())
+                    ON CONFLICT (email)
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        provider = EXCLUDED.provider,
+                        created_at = now(),
+                        is_subscribed = true
+                    ''',
+                    (email, name, provider)
+                )
+            conn.commit()
         logger.info(f"Email sauvegardé pour marketing: {email}")
     except Exception as e:
         logger.error(f"Erreur sauvegarde email marketing: {str(e)}")
 
 def auth_login():
-    """Authentification par email/password"""
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    
-    if not email or not password:
-        return jsonify({'error': 'Email et mot de passe requis'}), 400
-    
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
-    user = cursor.fetchone()
-    
-    if user and user[5] and check_password_hash(user[5], password):
-        cursor.execute('UPDATE users SET last_login = ? WHERE id = ?', 
-                      (datetime.utcnow(), user[0]))
-        
-        # S'assurer que l'utilisateur a un plan
-        cursor.execute('UPDATE users SET plan = ? WHERE id = ? AND (plan IS NULL OR plan = "")', ('free', user[0]))
-        
-        conn.commit()
-        
-        # Récupérer le plan et le téléphone de l'utilisateur
-        cursor.execute('SELECT plan, phone FROM users WHERE id = ?', (user[0],))
-        plan_result = cursor.fetchone()
-        user_plan = plan_result[0] if plan_result and plan_result[0] else 'free'
-        user_phone = plan_result[1] if plan_result and len(plan_result) > 1 else None
-        
-        user_data = {
-            'id': user[0],
-            'email': user[1],
-            'name': user[2] or email.split('@')[0],
-            'provider': 'email',
-            'plan': user_plan,
-            'phone': user_phone
-        }
-        
-        token = create_jwt_token(user_data)
-        save_marketing_email(email, user_data['name'], 'email')
-        
-        conn.close()
-        
-        return jsonify({
-            'token': token,
-            'user': user_data
-        }), 200
-    
-    conn.close()
-    return jsonify({'error': 'Email ou mot de passe incorrect'}), 401
+    """Legacy endpoint disabled: Firebase Authentication is required."""
+    return jsonify({
+        'error': 'Deprecated endpoint. Use Firebase Authentication from frontend and call /auth/verify.'
+    }), 410
 
 def auth_register():
-    """Inscription par email/password"""
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    name = data.get('name', email.split('@')[0] if email else '')
-    
-    if not email or not password:
-        return jsonify({'error': 'Email et mot de passe requis'}), 400
-    
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
-    if cursor.fetchone():
-        conn.close()
-        return jsonify({'error': 'Un compte existe déjà avec cet email'}), 409
-    
-    password_hash = generate_password_hash(password)
-    phone = data.get('phone')
-    cursor.execute('''
-        INSERT INTO users (email, name, provider, password_hash, plan, phone, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (email, name, 'email', password_hash, 'free', phone, datetime.utcnow()))
-    
-    user_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    user_data = {
-        'id': user_id,
-        'email': email,
-        'name': name,
-        'provider': 'email',
-        'plan': 'free',
-        'phone': phone
-    }
-    
-    token = create_jwt_token(user_data)
-    save_marketing_email(email, name, 'email')
-    
+    """Legacy endpoint disabled: Firebase Authentication is required."""
     return jsonify({
-        'token': token,
-        'user': user_data
-    }), 201
+        'error': 'Deprecated endpoint. Registration is handled by Firebase Authentication.'
+    }), 410
 
 def auth_google():
-    """Authentification Google moderne avec token verification"""
-    logger.info("=== REQUÊTE GOOGLE REÇUE ===")
-    logger.info(f"Method: {request.method}")
-    logger.info(f"Headers: {dict(request.headers)}")
-    client_id = os.getenv('GOOGLE_CLIENT_ID')
-    if not client_id:
-        logger.error("GOOGLE_CLIENT_ID manquant")
-        return jsonify({'error': 'Google OAuth non configuré'}), 500
-    
-    data = request.get_json()
-    logger.info(f"Data reçue: {data}")
-    if not data:
-        return jsonify({'error': 'Token Google requis'}), 400
-        
-    google_token = data.get('token')
-    if not google_token:
-        return jsonify({'error': 'Token Google manquant'}), 400
-    
-    try:
-        # Vérifier le token avec Google
-        logger.info("Vérification du token Google...")
-        idinfo = id_token.verify_oauth2_token(
-            google_token, 
-            Request(), 
-            client_id
-        )
-        
-        # Extraire les informations utilisateur
-        google_id = idinfo["sub"]
-        email = idinfo["email"]
-        name = idinfo.get("name", email.split('@')[0])
-        
-        logger.info(f"Token Google valide pour: {email}")
-        
-        # Sauvegarder/récupérer l'utilisateur
-        logger.info("Ouverture de la connexion SQLite...")
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        logger.info("Connexion SQLite ouverte.")
-        
-        cursor.execute('SELECT * FROM users WHERE email = ? OR google_id = ?', (email, google_id))
-        user = cursor.fetchone()
-        logger.info(f"Utilisateur trouvé: {user}")
-        
-        if user:
-            # Utilisateur existant
-            cursor.execute('''
-                UPDATE users SET 
-                    last_login = ?, 
-                    google_id = ?, 
-                    name = COALESCE(NULLIF(?, ''), name)
-                WHERE id = ?
-            ''', (datetime.utcnow(), google_id, name, user[0]))
-            user_id = user[0]
-            final_name = user[2] or name
-        else:
-            # Nouvel utilisateur
-            cursor.execute('''
-                INSERT INTO users (email, name, provider, google_id, plan, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (email, name, 'google', google_id, 'free', datetime.utcnow(), datetime.utcnow()))
-            user_id = cursor.lastrowid
-            final_name = name
-        
-        # S'assurer que tous les utilisateurs ont un plan
-        cursor.execute('UPDATE users SET plan = ? WHERE id = ? AND (plan IS NULL OR plan = "")', ('free', user_id))
-        
-        conn.commit()
-        
-        # Récupérer le plan de l'utilisateur
-        cursor.execute('SELECT plan FROM users WHERE id = ?', (user_id,))
-        plan_result = cursor.fetchone()
-        user_plan = plan_result[0] if plan_result and plan_result[0] else 'free'
-        
-        conn.close()
-        
-        user_data = {
-            'id': user_id,
-            'email': email,
-            'name': final_name,
-            'provider': 'google',
-            'plan': user_plan
-        }
-        
-        token = create_jwt_token(user_data)
-        logger.info("Token JWT créé.")
-
-        save_marketing_email(email, final_name, 'google')
-        logger.info("Email marketing sauvegardé.")
-        
-        logger.info(f"Authentification Google réussie pour: {email}")
-        
-        return jsonify({
-            'success': True,
-            'token': token,
-            'user': user_data
-        }), 200
-        
-    except ValueError as e:
-        logger.error(f"Token Google invalide: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': 'Token Google invalide'
-        }), 400
-    except Exception as e:
-        logger.error(f"Erreur lors de l'authentification Google: {str(e)}", exc_info=True) 
-        return jsonify({
-            'success': False,
-            'error': 'Erreur lors de l\'authentification Google'
-        }), 500
+    """Legacy endpoint disabled: Firebase Authentication is required."""
+    return jsonify({
+        'error': 'Deprecated endpoint. Use Firebase Google Sign-In on frontend and send Firebase ID token to backend.'
+    }), 410
 
 def auth_verify():
-    """Vérification du token JWT"""
+
+    """Vérification du token Firebase ou JWT"""
     auth_header = request.headers.get('Authorization')
     if not auth_header or not auth_header.startswith('Bearer '):
         return jsonify({'error': 'Token manquant'}), 401
-    
+     
     token = auth_header.replace('Bearer ', '')
-    payload = verify_jwt_token(token)
-    
-    if not payload:
+    auth_result = verify_auth_token(token)
+
+    if not auth_result:
         return jsonify({'error': 'Token invalide'}), 401
-    
-    # Récupérer les informations complètes de l'utilisateur depuis la base de données
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT id, email, name, provider, plan, phone FROM users WHERE id = ?', (payload['user_id'],))
-    user = cursor.fetchone()
-    conn.close()
-    
-    if not user:
-        return jsonify({'error': 'Utilisateur non trouvé'}), 404
-    
-    # S'assurer que l'utilisateur a un plan
-    user_plan = user[4] if user[4] else 'free'
-    
-    return jsonify({'user': {
-        'id': user[0],
-        'email': user[1],
-        'name': user[2] or user[1].split('@')[0],
-        'provider': user[3] or 'email',
-        'plan': user_plan,
-        'phone': user[5]
-    }}), 200
+
+    if auth_result['auth_type'] == 'firebase':
+        return jsonify({'user': auth_result['user']}), 200
+
+    try:
+        with _get_pg_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    '''
+                    SELECT
+                        u.id::text,
+                        u.email,
+                        COALESCE(u.name, u.email),
+                        COALESCE(u.provider, 'email'),
+                        u.phone,
+                        COALESCE(p.plan_code, 'free')
+                    FROM users u
+                    LEFT JOIN user_organizations uo ON uo.user_id = u.id
+                    LEFT JOIN plans p
+                      ON p.organization_id = uo.organization_id
+                     AND p.status IN ('active', 'trialing')
+                    WHERE u.id::text = %s OR u.email = %s
+                    ORDER BY p.started_at DESC NULLS LAST
+                    LIMIT 1
+                    ''',
+                    (str(auth_result['payload'].get('user_id', '')), auth_result['payload'].get('email', ''))
+                )
+                user = cursor.fetchone()
+
+        if not user:
+            return jsonify({'error': 'Utilisateur non trouvé'}), 404
+
+        return jsonify({'user': {
+            'id': user[0],
+            'email': user[1],
+            'name': user[2] or user[1].split('@')[0],
+            'provider': user[3] or 'email',
+            'plan': user[5] or 'free',
+            'phone': user[4]
+        }}), 200
+    except Exception as exc:
+        logger.error(f"Erreur lecture utilisateur PostgreSQL: {str(exc)}")
+        return jsonify({'error': 'Erreur serveur'}), 500
 
 def marketing_subscribe():
     """Endpoint pour sauvegarder les emails marketing"""

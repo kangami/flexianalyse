@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../auth/AuthProvider';
 
@@ -9,17 +9,72 @@ interface SuggestedAction {
   sample_prompt: string;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  description?: string;
+  cost_tier?: string;
+  is_default?: boolean;
+}
+
+const MODEL_CACHE_KEY = 'ai_models_cache';
+const MODEL_CACHE_DURATION = 30 * 60 * 1000;
+
+const getModelLogo = (model: ModelInfo): string => {
+  const provider = model.provider?.toLowerCase() || '';
+  if (provider.includes('openai') || provider.includes('smart')) return 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/OpenAI_Logo.svg/512px-OpenAI_Logo.svg.png';
+  if (provider.includes('mistral')) return 'https://mistral.ai/favicon.ico';
+  if (provider.includes('local')) return 'https://ollama.com/favicon.ico';
+  return '';
+};
+
+const FALLBACK_MODELS: ModelInfo[] = [
+  { id: 'auto', name: 'Auto (recommended)', provider: 'Smart selector', is_default: true, cost_tier: 'smart' },
+  { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI', is_default: false, cost_tier: 'low' },
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI', is_default: false, cost_tier: 'high' },
+  { id: 'gpt-5', name: 'GPT-5', provider: 'OpenAI', is_default: false, cost_tier: 'premium' },
+  { id: 'gpt-5-mini', name: 'GPT-5 Mini', provider: 'OpenAI', is_default: false, cost_tier: 'premium' },
+  { id: 'mistral', name: 'Mistral Medium', provider: 'Mistral AI', is_default: false, cost_tier: 'medium' },
+  { id: 'llama3', name: 'Llama 3.2', provider: 'Local', is_default: false, cost_tier: 'free' },
+];
+
+const fetchAvailableModels = async (): Promise<ModelInfo[]> => {
+  try {
+    const cached = localStorage.getItem(MODEL_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Date.now() < parsed.expiry && parsed.data?.models) return parsed.data.models;
+    }
+  } catch {}
+  try {
+    const response = await fetch('https://flexianalyse.com/models');
+    if (response.ok) {
+      const data = await response.json();
+      const models: ModelInfo[] = [
+        { id: 'auto', name: 'Auto (recommended)', provider: 'Smart selector', is_default: true, cost_tier: 'smart' },
+        ...(Array.isArray(data.models) ? data.models : []),
+      ];
+      localStorage.setItem(MODEL_CACHE_KEY, JSON.stringify({ data: { models }, expiry: Date.now() + MODEL_CACHE_DURATION }));
+      return models;
+    }
+  } catch {}
+  return FALLBACK_MODELS;
+};
+
 interface QueryFormProps {
     isFileContentVisible: boolean;
     setIsFileContentVisible: (visible: boolean) => void;
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
     loading: boolean;
     selectedModel: string;
+    setSelectedModel: (model: string) => void;
     researchMode: 'online' | 'local';
     setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
     suggestedActions?: SuggestedAction[];
     onSuggestedActionClick?: (action: SuggestedAction) => void;
     language?: 'en' | 'fr' | 'es';
+    detectedDocType?: { type: string; label: string; confidence: number } | null;
 }
 
 const QueryForm: React.FC<QueryFormProps> = ({ 
@@ -28,20 +83,50 @@ const QueryForm: React.FC<QueryFormProps> = ({
     onQuerySubmit, 
     loading, 
     selectedModel,
+    setSelectedModel,
     researchMode, 
     setResearchMode,
     suggestedActions = [],
     onSuggestedActionClick,
-    language = 'en'
+    language = 'en',
+    detectedDocType = null
 }) => {
     const { t } = useLanguage();
     const { isAuthenticated } = useAuth();
     const [query, setQuery] = useState<string>('');
     const [isMobile, setIsMobile] = useState(false);
     const [alertMessage, setAlertMessage] = useState<string>('');
+    const [isModelPopupOpen, setIsModelPopupOpen] = useState(false);
+    const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+    const [isLoadingModels, setIsLoadingModels] = useState(false);
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const modelPopupRef = useRef<HTMLDivElement>(null);
+    const modelBadgeRef = useRef<HTMLDivElement>(null);
     
+    // Load available models on mount
+    useEffect(() => {
+      setIsLoadingModels(true);
+      fetchAvailableModels().then(models => {
+        setAvailableModels(models);
+        setIsLoadingModels(false);
+      });
+    }, []);
+
+    // Close model popup on outside click
+    useEffect(() => {
+      const handleClickOutside = (e: MouseEvent) => {
+        if (
+          modelPopupRef.current && !modelPopupRef.current.contains(e.target as Node) &&
+          modelBadgeRef.current && !modelBadgeRef.current.contains(e.target as Node)
+        ) {
+          setIsModelPopupOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
     // Faire disparaître automatiquement l'alerte après 5 secondes
     useEffect(() => {
       if (alertMessage) {
@@ -160,7 +245,7 @@ const QueryForm: React.FC<QueryFormProps> = ({
             </div>
           )}
           
-          {/* Panneau d'actions suggérées avec scroll horizontal */}
+          {/* Badge du type de document détecté + actions suggérées */}
           {suggestedActions.length > 0 && onSuggestedActionClick && (
             <div className="mb-2 pb-2 border-b border-gray-200">
               <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
@@ -202,15 +287,81 @@ const QueryForm: React.FC<QueryFormProps> = ({
           `}>
             {/* Left controls */}
             <div className="flex flex-wrap gap-2">
-              {/* Model badge */}
-              <span
-                className={`
-                  bg-gray-100 text-gray-700 rounded-full px-3 py-1 text-xs
-                  ${isMobile ? 'font-medium' : 'font-normal'}
-                `}
-              >
-                {selectedModel === 'auto' ? t('query.autoModel') : selectedModel}
-              </span>
+              {/* Model badge - clickable popup trigger */}
+              <div className="relative" ref={modelBadgeRef}>
+                <button
+                  onClick={() => setIsModelPopupOpen(prev => !prev)}
+                  className={`
+                    bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full px-3 py-1 text-xs
+                    flex items-center gap-1.5 transition-colors cursor-pointer
+                    ${isMobile ? 'font-medium' : 'font-normal'}
+                  `}
+                >
+                  <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  {selectedModel === 'auto' ? t('query.autoModel') : selectedModel}
+                  <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Model selection popup */}
+                {isModelPopupOpen && (
+                  <div
+                    ref={modelPopupRef}
+                    className="absolute bottom-full left-0 mb-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
+                  >
+                    <div className="px-3 py-2 border-b border-gray-100">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select Model</p>
+                    </div>
+                    {isLoadingModels ? (
+                      <div className="px-4 py-4 flex items-center gap-2">
+                        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-xs text-gray-500">Loading models...</span>
+                      </div>
+                    ) : (
+                      <div className="max-h-64 overflow-y-auto">
+                        {availableModels.map((model) => (
+                          <button
+                            key={model.id}
+                            onClick={() => {
+                              setSelectedModel(model.id);
+                              setIsModelPopupOpen(false);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 flex items-center gap-2.5 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 ${
+                              selectedModel === model.id ? 'bg-blue-50' : ''
+                            }`}
+                          >
+                            <img
+                              src={getModelLogo(model)}
+                              alt=""
+                              className="w-4 h-4 flex-shrink-0 object-contain"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-xs font-medium truncate ${
+                                selectedModel === model.id ? 'text-blue-700' : 'text-gray-800'
+                              }`}>
+                                {model.name}
+                                {model.id === 'gpt-5' && (
+                                  <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-700">Latest</span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-gray-400 truncate">{model.provider}</div>
+                            </div>
+                            {selectedModel === model.id && (
+                              <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* File toggle */}
               {!isFileContentVisible && (

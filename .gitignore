@@ -22,5 +22,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Variables d'environnement
 *.env
+.env
+.env.local
+.env.development
+.env.production
+
+# Clés et certificats
+*.pem
+*.key
+*.crt
+firebase-service-account.json
+*service-account*.json
+
+# Config
 *.conf

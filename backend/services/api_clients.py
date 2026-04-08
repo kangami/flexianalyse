@@ -25,10 +25,11 @@ def get_model_config(selected_model):
     return MODEL_CONFIG.get(selected_model, MODEL_CONFIG[DEFAULT_MODEL])
 
 
-def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_tokens_override=None):
+def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_tokens_override=None, conversation_history=None):
     """
     Enhanced OpenAI API call supporting both Chat Completions and Responses API
     max_tokens_override: override la limite de tokens de la config du modèle
+    conversation_history: Liste de messages au format [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
     """
     model_config = get_model_config(selected_model)
     model_id = model_config["model_id"]
@@ -92,9 +93,17 @@ def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_t
             # Standard models use Chat Completions API
             else:
                 max_tokens = max_tokens_override if max_tokens_override is not None else model_config.get("max_tokens", 500)
+                
+                # Construire la liste des messages avec l'historique si fourni
+                messages = []
+                if conversation_history and isinstance(conversation_history, list):
+                    messages.extend(conversation_history)
+                # Ajouter le message actuel
+                messages.append({"role": "user", "content": prompt})
+                
                 request_params = {
                     "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                     "temperature": 0.5,
                     "max_tokens": max_tokens
                 }
@@ -144,18 +153,26 @@ def call_openai_api(prompt, selected_model="gpt-3.5-turbo", max_retries=3, max_t
     raise RuntimeError("[OpenAI] Max retries exceeded")
 
 
-def stream_response(prompt, selected_model="gpt-3.5-turbo"):
+def stream_response(prompt, selected_model="gpt-3.5-turbo", conversation_history=None):
     """
     Génère une réponse en streaming pour n'importe quel modèle
+    conversation_history: Liste de messages au format [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
     """
     model_config = get_model_config(selected_model)
+    
+    # Construire la liste des messages avec l'historique si fourni
+    messages = []
+    if conversation_history and isinstance(conversation_history, list):
+        messages.extend(conversation_history)
+    # Ajouter le message actuel
+    messages.append({"role": "user", "content": prompt})
     
     try:
         if selected_model.lower() in ["gpt-3.5-turbo", "gpt-4o", "openai"]:
             model_id = model_config["model_id"]
             stream = openai_client.chat.completions.create(
                 model=model_id,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0.5,
                 max_tokens=model_config.get("max_tokens", 500),
                 stream=True
@@ -166,7 +183,17 @@ def stream_response(prompt, selected_model="gpt-3.5-turbo"):
             yield f"data: {json.dumps({'done': True})}\n\n"
         elif selected_model.lower() == "mistral":
             try:
-                response = call_mistral_api(prompt)
+                # Pour Mistral, intégrer l'historique dans le prompt si disponible
+                if conversation_history and isinstance(conversation_history, list):
+                    history_text = "\n\n".join([
+                        f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
+                        for msg in conversation_history
+                    ])
+                    full_prompt = f"{history_text}\n\nUser: {prompt}\n\nAssistant:"
+                else:
+                    full_prompt = prompt
+                
+                response = call_mistral_api(full_prompt)
                 words = response.split(' ')
                 for i in range(0, len(words), 3):
                     chunk = ' '.join(words[i:i+3])
@@ -178,9 +205,14 @@ def stream_response(prompt, selected_model="gpt-3.5-turbo"):
             except Exception as mistral_error:
                 logger.warning(f"Mistral failed: {str(mistral_error)}, falling back to GPT-3.5")
                 yield f"data: {json.dumps({'warning': 'Mistral indisponible, utilisation de GPT-3.5'})}\n\n"
+                # Utiliser l'historique pour le fallback aussi
+                fallback_messages = []
+                if conversation_history and isinstance(conversation_history, list):
+                    fallback_messages.extend(conversation_history)
+                fallback_messages.append({"role": "user", "content": prompt})
                 stream = openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=fallback_messages,
                     temperature=0.5,
                     max_tokens=500,
                     stream=True

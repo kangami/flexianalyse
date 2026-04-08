@@ -23,8 +23,7 @@ const SignUpModal: React.FC<SignUpModalProps> = ({ isOpen, onClose, onSwitchToLo
   const [isLoading, setIsLoading] = useState(false);
   const [signupError, setSignupError] = useState<string>('');
   const [isExiting, setIsExiting] = useState(false);
-  
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const { signup, error, clearError, isAuthenticated } = useAuth();
 
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -42,6 +41,12 @@ const SignUpModal: React.FC<SignUpModalProps> = ({ isOpen, onClose, onSwitchToLo
       setShowConfirmPassword(false);
     }
   }, [isOpen, isExiting]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      handleClose();
+    }
+  }, [isAuthenticated]);
 
   // Réinitialiser l'état de sortie quand le modal s'ouvre
   useEffect(() => {
@@ -96,30 +101,15 @@ const SignUpModal: React.FC<SignUpModalProps> = ({ isOpen, onClose, onSwitchToLo
 
     setIsLoading(true);
     setSignupError('');
+    clearError();
 
     try {
-      const response = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          name: formData.name,
-          phone: formData.phone || undefined
-        }),
+      await signup({
+        email: formData.email,
+        password: formData.password,
+        name: formData.name,
+        phone: formData.phone || undefined,
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Inscription réussie, connecter automatiquement l'utilisateur
-        localStorage.setItem('auth_token', data.token);
-        window.location.reload(); // Recharger pour mettre à jour l'état d'authentification
-      } else {
-        setSignupError(data.error || 'Registration failed. Please try again.');
-      }
     } catch (error) {
       console.error('Registration error:', error);
       setSignupError('An error occurred. Please try again.');
@@ -150,6 +140,7 @@ const SignUpModal: React.FC<SignUpModalProps> = ({ isOpen, onClose, onSwitchToLo
     setIsExiting(true);
     setTimeout(() => {
       setSignupError('');
+      clearError();
       setErrors({});
       setIsExiting(false);
       onClose();
@@ -191,9 +182,9 @@ const SignUpModal: React.FC<SignUpModalProps> = ({ isOpen, onClose, onSwitchToLo
           </button>
         </div>
 
-        {signupError && (
+        {(signupError || error) && (
           <div className="bg-red-50 text-red-700 p-3 rounded-lg mb-4 text-sm border border-red-200">
-            {signupError}
+            {signupError || error}
           </div>
         )}
 

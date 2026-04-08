@@ -21,6 +21,7 @@
     "clsx": "^2.1.1",
     "docx": "^9.3.0",
     "file-saver": "^2.0.5",
+    "firebase": "^11.10.0",
     "franc-min": "^6.2.0",
     "html-to-text": "^9.0.5",
     "langchain": "^0.3.24",

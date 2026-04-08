@@ -630,5 +630,17 @@
     {
         "file_name": "cv-mix/Blanc et Rouge Simple Enseignant Lettre de motivation.pdf",
         "description": "The file 'cv-mix/Blanc et Rouge Simple Enseignant Lettre de motivation.pdf' aims to provide guidance and tips on writing a cover letter for a teaching position. It explains the importance of a cover letter in expressing interest in a specific job, highlighting skills relevant to the position, and showcasing accomplishments. The document also emphasizes the need for clarity, professionalism, and enthusiasm in the cover letter. Additionally, it advises on proofreading the letter and providing contact information for potential employers. Overall, the purpose of this document is to assist individuals in crafting an effective cover letter for a teaching job application."
+    },
+    {
+        "file_name": "cv-mix/Blue Orange Clean Simple Lease Agreement A4 Document.pdf",
+        "description": "The file 'Blue Orange Clean Simple Lease Agreement A4 Document.pdf' aims to outline the terms and conditions of a lease agreement between a landlord (Lars Peeters) and a tenant (Yaris Petros) for a property located at 123 Anywhere St., Any City ST 12345. The purpose of this document is to clearly define the responsibilities of both parties, including rent payment, security deposit, utilities, property use, maintenance, entry by the landlord, termination clauses, and governing laws. It serves as a legal contract to protect the rights and obligations of both the landlord and the tenant throughout the duration of the lease agreement."
+    },
+    {
+        "file_name": "AI_Architecture_Proposition_Zetane.pdf",
+        "description": "The file 'AI_Architecture_Proposition_Zetane.pdf' aims to propose an architecture for automating the extraction of structured data from scanned aviation maintenance work orders. The purpose of the document is to outline the different layers of the proposed architecture, including Ingestion, OCR & Text Extraction, LLM Structured Extraction, Validation & Quality Assurance, and Feedback & Learning. It also describes the components and data flow of the system, detailing how documents are processed through a structured pipeline involving OCR engines, LLMs, and human review. Additionally, the document discusses tradeoffs such as OCR accuracy vs cost and local models vs cloud models, as well as failure modes and the use of AI tooling to accelerate development and improve structured data extraction."
+    },
+    {
+        "file_name": "cv-mix/CSP-KarimNgami (1).pdf",
+        "description": "The file 'cv-mix/CSP-KarimNgami (1).pdf' aims to showcase the professional experience and skills of Karim Gatien NGAMI as a Customer Service Representative. It highlights his ability to provide exceptional service, build loyal relationships, solve problems, and increase sales. The document includes details about his work experience at Manu Life and AlexPallet Inc, as well as his education background in Computer Engineering. It also mentions his proficiency in English and French languages, as well as his familiarity with customer service software such as Zendesk, Freshdesk, and Amazon Connect. Overall, the purpose of this document is to present Karim NGAMI as a qualified and skilled customer service professional."
     }
 ]

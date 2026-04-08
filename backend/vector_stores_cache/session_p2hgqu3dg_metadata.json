@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-01-04T16:31:28.736932",
+  "files_count": 1,
+  "chunks_count": 1,
+  "files_indexed": [
+    "scan2.pdf"
+  ],
+  "auto_actions": {
+    "domain": "document_generique",
+    "suggested_actions": [
+      {
+        "id": "summarize_all",
+        "title": "Résumer documents",
+        "description": "Génère un résumé global des documents",
+        "sample_prompt": "Fournis un résumé clair et structuré de tous les documents uploadés, en mettant en évidence les thèmes principaux et les informations importantes. Adapte le résumé au type de document : pour un CV, concentre-toi sur l'expérience professionnelle, les compétences et les réalisations ; pour un document financier, mentionne les montants et chiffres pertinents ; pour un contrat, mentionne les parties et dates importantes. Ne mentionne PAS d'informations qui ne sont pas présentes dans les documents (par exemple, ne mentionne pas d'informations financières si le document est un CV)."
+      },
+      {
+        "id": "extract_key_points",
+        "title": "Extraire points clés",
+        "description": "Liste les points clés et entités",
+        "sample_prompt": "Extrais les points clés, décisions importantes et entités nommées (personnes, entreprises, lieux) de tous les documents uploadés et organise-les en puces."
+      },
+      {
+        "id": "extract_structured",
+        "title": "Extraire données structurées",
+        "description": "Extrait toutes les données dans un format structuré",
+        "sample_prompt": "Extrait toutes les données structurées de ce document : parties, dates, montants, informations clés."
+      }
+    ]
+  },
+  "session_id": "p2hgqu3dg"
+}

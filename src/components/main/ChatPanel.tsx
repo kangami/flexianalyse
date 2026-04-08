@@ -29,6 +29,7 @@ interface ChatPanelProps {
   loading: boolean;
   onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
   selectedModel: string;
+  setSelectedModel?: (model: string) => void;
   researchMode: 'online' | 'local';
   setResearchMode: React.Dispatch<React.SetStateAction<'online' | 'local'>>;
   suggestedActions?: SuggestedAction[];
@@ -43,6 +44,7 @@ interface ChatPanelProps {
   isProcessingDrop?: boolean;
   isMobile?: boolean;
   onFileSelect?: (file: File, details: { content: string | ArrayBuffer; description: string }) => void;
+  detectedDocType?: { type: string; label: string; confidence: number } | null;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -50,6 +52,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   loading,
   onQuerySubmit,
   selectedModel,
+  setSelectedModel,
   researchMode,
   setResearchMode,
   suggestedActions = [],
@@ -63,7 +66,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   setIsFileContentVisible,
   isProcessingDrop = false,
   isMobile = false,
-  onFileSelect
+  onFileSelect,
+  detectedDocType = null
 }) => {
   const { theme, setTheme } = useTheme();
   const { language, setLanguage, t } = useLanguage();
@@ -190,6 +194,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           currentStatus={currentStatus}
           onQuerySubmit={handleQuerySubmitWithLanguage}
           selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
           researchMode={researchMode}
           setResearchMode={setResearchMode}
           suggestedActions={suggestedActions}
@@ -198,6 +203,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           setIsFileContentVisible={setIsFileContentVisible}
           isMobile={isMobile}
           onFileSelect={onFileSelect}
+          detectedDocType={detectedDocType}
         />
       </div>
     </div>
