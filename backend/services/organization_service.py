@@ -17,3 +17,17 @@ class OrganizationService:
         org = Organization(id=UUID(int=0), name=name)
         created = self._loc.organizations.create(org)
         return org_to_dict(created)
+
+    def update(self, org_id: str, name: str) -> dict | None:
+        org = self._loc.organizations.get_by_id(UUID(org_id))
+        if not org:
+            return None
+        existing = self._loc.organizations.get_by_name(name)
+        if existing and str(existing.id) != org_id:
+            raise ValueError(f"Organisation '{name}' already exists.")
+        org.name = name
+        updated = self._loc.organizations.update(org)
+        return org_to_dict(updated) if updated else None
+
+    def delete(self, org_id: str) -> bool:
+        return self._loc.organizations.soft_delete(UUID(org_id))

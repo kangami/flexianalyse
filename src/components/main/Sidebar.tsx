@@ -397,6 +397,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [orgMsg, setOrgMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [deptEditId, setDeptEditId] = useState<string | null>(null);
   const [deptEditName, setDeptEditName] = useState('');
+  const [orgEditId, setOrgEditId] = useState<string | null>(null);
+  const [orgEditName, setOrgEditName] = useState('');
 
   const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const flyoutRef = useRef<HTMLDivElement>(null);
@@ -1186,20 +1188,61 @@ const Sidebar: React.FC<SidebarProps> = ({
                       {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </div>
-                  <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Create Organisation</p>
-                    <input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Organisation name"
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
-                    <button onClick={async () => {
-                      if (!orgName) return;
-                      const r = await fetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
-                      const d = await r.json();
-                      if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:'Organisation created!',ok:true}); }
-                      else setOrgMsg({text:d.error||'Error',ok:false});
-                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors">
-                      <i className="bi bi-plus-lg mr-1"></i>Create
-                    </button>
+                  <hr className="border-gray-200" />
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Organisations</h4>
+                    <div className="flex gap-1 mb-2">
+                      <input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Organisation name"
+                        className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
+                      <button onClick={async () => {
+                        if (!orgName) return;
+                        const r = await fetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
+                        const d = await r.json();
+                        if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:'Organisation created!',ok:true}); }
+                        else setOrgMsg({text:d.error||'Error',ok:false});
+                      }} className="px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">
+                        <i className="bi bi-plus-lg"></i>
+                      </button>
+                    </div>
+                    {orgs.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">No organisations yet</p>
+                    ) : (
+                      <Paginator items={orgs}>
+                        {pageItems => (
+                          <div className="space-y-1">
+                            {pageItems.map(o => (
+                              orgEditId === o.id ? (
+                                <div key={o.id} className="flex items-center gap-1">
+                                  <input value={orgEditName} onChange={e => setOrgEditName(e.target.value)}
+                                    className="flex-1 text-xs border border-purple-300 rounded px-2 py-1" />
+                                  <button onClick={async () => {
+                                    const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgEditName}) });
+                                    const d = await r.json();
+                                    if (r.ok) { setOrgs(prev => prev.map(x => x.id === o.id ? {...x, name:orgEditName} : x)); setOrgEditId(null); setOrgMsg({text:'Organisation updated!',ok:true}); }
+                                    else setOrgMsg({text:d.error||'Update failed',ok:false});
+                                  }} className="text-green-600 hover:text-green-700 px-1"><i className="bi bi-check-lg text-xs"></i></button>
+                                  <button onClick={() => setOrgEditId(null)} className="text-gray-400 hover:text-gray-600 px-1"><i className="bi bi-x text-xs"></i></button>
+                                </div>
+                              ) : (
+                                <div key={o.id} className="flex items-center justify-between border border-gray-200 rounded px-2 py-1 group">
+                                  <span className="text-xs text-gray-700">{o.name}</span>
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => { setOrgEditId(o.id); setOrgEditName(o.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
+                                    <button onClick={async () => {
+                                      const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'DELETE' });
+                                      if (r.ok) { setOrgs(prev => prev.filter(x => x.id !== o.id)); if (selectedOrgId === o.id) setSelectedOrgId(''); setOrgMsg({text:'Organisation deleted',ok:true}); }
+                                      else setOrgMsg({text:'Delete failed',ok:false});
+                                    }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
+                                  </div>
+                                </div>
+                              )
+                            ))}
+                          </div>
+                        )}
+                      </Paginator>
+                    )}
                   </div>
+                  <hr className="border-gray-200" />
                   <div>
                     <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Departments</h4>
                     <div className="flex gap-1 mb-2">
@@ -1658,8 +1701,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="w-16 bg-gray-100 border-r border-gray-200 flex flex-col items-center py-4 h-full relative">
         {/* Logo */}
         <div className="mb-8">
-          <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-blue-500 rounded-lg flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-sm">F</span>
+          <div className="w-9 h-8  flex items-center justify-center  overflow-hidden">
+            <img src="/flexiAnalyseLogo_website.png" alt="FlexiAnalyse" className="w-full h-full object-contain" />
           </div>
         </div>
 
