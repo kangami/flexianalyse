@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import logging
 from config.settings import configure_app
 from routes import register_routes
+from controllers import init_app
 
 load_dotenv()
 
@@ -26,6 +27,9 @@ def create_app():
     
     # Enregistrement des routes
     register_routes(app)
+    
+    # Initialisation DB + ServiceLocator
+    init_app()
     
     return app
 

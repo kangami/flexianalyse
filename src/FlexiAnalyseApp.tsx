@@ -16,12 +16,6 @@ import InsertTextModal from "./components/main/InsertTextModal";
 
 import mammoth from 'mammoth';
 
-import * as pdfjslib from 'pdfjs-dist/legacy/build/pdf';
-
-import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker?url';
-
-import { franc } from 'franc-min';
-
 import { useAuth } from './components/auth/AuthProvider';
 
 import { useTheme } from './contexts/ThemeContext';
@@ -71,10 +65,6 @@ interface SuggestedAction {
   sample_prompt: string;
 
 }
-
-
-
-pdfjslib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 
 
@@ -504,1493 +494,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
   
 
-  const apiUrl = 'https://flexianalyse.com'; // 'https://flexianalyse.com' 'http://127.0.0.1:5000';
+  const apiUrl = 'http://127.0.0.1:5000'; // 'https://flexianalyse.com' 'http://127.0.0.1:5000';
 
 
 
-  // Interface pour une page de document
+      // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
 
-  interface DocumentPage {
-
-    pageNumber: number;
-
-    content: string;
-
-    wordCount: number;
-
-    charCount: number;
-
-    images?: Array<{
-
-      id: string;
-
-      contentType: string;
-
-      dataUri?: string;
-
-      description?: string;
-
-      positionInPage?: string; // "top", "middle", "bottom"
-
-    }>;
-
-    hasImages: boolean;
-
-    startPosition: number; // Position dans le texte complet
-
-    endPosition: number;
-
-  }
-
-
-
-  // Interface pour le résultat d'extraction DOCX structuré
-
-  interface DocxExtractionResult {
-
-    text: string;
-
-    pages?: DocumentPage[];
-
-    images?: Array<{
-
-      id: string;
-
-      contentType: string;
-
-      dataUri?: string;
-
-      description?: string;
-
-      pageNumber?: number; // Page où se trouve l'image
-
-    }>;
-
-    hasImages: boolean;
-
-    metadata?: {
-
-      fileSize: number;
-
-      wordCount?: number;
-
-      pageCount?: number;
-
-      hasScannedContent?: boolean;
-
-      averageWordsPerPage?: number;
-
-    };
-
-  }
-
-
-
-  // Fonction améliorée d'extraction de texte DOCX avec support pour gros fichiers et images
-
-  const extractTextFromDocx = async (
-
-    content: ArrayBuffer,
-
-    onProgress?: (progress: { current: number; total: number; message: string }) => void
-
-  ): Promise<DocxExtractionResult> => {
+  const generateFileSummaryWithStreaming = useCallback(async (file: File, _content: string | ArrayBuffer) => {
 
     try {
 
-      if (content.byteLength === 0) {
-
-        console.error('Error: DOCX file is empty');
-
-        return {
-
-          text: 'Error: Le fichier DOCX est vide ou corrompu.',
-
-          hasImages: false
-
-        };
-
-      }
-
-
-
-      const fileSize = content.byteLength;
-
-      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-
-      const isLargeFile = fileSize > 5 * 1024 * 1024; // > 5MB
-
-
-
-      onProgress?.({ current: 0, total: 100, message: `Analyse du fichier DOCX (${fileSizeMB} MB)...` });
-
-
-
-      // Pour les gros fichiers, utiliser une stratégie de traitement optimisée
-
-      if (isLargeFile) {
-
-        console.log(`📄 Traitement d'un gros fichier DOCX (${fileSizeMB} MB), extraction optimisée...`);
-
-        onProgress?.({ current: 10, total: 100, message: 'Extraction du texte (fichier volumineux)...' });
-
-      }
-
-
-
-      // Extraction du texte avec mammoth (optimisé pour gros fichiers)
-
-      // Utiliser extractRawText pour la performance sur gros fichiers
-
-      const textOptions = {
-
-        arrayBuffer: content,
-
-        // Options pour améliorer la performance sur gros fichiers
-
-        styleMap: [
-
-          // Ignorer certains styles pour accélérer l'extraction
-
-        ],
-
-        includeEmbeddedStyleMap: false, // Ne pas inclure les styles embed pour la performance
-
-        includeDefaultStyleMap: false
-
-      };
-
-
-
-      const textResult = await mammoth.extractRawText(textOptions);
-
-      
-
-      onProgress?.({ current: 50, total: 100, message: 'Texte extrait, recherche d\'images...' });
-
-
-
-      if (!textResult || !textResult.value) {
-
-        return {
-
-          text: 'Le fichier DOCX ne contient pas de texte extractible.',
-
-          hasImages: false,
-
-          metadata: { fileSize }
-
-        };
-
-      }
-
-
-
-      let extractedText = textResult.value;
-
-      const wordCount = extractedText.trim().split(/\s+/).filter(w => w.length > 0).length;
-
-
-
-      // Détecter si le texte semble être issu d'un scan (peu de texte, beaucoup de caractères spéciaux)
-
-      const hasScannedContent = wordCount < 100 && fileSize > 2 * 1024 * 1024;
-
-
-
-      // Extraction du contenu structuré par pages
-
-      onProgress?.({ current: 55, total: 100, message: 'Analyse de la structure des pages...' });
-
-      
-
-      let pages: DocumentPage[] = [];
-
-      try {
-
-        // Division du texte en pages basée sur:
-
-        // 1. Les sauts de page explicites (paragraphes courts entre longs paragraphes)
-
-        // 2. Une estimation basée sur le nombre de mots (~500 mots par page)
-
-        // Les sauts de page peuvent être représentés par <p style="page-break-before:always">
-
-        // ou des divs avec des classes spécifiques
-
-        
-
-        // Diviser le texte en pages basées sur:
-
-        // 1. Les sauts de page explicites (si présents)
-
-        // 2. Les sections logiques (paragraphes vides multiples)
-
-        // 3. Une estimation basée sur le nombre de mots (fallback)
-
-        
-
-        const paragraphs = extractedText.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-
-        const wordsPerPage = 500; // Estimation moyenne: ~500 mots par page
-
-        const currentPage: DocumentPage[] = [];
-
-        let currentPageContent: string[] = [];
-
-        let currentPageWords = 0;
-
-        let currentPageNumber = 1;
-
-        let globalPosition = 0;
-
-        
-
-        for (let i = 0; i < paragraphs.length; i++) {
-
-          const paragraph = paragraphs[i];
-
-          const paragraphWords = paragraph.trim().split(/\s+/).filter(w => w.length > 0).length;
-
-          const paragraphStartPos = globalPosition;
-
-          globalPosition += paragraph.length + 2; // +2 pour les sauts de ligne
-
-          
-
-          // Détecter les sauts de page explicites (paragraphe très court suivi d'un paragraphe long)
-
-          // ou si on dépasse la limite de mots par page
-
-          const shouldStartNewPage = 
-
-            (currentPageWords > 0 && currentPageWords + paragraphWords > wordsPerPage) ||
-
-            (paragraph.trim().length < 50 && i < paragraphs.length - 1 && paragraphs[i + 1]?.trim().length > 200);
-
-          
-
-          if (shouldStartNewPage && currentPageContent.length > 0) {
-
-            // Finaliser la page actuelle
-
-            const pageContent = currentPageContent.join('\n\n');
-
-            const pageWordCount = pageContent.trim().split(/\s+/).filter(w => w.length > 0).length;
-
-            
-
-            currentPage.push({
-
-              pageNumber: currentPageNumber,
-
-              content: pageContent,
-
-              wordCount: pageWordCount,
-
-              charCount: pageContent.length,
-
-              hasImages: false,
-
-              startPosition: paragraphStartPos - pageContent.length,
-
-              endPosition: paragraphStartPos
-
-            });
-
-            
-
-            // Démarrer une nouvelle page
-
-            currentPageNumber++;
-
-            currentPageContent = [];
-
-            currentPageWords = 0;
-
-          }
-
-          
-
-          currentPageContent.push(paragraph);
-
-          currentPageWords += paragraphWords;
-
-        }
-
-        
-
-        // Ajouter la dernière page
-
-        if (currentPageContent.length > 0) {
-
-          const pageContent = currentPageContent.join('\n\n');
-
-          const pageWordCount = pageContent.trim().split(/\s+/).filter(w => w.length > 0).length;
-
-          
-
-          currentPage.push({
-
-            pageNumber: currentPageNumber,
-
-            content: pageContent,
-
-            wordCount: pageWordCount,
-
-            charCount: pageContent.length,
-
-            hasImages: false,
-
-            startPosition: globalPosition - pageContent.length,
-
-            endPosition: globalPosition
-
-          });
-
-        }
-
-        
-
-        pages = currentPage;
-
-        
-
-        // Si aucune page n'a été créée (document très court), créer une page unique
-
-        if (pages.length === 0 && extractedText.trim().length > 0) {
-
-          pages = [{
-
-            pageNumber: 1,
-
-            content: extractedText,
-
-            wordCount: wordCount,
-
-            charCount: extractedText.length,
-
-            hasImages: false,
-
-            startPosition: 0,
-
-            endPosition: extractedText.length
-
-          }];
-
-        }
-
-        
-
-        console.log(`📄 Document divisé en ${pages.length} page(s) détectée(s)`);
-
-        onProgress?.({ current: 60, total: 100, message: `${pages.length} page(s) détectée(s)` });
-
-      } catch (pageError) {
-
-        console.warn('Erreur lors de la division en pages (non bloquant):', pageError);
-
-        // En cas d'erreur, créer une page unique avec tout le contenu
-
-        pages = [{
-
-          pageNumber: 1,
-
-          content: extractedText,
-
-          wordCount: wordCount,
-
-          charCount: extractedText.length,
-
-          hasImages: false,
-
-          startPosition: 0,
-
-          endPosition: extractedText.length
-
-        }];
-
-      }
-
-
-
-      // Extraction des images avec mammoth (convertToHtml pour obtenir les images)
-
-      const imageOptions = {
-
-        arrayBuffer: content,
-
-        convertImage: mammoth.images.imgElement(async (image) => {
-
-          // Fonction pour traiter les images - retourner une description pour l'indexation
-
-          try {
-
-            const imageBuffer: any = await image.read('base64');
-
-            let base64: string;
-
-            let contentType = 'image/png';
-
-            
-
-            if (typeof imageBuffer === 'string') {
-
-              base64 = imageBuffer;
-
-            } else if (imageBuffer && typeof imageBuffer === 'object') {
-
-              base64 = imageBuffer.data ? imageBuffer.data.toString('base64') : String(imageBuffer);
-
-              contentType = imageBuffer.contentType || 'image/png';
-
-            } else {
-
-              base64 = String(imageBuffer);
-
-            }
-
-            
-
-            return {
-
-              src: `data:${contentType};base64,${base64}`,
-
-              alt: `Image extraite du document`
-
-            };
-
-          } catch (err) {
-
-            console.warn('Erreur lors de la lecture de l\'image:', err);
-
-            return {
-
-              src: '',
-
-              alt: 'Image non disponible'
-
-            };
-
-          }
-
-        })
-
-      };
-
-
-
-      let images: DocxExtractionResult['images'] = [];
-
-      let hasImages = false;
-
-
-
-      try {
-
-        // Essayer d'extraire les images (peut échouer si pas d'images ou fichier trop gros)
-
-        if (!isLargeFile || fileSize < 20 * 1024 * 1024) { // Limiter à 20MB pour l'extraction d'images
-
-          const htmlResult = await mammoth.convertToHtml(imageOptions);
-
-          
-
-          // Parser le HTML pour extraire les images
-
-          const parser = new DOMParser();
-
-          const doc = parser.parseFromString(htmlResult.value, 'text/html');
-
-          const imgElements = doc.querySelectorAll('img');
-
-          
-
-          if (imgElements.length > 0) {
-
-            hasImages = true;
-
-            images = Array.from(imgElements).map((img, index) => {
-
-              // Essayer de déterminer la page où se trouve l'image
-
-              // En analysant la position de l'élément img dans le HTML
-
-              let imagePageNumber: number | undefined = undefined;
-
-              
-
-              // Chercher dans quelle section/paragraphe se trouve l'image
-
-              let currentElement: Element | null = img.parentElement;
-
-              let textBeforeImage = '';
-
-              while (currentElement && currentElement !== doc.body) {
-
-                const siblings = Array.from(currentElement.parentElement?.children || []);
-
-                const imageIndex = siblings.indexOf(currentElement);
-
-                for (let i = 0; i < imageIndex; i++) {
-
-                  textBeforeImage += siblings[i].textContent || '';
-
-                }
-
-                currentElement = currentElement.parentElement;
-
-              }
-
-              
-
-              // Déterminer la page basée sur la position du texte avant l'image
-
-              const charPositionBeforeImage = textBeforeImage.length;
-
-              if (pages.length > 0) {
-
-                for (const page of pages) {
-
-                  if (charPositionBeforeImage >= page.startPosition && charPositionBeforeImage <= page.endPosition) {
-
-                    imagePageNumber = page.pageNumber;
-
-                    // Ajouter l'image à la page
-
-                    if (!page.images) {
-
-                      page.images = [];
-
-                    }
-
-                    page.images.push({
-
-                      id: `img_${index}`,
-
-                      contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
-
-                      dataUri: img.src,
-
-                      description: img.alt || `Image ${index + 1} du document`,
-
-                      positionInPage: 'middle' // Approximation
-
-                    });
-
-                    page.hasImages = true;
-
-                    break;
-
-                  }
-
-                }
-
-              }
-
-              
-
-              // Si pas de correspondance trouvée, attribuer à la première page
-
-              if (imagePageNumber === undefined && pages.length > 0) {
-
-                imagePageNumber = 1;
-
-                if (!pages[0].images) {
-
-                  pages[0].images = [];
-
-                }
-
-                pages[0].images.push({
-
-                  id: `img_${index}`,
-
-                  contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
-
-                  dataUri: img.src,
-
-                  description: img.alt || `Image ${index + 1} du document`,
-
-                  positionInPage: 'middle'
-
-                });
-
-                pages[0].hasImages = true;
-
-              }
-
-              
-
-              return {
-
-                id: `img_${index}`,
-
-                contentType: (img.src.match(/data:([^;]+)/)?.[1]) || 'image/png',
-
-                dataUri: img.src,
-
-                description: img.alt || `Image ${index + 1} du document`,
-
-                pageNumber: imagePageNumber
-
-              };
-
-            });
-
-
-
-            // Ajouter des références aux images dans le texte pour l'indexation
-
-            const imagesByPage = images.reduce((acc, img) => {
-
-              const page = img.pageNumber || 1;
-
-              if (!acc[page]) acc[page] = [];
-
-              acc[page].push(img);
-
-              return acc;
-
-            }, {} as Record<number, typeof images>);
-
-            
-
-            const imageReferences = Object.entries(imagesByPage)
-
-              .map(([page, imgs]) => `Page ${page}: ${imgs.length} image(s)`)
-
-              .join(', ');
-
-            extractedText += `\n\n[Ce document contient ${images.length} image(s): ${imageReferences}]`;
-
-          }
-
-
-
-          onProgress?.({ current: 80, total: 100, message: hasImages ? `${images.length} image(s) trouvée(s)` : 'Aucune image trouvée' });
-
-        } else {
-
-          // Pour les très gros fichiers, détecter simplement la présence d'images
-
-          // sans les extraire complètement (économise la mémoire)
-
-          const htmlPreview = await mammoth.convertToHtml({ 
-
-            arrayBuffer: content.slice(0, 1024 * 1024) // Échantillon de 1MB pour détection
-
-          });
-
-          hasImages = htmlPreview.value.includes('<img') || htmlPreview.value.includes('image');
-
-          if (hasImages) {
-
-            extractedText += '\n\n[Ce document contient des images (non indexées - fichier trop volumineux).]';
-
-          }
-
-          onProgress?.({ current: 75, total: 100, message: hasImages ? 'Images détectées (non extraites)' : 'Analyse terminée' });
-
-        }
-
-      } catch (imageError) {
-
-        console.warn('Erreur lors de l\'extraction des images (non bloquant):', imageError);
-
-        // Ne pas bloquer si l'extraction d'images échoue
-
-      }
-
-
-
-      onProgress?.({ current: 100, total: 100, message: 'Extraction terminée' });
-
-
-
-      // Calculer les statistiques moyennes par page
-
-      const averageWordsPerPage = pages.length > 0 
-
-        ? Math.round(pages.reduce((sum, page) => sum + page.wordCount, 0) / pages.length)
-
-        : undefined;
-
-
-
-      return {
-
-        text: extractedText.trim() || 'Aucun texte extractible trouvé.',
-
-        pages: pages.length > 0 ? pages : undefined,
-
-        images: images.length > 0 ? images : undefined,
-
-        hasImages,
-
-        metadata: {
-
-          fileSize,
-
-          wordCount,
-
-          pageCount: pages.length,
-
-          hasScannedContent,
-
-          averageWordsPerPage
-
-        }
-
-      };
-
-    } catch (error) {
-
-      console.error('Error extracting text from .docx:', error);
-
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-      
-
-      if (errorMessage.includes('Corrupted zip') || errorMessage.includes('data length = 0')) {
-
-        return {
-
-          text: 'Error: Le fichier DOCX est corrompu ou invalide. Veuillez vérifier le fichier.',
-
-          hasImages: false
-
-        };
-
-      }
-
-      
-
-      return {
-
-        text: `Error extracting text from .docx: ${errorMessage}`,
-
-        hasImages: false
-
-      };
-
-    }
-
-  };
-
-
-
-  // Fonction wrapper pour compatibilité (retourne juste le texte)
-
-  const extractTextFromDocxSimple = async (content: ArrayBuffer): Promise<string> => {
-
-    const result = await extractTextFromDocx(content);
-
-    return result.text;
-
-  };
-
-
-
-  // Interface pour le résultat d'extraction PDF structuré (similaire à DOCX)
-
-  interface PdfExtractionResult {
-
-    text: string;
-
-    pages?: DocumentPage[];
-
-    images?: Array<{
-
-      id: string;
-
-      contentType: string;
-
-      dataUri?: string;
-
-      description?: string;
-
-      pageNumber?: number;
-
-    }>;
-
-    hasImages: boolean;
-
-    metadata?: {
-
-      fileSize: number;
-
-      wordCount?: number;
-
-      pageCount?: number;
-
-      hasScannedContent?: boolean;
-
-      scannedPages?: number[]; // Numéros des pages scannées
-
-      invoicePages?: number[]; // Numéros des pages qui semblent être des factures
-
-      averageWordsPerPage?: number;
-
-    };
-
-  }
-
-
-
-  // Fonction améliorée d'extraction de texte PDF avec support pour gros fichiers, images et tracking par page
-
-  const extractTextFromPdf = async (
-
-    arrayBuffer: ArrayBuffer,
-
-    onProgress?: (progress: { current: number; total: number; message: string }) => void
-
-  ): Promise<PdfExtractionResult> => {
-
-    try {
-
-      const fileSize = arrayBuffer.byteLength;
-
-      const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(2);
-
-      const isLargeFile = fileSize > 5 * 1024 * 1024; // > 5MB
-
-
-
-      onProgress?.({ current: 0, total: 100, message: `Analyse du fichier PDF (${fileSizeMB} MB)...` });
-
-
-
-      if (isLargeFile) {
-
-        console.log(`📄 Traitement d'un gros fichier PDF (${fileSizeMB} MB), extraction optimisée...`);
-
-        onProgress?.({ current: 5, total: 100, message: 'Chargement du PDF (fichier volumineux)...' });
-
-      }
-
-
-
-      const bufferCopy = arrayBuffer.slice(0);
-
-      const pdf = await pdfjslib.getDocument({ 
-
-        data: bufferCopy,
-
-        // Options pour améliorer la performance sur gros fichiers
-
-        verbosity: 0, // Réduire les logs
-
-        stopAtErrors: false,
-
-        maxImageSize: 1024 * 1024 * 10, // Limiter la taille des images à 10MB
-
-      }).promise;
-
-
-
-      const totalPages = pdf.numPages;
-
-      console.log(`📄 PDF chargé: ${totalPages} page(s)`);
-
-      onProgress?.({ current: 10, total: 100, message: `PDF chargé: ${totalPages} page(s) détectée(s)` });
-
-
-
-      let fullText = '';
-
-      const pages: DocumentPage[] = [];
-
-      const images: PdfExtractionResult['images'] = [];
-
-      const scannedPages: number[] = [];
-
-      const invoicePages: number[] = [];
-
-      let totalWordCount = 0;
-
-
-
-      // Traiter chaque page
-
-      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-
-        const progressPercent = 10 + Math.round((pageNum / totalPages) * 75);
-
-        onProgress?.({ 
-
-          current: progressPercent, 
-
-          total: 100, 
-
-          message: `Traitement de la page ${pageNum}/${totalPages}...` 
-
-        });
-
-
-
-        try {
-
-          const page = await pdf.getPage(pageNum);
-
-          
-
-          // 1. Extraire le texte de la page
-
-          const textContent = await page.getTextContent();
-
-          const pageText = textContent.items.map((item: any) => item.str).join(' ').trim();
-
-          const pageWordCount = pageText.split(/\s+/).filter(w => w.length > 0).length;
-
-          totalWordCount += pageWordCount;
-
-
-
-          // 2. Détecter les images dans la page
-
-          let pageHasImages = false;
-
-          const pageImages: Array<{ id: string; dataUri: string; contentType: string; description: string }> = [];
-
-
-
-          try {
-
-            // Utiliser getOperatorList pour détecter les opérateurs d'images
-
-            const operatorList = await page.getOperatorList();
-
-            const hasImageOps = operatorList.fnArray.some((fn: number) => {
-
-              // Opérateurs PDF pour les images: Do, BI, ID, EI
-
-              // OPS constants: paintXObject (Do), paintInlineImageXObject (BI/ID/EI)
-
-              return fn === pdfjslib.OPS.paintImageXObject || 
-
-                     fn === pdfjslib.OPS.paintXObject ||
-
-                     fn === pdfjslib.OPS.paintInlineImageXObject;
-
-            });
-
-
-
-            if (hasImageOps) {
-
-              pageHasImages = true;
-
-              
-
-              // Essayer d'extraire les images en rendant la page en canvas
-
-              if (!isLargeFile || pageNum <= 5) { // Limiter l'extraction d'images pour gros fichiers
-
-                try {
-
-                  const viewport = page.getViewport({ scale: 2.0 });
-
-                  const canvas = document.createElement('canvas');
-
-                  const context = canvas.getContext('2d');
-
-                  
-
-                  if (context) {
-
-                    canvas.width = viewport.width;
-
-                    canvas.height = viewport.height;
-
-                    
-
-                    await page.render({
-
-                      canvasContext: context,
-
-                      viewport: viewport
-
-                    }).promise;
-
-                    
-
-                    // Convertir le canvas en image
-
-                    const imageDataUri = canvas.toDataURL('image/png');
-
-                    pageImages.push({
-
-                      id: `pdf_img_page${pageNum}_1`,
-
-                      dataUri: imageDataUri,
-
-                      contentType: 'image/png',
-
-                      description: `Image extraite de la page ${pageNum} du PDF`
-
-                    });
-
-                  }
-
-                } catch (imgError) {
-
-                  console.warn(`Erreur lors de l'extraction d'image de la page ${pageNum}:`, imgError);
-
-                  // Continuer même si l'extraction d'image échoue
-
-                }
-
-              }
-
-            }
-
-          } catch (imgDetectError) {
-
-            console.warn(`Erreur lors de la détection d'images page ${pageNum}:`, imgDetectError);
-
-          }
-
-
-
-          // 3. Détecter si la page est scannée (peu de texte mais présence d'images ou grande taille)
-
-          const isScannedPage = pageWordCount < 50 && (pageHasImages || fileSize / totalPages > 200 * 1024);
-
-
-
-          // 4. Détecter si la page semble être une facture
-
-          const isInvoicePage = (() => {
-
-            if (pageWordCount < 20 && pageHasImages) return false; // Trop peu de texte
-
-            const textLower = pageText.toLowerCase();
-
-            const invoiceKeywords = ['facture', 'invoice', 'bill', 'montant', 'total', 'tva', 'tax', 
-
-                                     'date', 'client', 'customer', 'numero', 'number', 'due', 'échéance',
-
-                                     'amount', 'subtotal', 'reçu', 'receipt', 'payment', 'paiement'];
-
-            const matches = invoiceKeywords.filter(keyword => textLower.includes(keyword)).length;
-
-            return matches >= 3 || (matches >= 2 && pageHasImages);
-
-          })();
-
-
-
-          if (isScannedPage) {
-
-            scannedPages.push(pageNum);
-
-          }
-
-          if (isInvoicePage) {
-
-            invoicePages.push(pageNum);
-
-          }
-
-
-
-          // 5. Ajouter les images de la page à la liste globale
-
-          if (pageImages.length > 0) {
-
-            images.push(...pageImages.map(img => ({
-
-              ...img,
-
-              pageNumber: pageNum
-
-            })));
-
-          }
-
-
-
-          // 6. Construire l'objet page
-
-          const pageObj: DocumentPage = {
-
-            pageNumber: pageNum,
-
-            content: pageText || `[Page ${pageNum} - Contenu non extractible ou scanné]`,
-
-            wordCount: pageWordCount,
-
-            charCount: pageText.length,
-
-            hasImages: pageHasImages,
-
-            images: pageImages.length > 0 ? pageImages.map(img => ({
-
-              id: img.id,
-
-              contentType: img.contentType,
-
-              dataUri: img.dataUri,
-
-              description: img.description,
-
-              positionInPage: 'middle' // Approximation
-
-            })) : undefined,
-
-            startPosition: fullText.length,
-
-            endPosition: fullText.length + pageText.length
-
-          };
-
-
-
-          pages.push(pageObj);
-
-          fullText += pageText + '\n\n';
-
-
-
-          // Pour les gros fichiers, faire une pause toutes les 10 pages pour éviter de bloquer le UI
-
-          if (isLargeFile && pageNum % 10 === 0) {
-
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-          }
-
-
-
-        } catch (pageError) {
-
-          console.error(`Erreur lors du traitement de la page ${pageNum}:`, pageError);
-
-          // Créer une page avec message d'erreur
-
-          pages.push({
-
-            pageNumber: pageNum,
-
-            content: `[Erreur lors de l'extraction de la page ${pageNum}]`,
-
-            wordCount: 0,
-
-            charCount: 0,
-
-            hasImages: false,
-
-            startPosition: fullText.length,
-
-            endPosition: fullText.length
-
-          });
-
-        }
-
-      }
-
-
-
-      onProgress?.({ current: 90, total: 100, message: 'Analyse terminée, compilation des résultats...' });
-
-
-
-      // Statistiques finales
-
-      const hasScannedContent = scannedPages.length > 0;
-
-      const averageWordsPerPage = pages.length > 0 ? Math.round(totalWordCount / pages.length) : 0;
-
-
-
-      // Ajouter des informations sur les pages scannées et factures dans le texte
-
-      if (scannedPages.length > 0) {
-
-        fullText += `\n\n[Note: ${scannedPages.length} page(s) scannée(s) détectée(s): ${scannedPages.join(', ')}]`;
-
-      }
-
-      if (invoicePages.length > 0) {
-
-        fullText += `\n\n[Note: ${invoicePages.length} page(s) de facture(s) détectée(s): ${invoicePages.join(', ')}]`;
-
-      }
-
-      if (images.length > 0) {
-
-        fullText += `\n\n[Ce document contient ${images.length} image(s) extraite(s).]`;
-
-      }
-
-
-
-      onProgress?.({ current: 100, total: 100, message: 'Extraction terminée' });
-
-
-
-      return {
-
-        text: fullText.trim() || 'Aucun texte extractible trouvé.',
-
-        pages: pages.length > 0 ? pages : undefined,
-
-        images: images.length > 0 ? images : undefined,
-
-        hasImages: images.length > 0,
-
-        metadata: {
-
-          fileSize,
-
-          wordCount: totalWordCount,
-
-          pageCount: totalPages,
-
-          hasScannedContent,
-
-          scannedPages: scannedPages.length > 0 ? scannedPages : undefined,
-
-          invoicePages: invoicePages.length > 0 ? invoicePages : undefined,
-
-          averageWordsPerPage
-
-        }
-
-      };
-
-    } catch (error) {
-
-      console.error('Error extracting text from PDF:', error);
-
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-
-      
-
-      return {
-
-        text: `Error extracting text from PDF: ${errorMessage}`,
-
-        hasImages: false,
-
-        metadata: {
-
-          fileSize: arrayBuffer.byteLength
-
-        }
-
-      };
-
-    }
-
-  };
-
-
-
-  // Fonction wrapper pour compatibilité (retourne juste le texte)
-
-  const extractTextFromPdfSimple = async (arrayBuffer: ArrayBuffer): Promise<string> => {
-
-    const result = await extractTextFromPdf(arrayBuffer);
-
-    return result.text;
-
-  };
-
-
-
-  // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
-
-  const generateFileSummaryWithStreaming = useCallback(async (file: File, content: string | ArrayBuffer) => {
-
-    try {
-
-      let fileContent: string;
-
-      const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-      
-
-      // Afficher le statut d'extraction selon le type de fichier
-
-      try {
-
-      if (extension === '.pdf') {
-
-        // Vérifier la limite de pages AVANT l'extraction complète
-
-        const pageCheck = await checkPageLimit(file);
-
-        if (!pageCheck.isValid) {
-
-          const errorMessage = pageCheck.errorMessage || t('error.page.limit.exceeded.generic', { fileName: file.name });
-
-          console.warn(errorMessage);
-
-          showLimitInfoBubble(errorMessage);
-
-          setLoading(false);
-
-          setCurrentStatus('');
-
-          const messageId = Math.random().toString(36).substr(2, 9);
-
-          const errorMessageChat: ChatMessage = {
-
-            id: messageId,
-
-            userQuery: `📄 ${file.name}`,
-
-            aiResponse: errorMessage
-
-          };
-
-          setChatHistory((prev) => [...prev, errorMessageChat]);
-
-          return;
-
-        }
-
-        
-
-        setCurrentStatus(t('status.extracting.pdf', { fileName: file.name }));
-
-          const pdfResult = await extractTextFromPdf(content as ArrayBuffer, (progress) => {
-
-            setCurrentStatus(`${t('status.extracting.pdf', { fileName: file.name })} - ${progress.message}`);
-
-          });
-
-          
-
-          fileContent = pdfResult?.text || '';
-
-          if (!fileContent || fileContent.trim().length === 0) {
-
-            console.warn(`Aucun texte extrait du PDF ${file.name}`);
-
-            fileContent = '[Aucun texte extractible du PDF]';
-
-          }
-
-      } else if (extension === '.docx') {
-
-        setCurrentStatus(t('status.extracting.docx', { fileName: file.name }));
-
-          const docxResult = await extractTextFromDocx(content as ArrayBuffer, (progress) => {
-
-            setCurrentStatus(`${t('status.extracting.docx', { fileName: file.name })} - ${progress.message}`);
-
-          });
-
-          
-
-          // Vérifier la limite de 100 pages (pour DOCX, compter les pages dans le tableau pages)
-
-          const pageCount = docxResult.pages?.length || 0;
-
-          if (pageCount > 100) {
-
-            const errorMessage = t('error.page.limit.exceeded', { fileName: file.name, pageCount: pageCount.toString() });
-
-            console.warn(errorMessage);
-
-            showLimitInfoBubble(errorMessage);
-
-            setLoading(false);
-
-            setCurrentStatus('');
-
-            const messageId = Math.random().toString(36).substr(2, 9);
-
-            const errorMessageChat: ChatMessage = {
-
-              id: messageId,
-
-              userQuery: `📄 ${file.name}`,
-
-              aiResponse: errorMessage
-
-            };
-
-            setChatHistory((prev) => [...prev, errorMessageChat]);
-
-            return;
-
-          }
-
-          
-
-          fileContent = docxResult?.text || '';
-
-          if (!fileContent || fileContent.trim().length === 0) {
-
-            console.warn(`Aucun texte extrait du DOCX ${file.name}`);
-
-            fileContent = '[Aucun texte extractible du DOCX]';
-
-          }
-
-      } else {
-
-        setCurrentStatus(t('status.reading.file', { fileName: file.name }));
-
-        fileContent = typeof content === 'string' ? content : new TextDecoder().decode(new Uint8Array(content as ArrayBuffer));
-
-        }
-
-      } catch (extractionError) {
-
-        console.error(`Erreur lors de l'extraction du texte de ${file.name}:`, extractionError);
-
-        fileContent = `[Erreur lors de l'extraction du texte: ${extractionError instanceof Error ? extractionError.message : 'Erreur inconnue'}]`;
-
-      }
-
-      
-
-      // Vérifier que le contenu est valide avant de continuer
-
-      if (!fileContent || fileContent.trim().length === 0 || fileContent.startsWith('[Erreur') || fileContent.startsWith('[Aucun')) {
-
-        console.warn(`Contenu invalide ou vide pour ${file.name}, impossible de générer un résumé`);
-
-        const messageId = Math.random().toString(36).substr(2, 9);
-
-        const summaryMessage: ChatMessage = {
-
-          id: messageId,
-
-          userQuery: `📄 ${file.name}`,
-
-          aiResponse: fileContent.includes('Erreur') || fileContent.includes('Aucun') 
-
-            ? `⚠️ ${fileContent}` 
-
-            : '⚠️ Impossible de générer un résumé: le fichier ne contient pas de texte extractible.'
-
-        };
-
-        setChatHistory((prev) => [...prev, summaryMessage]);
-
-        setLoading(false);
-
-        setCurrentStatus('');
-
-        return;
-
-      }
-
-      
-
-      // Limiter le contenu pour la requête
-
-      const limitedContent = fileContent.substring(0, 2000);
-
-      console.log(`📝 Génération du résumé pour ${file.name} (${limitedContent.length} caractères)`);
+      console.log(`� Génération du résumé pour ${file.name} via Docling backend`);
 
       
 
@@ -2010,39 +524,29 @@ const FlexiAnalyseApp: React.FC = () => {
 
       
 
-      // Ajouter le message à l'historique
-
       setChatHistory((prev) => [...prev, summaryMessage]);
 
       setLoading(true);
 
-      
-
-      // Mettre à jour le statut pour l'analyse
-
-      setCurrentStatus(t('status.analyzing.document', { fileName: file.name }));
-
-      
-
-      // Utiliser le streaming pour le résumé
-
       setCurrentStatus(t('status.sending.server'));
+
+      
+
+      // Envoyer le fichier brut au backend via FormData (Docling parse côté serveur)
+
+      const formData = new FormData();
+
+      formData.append('file', file, file.name);
+
+      formData.append('language', language);
+
+      
 
       const response = await fetch(`${apiUrl}/summarize_file_stream`, {
 
         method: 'POST',
 
-        headers: { 'Content-Type': 'application/json' },
-
-        body: JSON.stringify({
-
-          file_name: file.name,
-
-          file_content: limitedContent,
-
-          language: language
-
-        })
+        body: formData
 
       });
 
@@ -2572,21 +1076,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
       
 
-      if (extension === '.pdf') {
+      if (['.pdf', '.docx'].includes(extension)) {
 
-        const arrayBuffer = await file.arrayBuffer();
-
-        const pdfResult = await extractTextFromPdf(arrayBuffer);
-
-        fileContent = pdfResult.text;
-
-      } else if (extension === '.docx') {
-
-        const arrayBuffer = await file.arrayBuffer();
-
-        const docxResult = await extractTextFromDocx(arrayBuffer);
-
-        fileContent = docxResult.text;
+        fileContent = file.name;
 
       } else {
 
@@ -3056,499 +1548,61 @@ const FlexiAnalyseApp: React.FC = () => {
 
 
 
-  const detectLanguage = (text: string): string => {
-
-    const langCode = franc(text);
-
-    if(langCode === 'fra') return 'fr';
-
-    if(langCode === 'eng') return 'en';
-
-    if(langCode === 'spa') return 'es';
-
-    return 'en';
-
-  };
-
-
-
-  const extractTextFromFile = async (
-
-    file: File,
-
-    onProgress?: (progress: { current: number; total: number; message: string }) => void
-
-  ): Promise<string> => {
-
-    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-    const arrayBufferOriginal = await file.arrayBuffer();
-
-    const arrayBuffer = arrayBufferOriginal.slice(0);
-
-    
-
-    if (extension === '.docx') {
-
-      const result = await extractTextFromDocx(arrayBuffer, onProgress);
-
-      return result.text;
-
-    } else if (extension === '.pdf') {
-
-      const result = await extractTextFromPdf(arrayBuffer, onProgress);
-
-      return result.text;
-
-    } else if (['.txt', '.md', '.java', '.py', '.js', '.ts', '.cpp', '.c', '.h', '.rb', '.go', '.php', '.html', '.css', '.scss', '.jsx', '.tsx', '.sql'].includes(extension)) {
-
-      return new TextDecoder().decode(new Uint8Array(arrayBuffer));
-
-    } else {
-
-      return 'Unsupported file type';
-
-    }
-
-  };
-
-
-
-  // Fonction pour extraire le contenu structuré d'un fichier (inclut images pour DOCX)
-
-  const extractStructuredContentFromFile = async (
-
-    file: File,
-
-    onProgress?: (progress: { current: number; total: number; message: string }) => void
-
-  ): Promise<DocxExtractionResult | { text: string; hasImages: false }> => {
-
-    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-    const arrayBufferOriginal = await file.arrayBuffer();
-
-    const arrayBuffer = arrayBufferOriginal.slice(0);
-
-    
-
-    if (extension === '.docx') {
-
-      return await extractTextFromDocx(arrayBuffer, onProgress);
-
-    } else {
-
-      // Pour les autres types de fichiers, retourner juste le texte
-
-      const text = await extractTextFromFile(file, onProgress);
-
-      return { text, hasImages: false };
-
-    }
-
-  };
-
-
-
-  // Fonction pour vérifier rapidement le nombre de pages AVANT l'extraction complète
-
-  const checkPageLimit = async (file: File): Promise<{ isValid: boolean; pageCount: number; errorMessage?: string }> => {
-
-    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-    
-
-    if (extension === '.pdf') {
-
-      try {
-
-        // Pour PDF, on peut obtenir le nombre de pages rapidement sans extraire tout le texte
-
-        const arrayBuffer = await file.arrayBuffer();
-
-        const bufferCopy = arrayBuffer.slice(0);
-
-        const pdf = await pdfjslib.getDocument({ 
-
-          data: bufferCopy,
-
-          verbosity: 0,
-
-          stopAtErrors: false,
-
-        }).promise;
-
-        
-
-        const pageCount = pdf.numPages;
-
-        if (pageCount > 100) {
-
-          return {
-
-            isValid: false,
-
-            pageCount,
-
-            errorMessage: t('error.page.limit.exceeded.ignored', { fileName: file.name, pageCount: pageCount.toString() })
-
-          };
-
-        }
-
-        return { isValid: true, pageCount };
-
-      } catch (error) {
-
-        console.warn(`Erreur lors de la vérification du nombre de pages pour ${file.name}:`, error);
-
-        // En cas d'erreur, on continue quand même (la vérification n'est pas bloquante)
-
-        return { isValid: true, pageCount: 0 };
-
-      }
-
-    } else if (extension === '.docx') {
-
-      // Pour DOCX, on ne peut pas vraiment connaître le nombre de pages sans parser le fichier
-
-      // On va laisser passer et vérifier après extraction (mais on essaie de le faire rapidement)
-
-      // Pour l'instant, on retourne true pour ne pas bloquer
-
-      return { isValid: true, pageCount: 0 };
-
-    }
-
-    
-
-    // Pour les autres types de fichiers, pas de limite de pages
-
-    return { isValid: true, pageCount: 0 };
-
-  };
-
-
-
-  // NOUVELLE FONCTION: Indexation côté backend avec support pour contenu structuré (images DOCX)
+    // Indexation côté backend — envoie les fichiers bruts via FormData, Docling parse côté serveur
 
   const indexDirectoryContentOnBackend = async (files: File[]) => {
 
     try {
 
-      console.log('=== ENVOI DES FICHIERS AU BACKEND POUR INDEXATION ===');
+      console.log('=== ENVOI DES FICHIERS AU BACKEND POUR INDEXATION (Docling) ===');
 
       console.log('Fichiers à indexer:', files.length);
 
       
 
-      setIndexingStatus(t('status.indexing.extracting', { count: files.length }));
+      setIndexingStatus(t('status.indexing.on.server', { count: files.length }));
 
       
 
-      // Extraire le contenu structuré de tous les fichiers
+      // Construire le FormData avec les fichiers bruts
 
-      const fileContents: Array<{
+      const formData = new FormData();
 
-        fileName: string;
+      for (const file of files) {
 
-        content: string;
+        formData.append('files', file, file.name);
 
-        images?: Array<{
+      }
 
-          id: string;
-
-          contentType: string;
-
-          dataUri?: string;
-
-          description?: string;
-
-          pageNumber?: number;
-
-        }>;
-
-        hasImages?: boolean;
-
-        metadata?: {
-
-          fileSize: number;
-
-          wordCount?: number;
-
-          pageCount?: number;
-
-          hasScannedContent?: boolean;
-
-          scannedPages?: number[];
-
-          invoicePages?: number[];
-
-          averageWordsPerPage?: number;
-
-        };
-
-      }> = [];
+      formData.append('language', language);
 
       
-
-      for (let i = 0; i < files.length; i++) {
-
-        const file = files[i];
-
-        const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-        console.log(`Traitement du fichier ${i + 1}/${files.length}: ${file.name}`);
-
-        
-
-        // Vérifier la limite de pages AVANT l'extraction complète (pour économiser les ressources)
-
-        const pageCheck = await checkPageLimit(file);
-
-        if (!pageCheck.isValid) {
-
-          console.warn(pageCheck.errorMessage);
-
-          if (pageCheck.errorMessage) {
-
-            showLimitInfoBubble(pageCheck.errorMessage);
-
-          }
-
-          continue; // Ignorer ce fichier et passer au suivant
-
-        }
-
-        
-
-        // Utiliser le callback de progression pour mettre à jour le statut
-
-        const progressCallback = (progress: { current: number; total: number; message: string }) => {
-
-          const progressPercent = Math.round((progress.current / progress.total) * 100);
-
-          setIndexingStatus(
-
-            `${t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length })} - ${progress.message} (${progressPercent}%)`
-
-          );
-
-        };
-
-        
-
-        try {
-
-          if (extension === '.docx') {
-
-            // Utiliser l'extraction structurée pour DOCX (inclut images)
-
-            const structuredResult = await extractTextFromDocx(
-
-              await file.arrayBuffer(),
-
-              progressCallback
-
-            );
-
-            
-
-            // Vérifier la limite de 100 pages (pour DOCX, compter les pages dans le tableau pages)
-
-            const pageCount = structuredResult.pages?.length || 0;
-
-            if (pageCount > 100) {
-
-              const errorMessage = t('error.page.limit.exceeded.ignored', { fileName: file.name, pageCount: pageCount.toString() });
-
-              console.warn(errorMessage);
-
-              showLimitInfoBubble(errorMessage);
-
-              continue; // Ignorer ce fichier et passer au suivant
-
-            }
-
-            
-
-            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
-
-              fileContents.push({
-
-                fileName: file.name,
-
-                content: structuredResult.text,
-
-                images: structuredResult.images,
-
-                hasImages: structuredResult.hasImages,
-
-                metadata: structuredResult.metadata
-
-              });
-
-              console.log(`✅ Fichier DOCX traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}${pageCount > 0 ? `, ${pageCount} page(s)` : ''})`);
-
-            } else {
-
-              console.log(`❌ Fichier DOCX ignoré: ${file.name} - contenu invalide`);
-
-            }
-
-          } else if (extension === '.pdf') {
-
-            // Utiliser l'extraction structurée pour PDF (inclut pages et images)
-
-            // Note: La vérification de pages a déjà été faite avec checkPageLimit() avant
-
-            const structuredResult = await extractTextFromPdf(
-
-              await file.arrayBuffer(),
-
-              progressCallback
-
-            );
-
-            
-
-            if (structuredResult.text && structuredResult.text !== 'Unsupported file type') {
-
-              const pageCount = structuredResult.metadata?.pageCount || 0;
-
-              fileContents.push({
-
-                fileName: file.name,
-
-                content: structuredResult.text,
-
-                images: structuredResult.images,
-
-                hasImages: structuredResult.hasImages,
-
-                metadata: structuredResult.metadata
-
-              });
-
-              console.log(`✅ Fichier PDF traité: ${file.name} (${structuredResult.text.length} caractères${structuredResult.hasImages ? `, ${structuredResult.images?.length || 0} image(s)` : ''}, ${pageCount} page(s))`);
-
-            } else {
-
-              console.log(`❌ Fichier PDF ignoré: ${file.name} - contenu invalide`);
-
-            }
-
-          } else {
-
-            // Pour les autres types de fichiers, utiliser l'extraction simple
-
-        setIndexingStatus(t('status.indexing.processing', { fileName: file.name, current: i + 1, total: files.length }));
-
-            const text = await extractTextFromFile(file, progressCallback);
-
-        
-
-        if (text && text !== 'Unsupported file type') {
-
-          fileContents.push({
-
-            fileName: file.name,
-
-                content: text,
-
-                hasImages: false
-
-          });
-
-          console.log(`✅ Fichier traité: ${file.name} (${text.length} caractères)`);
-
-        } else {
-
-          console.log(`❌ Fichier ignoré: ${file.name} - type non supporté`);
-
-            }
-
-          }
-
-        } catch (fileError) {
-
-          console.error(`❌ Erreur lors du traitement de ${file.name}:`, fileError);
-
-          // Continuer avec les autres fichiers même si un échoue
-
-        }
-
-      }
-
-
-
-      console.log(`📤 Envoi de ${fileContents.length} fichiers au backend...`);
-
-      const filesWithImages = fileContents.filter(f => f.hasImages && f.images && f.images.length > 0).length;
-
-      if (filesWithImages > 0) {
-
-        setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }) + ` (${filesWithImages} fichier(s) avec images)`);
-
-      } else {
-
-      setIndexingStatus(t('status.indexing.on.server', { count: fileContents.length }));
-
-      }
-
-
-
-      // Envoyer au backend pour indexation (avec support pour contenu structuré)
 
       const response = await fetch(`${apiUrl}/index-directory`, {
 
         method: 'POST',
 
-        headers: { 
+        headers: { 'Session-ID': sessionId },
 
-          'Content-Type': 'application/json',
-
-          'Session-ID': sessionId
-
-        },
-
-        body: JSON.stringify({
-
-          files: fileContents.map(f => ({
-
-            fileName: f.fileName,
-
-            content: f.content,
-
-            images: f.images, // Envoyer les images pour traitement OCR optionnel
-
-            hasImages: f.hasImages,
-
-            metadata: f.metadata
-
-          })),
-
-          language: language
-
-        }),
+        body: formData,
 
       });
 
-
+      
 
       if (!response.ok) {
 
         const errorData = await response.json().catch(() => ({}));
 
-        throw new Error(errorData.error || 'Échec de l\'indexation sur le serveur');
+        throw new Error(errorData.error || "Échec de l'indexation sur le serveur");
 
       }
 
-
+      
 
       const data = await response.json();
 
-      console.log('✅ Indexation terminée sur le backend:', data);
+      console.log('✅ Indexation Docling terminée sur le backend:', data);
 
       
 
@@ -3556,9 +1610,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       setIndexingStatus('');
 
-
-
-      // Mettre à jour les actions suggérées renvoyées par le backend
+      
 
       if (Array.isArray(data.suggested_actions)) {
 
@@ -3570,9 +1622,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
-      // Mettre à jour le type de document détecté
+      
 
       if (data.detected_type && data.detected_type_label) {
 
@@ -3586,13 +1636,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
         });
 
-        console.log(`📋 Document type detected: ${data.detected_type_label} (${Math.round((data.detected_type_confidence || 0) * 100)}% confidence)`);
+        console.log(`📋 Document type: ${data.detected_type_label} (${Math.round((data.detected_type_confidence || 0) * 100)}% confidence)`);
 
       }
 
       
 
-      console.log(`📚 ${data.indexed_files_count} fichiers indexés avec ${data.chunks_count} chunks${filesWithImages > 0 ? ` (${filesWithImages} avec images)` : ''}`);
+      console.log(`📚 ${data.indexed_files_count} fichiers indexés avec ${data.chunks_count} chunks`);
 
       
 
@@ -3603,12 +1653,6 @@ const FlexiAnalyseApp: React.FC = () => {
       setIsDirectoryIndexed(false);
 
       setIndexingStatus('');
-
-      
-
-      // Afficher une notification d'erreur à l'utilisateur
-
-      //alert(`Erreur lors de l'indexation: ${error instanceof Error ? error.message : 'Erreur inconnue'}`);
 
     }
 
@@ -3692,95 +1736,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
 
 
-  // Fonction pour vérifier si le fichier sélectionné dépasse la limite de pages
-
-  const checkSelectedFilePageLimit = async (file: File | null): Promise<{ isValid: boolean; pageCount: number; errorMessage?: string }> => {
-
-    if (!file) {
-
-      return { isValid: true, pageCount: 0 };
-
-    }
-
-
-
-    const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-    
-
-    if (extension === '.pdf') {
-
-      try {
-
-        // Pour PDF, on peut obtenir le nombre de pages rapidement
-
-        const arrayBuffer = await file.arrayBuffer();
-
-        const bufferCopy = arrayBuffer.slice(0);
-
-        const pdf = await pdfjslib.getDocument({ 
-
-          data: bufferCopy,
-
-          verbosity: 0,
-
-          stopAtErrors: false,
-
-        }).promise;
-
-        
-
-        const pageCount = pdf.numPages;
-
-        if (pageCount > 100) {
-
-          return {
-
-            isValid: false,
-
-            pageCount,
-
-            errorMessage: t('error.page.limit.exceeded.query', { fileName: file.name, pageCount: pageCount.toString() })
-
-          };
-
-        }
-
-        return { isValid: true, pageCount };
-
-      } catch (error) {
-
-        console.warn(`Erreur lors de la vérification du nombre de pages pour ${file.name}:`, error);
-
-        // En cas d'erreur, on continue quand même
-
-        return { isValid: true, pageCount: 0 };
-
-      }
-
-    } else if (extension === '.docx') {
-
-      // Pour DOCX, on doit extraire pour connaître le nombre de pages
-
-      // On va vérifier si le fichier a déjà été traité et stocker le nombre de pages
-
-      // Pour l'instant, on laisse passer et on vérifiera côté backend si nécessaire
-
-      return { isValid: true, pageCount: 0 };
-
-    }
-
-    
-
-    // Pour les autres types de fichiers, pas de limite de pages
-
-    return { isValid: true, pageCount: 0 };
-
-  };
-
-
-
-  // Fonction principale de gestion des requêtes utilisateur
+    // Fonction principale de gestion des requêtes utilisateur
 
   const handleQuerySubmit = async (query: string, mode: 'online' | 'local') => {
 
@@ -3796,35 +1752,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     
 
-    // Vérifier si le fichier sélectionné dépasse la limite de 100 pages (mode local uniquement)
-
-    if (mode === 'local' && selectedFile) {
-
-      const fileCheck = await checkSelectedFilePageLimit(selectedFile);
-
-      if (!fileCheck.isValid) {
-
-        const errorMessage = fileCheck.errorMessage || t('error.page.limit.exceeded.query.generic', { fileName: selectedFile.name });
-
-        showLimitInfoBubble(errorMessage);
-
-        // Retirer le message de l'historique s'il a été ajouté
-
-        setChatHistory((prev) => prev.slice(0, -1));
-
-        setLoading(false);
-
-        setCurrentStatus('');
-
-        return;
-
-      }
-
-    }
-
-    
-
-    // Incrémenter le compteur de requêtes pour les non connectés
+        // Incrémenter le compteur de requêtes pour les non connectés
 
     if (!isAuthenticated) {
 
@@ -4006,35 +1934,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
 
 
+          // Pour les fichiers binaires (PDF/DOCX), le contenu est dans le vector store Docling
+
+          // — pas besoin d'extraction locale
+
           if (isBinary) {
 
-            if (fileDetails.content instanceof ArrayBuffer) {
-
-              const contentCopy = fileDetails.content.slice(0); 
-
-              if (extension === '.docx') {
-
-                const docxResult = await extractTextFromDocx(contentCopy);
-
-                currentFileContent = docxResult.text;
-
-              } else if (extension === '.pdf') {
-
-                const pdfResult = await extractTextFromPdf(contentCopy);
-
-                currentFileContent = pdfResult.text;
-
-              } else {
-
-                currentFileContent = 'Type de fichier binaire non supporté';
-
-              }
-
-            } else {
-
-              currentFileContent = 'Erreur: Contenu binaire non disponible';
-
-            }
+            currentFileContent = '';
 
           } else {
 
@@ -4410,8 +2316,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
 
 
-    const language = detectLanguage(query);
-
     const effectiveModel =
 
       selectedModel === AUTO_MODEL_ID ? chooseModelForQuery(query) : selectedModel;
@@ -4734,7 +2638,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         ? fileDetails.content 
 
-        : await extractTextFromFile(selectedFile);
+        : '';
 
 
 
@@ -5376,15 +3280,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       
 
-      {/* Sidebar Container - reste identique */}
+      {/* Sidebar Container */}
 
       <div className="flex">
 
-        <div className={`hidden lg:block bg-gray-200 transition-all duration-300 fixed top-0 left-0 h-full ${
-
-          isSidebarOpen ? 'w-64 overflow-y-auto' : 'w-20 overflow-visible'
-
-        } z-40`}>
+        <div className="hidden lg:block fixed top-0 left-0 h-full z-40">
 
           <Sidebar
 
@@ -5414,83 +3314,27 @@ const FlexiAnalyseApp: React.FC = () => {
 
         <div className="lg:hidden">
 
-          <button
+          <Sidebar
 
-            onClick={toggleSidebar}
+            onFileSelect={handleFileSelect}
 
-            className="fixed top-4 left-4 z-50 bg-white shadow-lg rounded-md p-2 text-gray-700 hover:text-blue-500 transition-colors"
+            getRepoStructure={getRepoStructure}
 
-          >
+            selectedModel={selectedModel}
 
-            <svg
+            setSelectedModel={setSelectedModel}
 
-              className="h-6 w-6"
+            isSidebarOpen={isSidebarOpen}
 
-              fill="none"
+            toggleSidebar={toggleSidebar}
 
-              stroke="currentColor"
+            addFileToSidebar={addFileToSidebar}
 
-              viewBox="0 0 24 24"
+            onDirectorySelect={handleDirectorySelect}
 
-              xmlns="http://www.w3.org/2000/svg"
+            onLogout={handleLogout}
 
-            >
-
-              <path
-
-                strokeLinecap="round"
-
-                strokeLinejoin="round"
-
-                strokeWidth="2"
-
-                d="M4 6h16M4 12h16M4 18h16"
-
-              />
-
-            </svg>
-
-          </button>
-
-
-
-          {isSidebarOpen && (
-
-            <>
-
-              <div
-
-                className="fixed inset-0 bg-black bg-opacity-50 z-30"
-
-                onClick={toggleSidebar}
-
-              />
-
-              <div className="fixed inset-y-0 left-0 z-40 w-64 bg-gray-200 shadow-lg">
-
-                <Sidebar
-
-                  onFileSelect={handleFileSelect}
-
-                  getRepoStructure={getRepoStructure}
-
-                  selectedModel={selectedModel}
-
-                  setSelectedModel={setSelectedModel}
-
-                  isSidebarOpen={isSidebarOpen}
-
-                  toggleSidebar={toggleSidebar}
-
-                  onLogout={handleLogout}
-
-                />
-
-              </div>
-
-            </>
-
-          )}
+          />
 
         </div>
 
@@ -5518,11 +3362,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       <div
 
-        className={`flex-1 flex transition-all duration-300 ${
-
-          isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'
-
-        } relative z-30 h-screen overflow-hidden`}
+        className={`flex-1 flex transition-all duration-300 lg:ml-16 relative z-30 h-screen overflow-hidden`}
 
       >
 

@@ -637,7 +637,7 @@
     },
     {
         "file_name": "AI_Architecture_Proposition_Zetane.pdf",
-        "description": "The file 'AI_Architecture_Proposition_Zetane.pdf' aims to propose an architecture for automating the extraction of structured data from scanned aviation maintenance work orders. The purpose of the document is to outline the different layers of the proposed architecture, including Ingestion, OCR & Text Extraction, LLM Structured Extraction, Validation & Quality Assurance, and Feedback & Learning. It also describes the components and data flow of the system, detailing how documents are processed through a structured pipeline involving OCR engines, LLMs, and human review. Additionally, the document discusses tradeoffs such as OCR accuracy vs cost and local models vs cloud models, as well as failure modes and the use of AI tooling to accelerate development and improve structured data extraction."
+        "description": "The file 'AI_Architecture_Proposition_Zetane.pdf' aims to propose an architecture for automating the extraction of structured data from scanned aviation maintenance work orders. The purpose of this document is to outline a system that can ingest scanned PDF documents, extract text using OCR technology, interpret the content using Large Language Models (LLMs), and convert the information into structured records that can be automatically inserted into a maintenance system (MRO / ERP). The document provides an overview of the architecture, the goals of each layer within the system, components and data flow, tradeoffs to consider, failure modes, and the use of AI tooling to accelerate development and improve efficiency in the document processing workflow."
     },
     {
         "file_name": "cv-mix/CSP-KarimNgami (1).pdf",

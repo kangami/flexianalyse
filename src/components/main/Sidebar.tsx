@@ -1,5 +1,6 @@
 import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
-import { FolderOpen, Folder, ChevronRight, Search, User, FileText } from 'lucide-react';
+import { Paginator } from '../ui/Paginator';
+import { FolderOpen, Folder } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../auth/AuthProvider';
@@ -7,11 +8,8 @@ import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
 import { auth } from '../../lib/firebase';
 
-interface FileDescription {
-  file_name: string;
-  description: string;
-  model_used?: string;
-}
+type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
+type OrganisationTab = 'organisation' | 'user' | 'permission';
 
 interface FileNode {
   name: string;
@@ -361,31 +359,71 @@ const Sidebar: React.FC<SidebarProps> = ({
   addFileToSidebar,
   onLogout
 }) => {
-  const { t } = useLanguage();
-  const { theme } = useTheme();
+  const { language, setLanguage } = useLanguage();
+  const { theme, setTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
   const [files, setFiles] = useState<FileNode[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isMobileFileDropdownOpen, setIsMobileFileDropdownOpen] = useState<boolean>(false);
-  const [isDesktopFileDropdownOpen, setIsDesktopFileDropdownOpen] = useState<boolean>(false);
-  const [isMobileModelDropdownOpen, setIsMobileModelDropdownOpen] = useState<boolean>(false);
-  const [isDesktopModelDropdownOpen, setIsDesktopModelDropdownOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [modelStatus, setModelStatus] = useState<{ [key: string]: boolean }>({});
-  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(true);
+  const [, setIsLoadingModels] = useState<boolean>(true);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
   
-  // États pour les sections expandables
-  const [isExplorerExpanded, setIsExplorerExpanded] = useState<boolean>(true);
-  const [isSearchExpanded, setIsSearchExpanded] = useState<boolean>(true);
-  const [isUserInfoExpanded, setIsUserInfoExpanded] = useState<boolean>(true);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState<boolean>(false);
   
-  // Faire disparaître automatiquement les erreurs après 5 secondes
+  // Icon rail active panel state
+  const [activePanel, setActivePanel] = useState<SidebarPanel>(null);
+  const [organisationTab, setOrganisationTab] = useState<OrganisationTab>('organisation');
+  
+  // Organisation management state
+  const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([]);
+  const [departments, setDepartments] = useState<{ id: string; organization_id: string; name: string }[]>([]);
+  const [roles, setRoles] = useState<{ id: string; organization_id: string; name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; email: string; full_name: string }[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  const [orgName, setOrgName] = useState('');
+  const [deptName, setDeptName] = useState('');
+  const [roleName, setRoleName] = useState('');
+  const [userEmail, setUserEmail] = useState('');
+  const [userPassword, setUserPassword] = useState('');
+  const [userFullName, setUserFullName] = useState('');
+  const [permRoleId, setPermRoleId] = useState('');
+  const [permAction, setPermAction] = useState('read');
+  const [permResource, setPermResource] = useState('chat');
+  const [orgMsg, setOrgMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [deptEditId, setDeptEditId] = useState<string | null>(null);
+  const [deptEditName, setDeptEditName] = useState('');
+
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const iconRailRef = useRef<HTMLDivElement>(null);
+  
+  // Load org data when panel opens
+  useEffect(() => {
+    if (activePanel === 'organisation') {
+      fetch(`${API}/api/v2/organizations`).then(r => r.json()).then(d => { setOrgs(d.data || []); if (d.data?.[0]) setSelectedOrgId(d.data[0].id); }).catch(() => {});
+      fetch(`${API}/api/v2/users`).then(r => r.json()).then(d => setUsers(d.data || [])).catch(() => {});
+      fetch(`${API}/api/v2/roles`).then(r => r.json()).then(d => setRoles(d.data || [])).catch(() => {});
+    }
+  }, [activePanel]);
+
+  // Auto-dismiss orgMsg after 5s
+  useEffect(() => {
+    if (!orgMsg) return;
+    const t = setTimeout(() => setOrgMsg(null), 5000);
+    return () => clearTimeout(t);
+  }, [orgMsg]);
+
+  // Load departments when org changes
+  useEffect(() => {
+    if (selectedOrgId) {
+      fetch(`${API}/api/v2/departments?organization_id=${selectedOrgId}`).then(r => r.json()).then(d => setDepartments(d.data || [])).catch(() => {});
+    }
+  }, [selectedOrgId]);
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => {
@@ -397,10 +435,6 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const desktopDropdownRef = useRef<HTMLDivElement>(null);
-  const modelDropdownRef = useRef<HTMLDivElement>(null);
-  const desktopModelDropdownRef = useRef<HTMLDivElement>(null);
 
   const allowedExtensions: string[] = [
     '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
@@ -505,29 +539,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [apiService, modelStatus]);
 
-  // Mobile model dropdown
-  const handleMobileModelDropdownOpen = useCallback(() => {
-    setIsMobileModelDropdownOpen(true);
-    setIsMobileFileDropdownOpen(false);
-    // Test all models in background when dropdown opens
-    availableModels.forEach(model => {
-      if (modelStatus[model.id] === undefined) {
-        testModelOnDemand(model.id);
-      }
-    });
-  }, [availableModels, modelStatus, testModelOnDemand]);
-
-  // Desktop model dropdown
-  const handleDesktopModelDropdownOpen = useCallback(() => {
-    setIsDesktopModelDropdownOpen(true);
-    setIsDesktopFileDropdownOpen(false);
-    // Test all models in background when dropdown opens
-    availableModels.forEach(model => {
-      if (modelStatus[model.id] === undefined) {
-        testModelOnDemand(model.id);
-      }
-    });
-  }, [availableModels, modelStatus, testModelOnDemand]);
 
   useEffect(() => {
     const loadRecentDocuments = async () => {
@@ -543,30 +554,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     loadRecentDocuments();
   }, [apiService, isAuthenticated, user]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsMobileFileDropdownOpen(false);
-      }
-
-      if (desktopDropdownRef.current && !desktopDropdownRef.current.contains(event.target as Node)) {
-        setIsDesktopFileDropdownOpen(false);
-      }
-
-      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
-        setIsMobileModelDropdownOpen(false);
-      }
-
-      // Desktop model dropdown
-      if (desktopModelDropdownRef.current && !desktopModelDropdownRef.current.contains(event.target as Node)) {
-        setIsDesktopModelDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
 
   const filterFiles = useCallback((fileList: FileList): File[] => {
     return Array.from(fileList).filter((file) => {
@@ -1085,73 +1072,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     ));
   }, [handleToggleFolder, handleFileClick, pendingFiles]);
 
-  const getSelectedModelInfo = useCallback((): ModelInfo => {
-    return availableModels.find(model => model.id === selectedModel) || 
-           { id: selectedModel, name: selectedModel, provider: 'Unknown' };
-  }, [availableModels, selectedModel]);
-
-  const getModelStatusIcon = useCallback((modelId: string) => {
-    const status = modelStatus[modelId];
-    if (status === undefined) {
-      return <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>;
-    }
-    return (
-      <div className={`w-2 h-2 rounded-full ${
-        status ? 'bg-green-500' : 'bg-red-500'
-      }`}></div>
-    );
-  }, [modelStatus]);
-
-  const getCostTierColor = useCallback((costTier?: string) => {
-    switch (costTier) {
-      case 'free': return 'bg-green-100 text-green-800';
-      case 'low': return 'bg-blue-100 text-blue-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'high': return 'bg-orange-100 text-orange-800';
-      case 'premium': return 'bg-purple-100 text-purple-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  }, []);
-
-  // Function to get model logo from CDN
-  const getModelLogo = useCallback((model: ModelInfo): string => {
-    const modelId = model.id.toLowerCase();
-    const provider = model.provider.toLowerCase();
-
-    // Map based on model ID first, then provider
-    // Using Simple Icons CDN with SVG format for reliable logo sources
-    if (modelId === 'auto') {
-      // Auto/Smart selector - using a robot/automation icon
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/robotframework.svg';
-    }
-    
-    // Check for Claude models BEFORE OpenAI or other generic AI checks
-    if (modelId.includes('claude') || provider.includes('anthropic')) {
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/anthropic.svg';
-    }
-
-    // Check for Gemini/Google models BEFORE OpenAI check to avoid conflicts
-    if (modelId.includes('gemini') || provider.includes('google')) {
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/google.svg';
-    }
-    
-    if (modelId.includes('gpt') || provider.includes('openai')) {
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/openai.svg';
-    }
-    
-    if (modelId.includes('mistral') || provider.includes('mistral')) {
-      // Mistral AI - using a generic AI/ML icon as fallback since Mistral isn't in simple-icons
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/matrix.svg';
-    }
-    
-    if (modelId.includes('llama') || provider.includes('local')) {
-      // Llama models are from Meta
-      return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/meta.svg';
-    }
-    
-    // Default logo for unknown providers
-    return 'https://cdn.jsdelivr.net/npm/simple-icons@v11/icons/openai.svg';
-  }, []);
 
   // Memoized file structure calculations
   const fileStructure = useMemo(() => {
@@ -1165,445 +1085,459 @@ const Sidebar: React.FC<SidebarProps> = ({
     getRepoStructure(() => fileStructure.structure, fileStructure.allFiles);
   }, [fileStructure, getRepoStructure]);
 
-  // Helper function pour obtenir les classes CSS selon le thème
-  const getThemeClasses = useCallback(() => {
-    switch (theme) {
-      case 'dark':
-        return {
-          sidebar: 'bg-gray-800',
-          text: 'text-gray-200',
-          textSecondary: 'text-gray-400',
-          bg: 'bg-gray-700',
-          border: 'border-gray-600',
-          hover: 'hover:bg-gray-700'
-        };
-      case 'dark-blue':
-        return {
-          sidebar: 'bg-blue-950',
-          text: 'text-blue-100',
-          textSecondary: 'text-blue-300',
-          bg: 'bg-blue-900',
-          border: 'border-blue-800',
-          hover: 'hover:bg-blue-900'
-        };
-      default: // white
-        return {
-          sidebar: 'bg-gray-100',
-          text: 'text-gray-800',
-          textSecondary: 'text-gray-600',
-          bg: 'bg-white',
-          border: 'border-gray-300',
-          hover: 'hover:bg-gray-50'
-        };
-    }
-  }, [theme]);
 
-  // Composant de section expandable réutilisable
-  const ExpandableSection: React.FC<{
-    title: string;
-    icon: React.ReactNode;
-    isExpanded: boolean;
-    onToggle: () => void;
-    children: React.ReactNode;
-  }> = ({ title, icon, isExpanded, onToggle, children }) => {
-    const themeClasses = getThemeClasses();
-    
-    return (
-      <div className="mb-1 overflow-hidden">
-        {/* Header */}
-        <button
-          onClick={onToggle}
-          className={`w-full flex items-center justify-between px-2 py-1.5 ${themeClasses.hover} transition-colors duration-200 rounded-sm`}
-        >
-          <div className="flex items-center gap-2">
-            <div 
-              className={`transition-transform duration-500 ease-in-out transform origin-center ${
-                isExpanded ? 'rotate-90' : 'rotate-0'
-              }`}
-              style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
-            >
-              <ChevronRight size={16} className={themeClasses.textSecondary} />
-            </div>
-            {icon}
-            <span className={`text-sm font-semibold ${themeClasses.text} transition-opacity duration-300`}>
-              {title}
-            </span>
-          </div>
-        </button>
-        
-        {/* Content avec animation fluide */}
-        <div
-          className="grid transition-all duration-500 ease-in-out"
-          style={{
-            gridTemplateRows: isExpanded ? '1fr' : '0fr',
-            transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
-          }}
-        >
-          <div className="overflow-hidden">
-            <div 
-              className={`px-2 pb-1 transition-opacity duration-500 ${
-                isExpanded ? 'opacity-100 delay-100' : 'opacity-0 delay-0'
-              }`}
-              style={{ transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)' }}
-            >
-              {children}
+  // Handle icon click - toggle panel
+  const handleIconClick = useCallback((panel: SidebarPanel) => {
+    setActivePanel(prev => prev === panel ? null : panel);
+  }, []);
+
+  // Close flyout when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        activePanel &&
+        flyoutRef.current && !flyoutRef.current.contains(event.target as Node) &&
+        iconRailRef.current && !iconRailRef.current.contains(event.target as Node)
+      ) {
+        setActivePanel(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activePanel]);
+
+  // Render the flyout panel content based on active panel
+  const renderFlyoutContent = () => {
+    switch (activePanel) {
+      case 'connector':
+        return (
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Connector</h3>
+            <div className="space-y-2">
+              <button
+                onClick={() => { fileInputRef.current?.click(); setActivePanel(null); }}
+                className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
+              >
+                <i className="bi bi-file-earmark-plus mr-2"></i>
+                Import a file
+              </button>
+              <button
+                onClick={() => { folderInputRef.current?.click(); setActivePanel(null); }}
+                className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
+              >
+                <i className="bi bi-folder-plus mr-2"></i>
+                Import a folder
+              </button>
+              <hr className="my-2 border-gray-200" />
+              <p className="text-xs text-gray-400 px-3">More connectors coming soon...</p>
             </div>
           </div>
-        </div>
-      </div>
-    );
+        );
+      case 'agents':
+        return (
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Agents</h3>
+            <p className="text-xs text-gray-500">No agents available yet.</p>
+            <p className="text-xs text-gray-400 mt-2">AI agents will appear here as they become available.</p>
+          </div>
+        );
+      case 'organisation':
+        return (
+          <div className="flex flex-col h-full">
+            {/* Horizontal Tabs */}
+            <div className="flex border-b border-gray-200 bg-gray-50">
+              {[
+                { id: 'organisation' as OrganisationTab, label: 'Organisation', icon: 'bi-buildings' },
+                { id: 'user' as OrganisationTab, label: 'User', icon: 'bi-people' },
+                { id: 'permission' as OrganisationTab, label: 'Permission', icon: 'bi-shield-lock' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setOrganisationTab(tab.id)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-semibold transition-colors ${
+                    organisationTab === tab.id
+                      ? 'text-purple-600 border-b-2 border-purple-600 bg-white'
+                      : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <i className={`bi ${tab.icon} text-sm`}></i>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {orgMsg && (
+                <div className={`mb-3 px-3 py-2 rounded-md text-xs flex items-center justify-between gap-2 ${orgMsg.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  <span>{orgMsg.text}</span>
+                  <button onClick={() => setOrgMsg(null)} className="flex-shrink-0 hover:opacity-70">
+                    <i className="bi bi-x text-sm"></i>
+                  </button>
+                </div>
+              )}
+              {organisationTab === 'organisation' && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Active Organisation</label>
+                    <select value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 bg-white">
+                      {orgs.length === 0 && <option value="">— No organisations —</option>}
+                      {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Create Organisation</p>
+                    <input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Organisation name"
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <button onClick={async () => {
+                      if (!orgName) return;
+                      const r = await fetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
+                      const d = await r.json();
+                      if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:'Organisation created!',ok:true}); }
+                      else setOrgMsg({text:d.error||'Error',ok:false});
+                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 transition-colors">
+                      <i className="bi bi-plus-lg mr-1"></i>Create
+                    </button>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Departments</h4>
+                    <div className="flex gap-1 mb-2">
+                      <input value={deptName} onChange={e => setDeptName(e.target.value)} placeholder="Department name"
+                        className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
+                      <button onClick={async () => {
+                        if (!deptName || !selectedOrgId) return;
+                        const r = await fetch(`${API}/api/v2/departments`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptName, organization_id:selectedOrgId}) });
+                        const d = await r.json();
+                        if (r.ok) { setDepartments(prev => [...prev, d]); setDeptName(''); setOrgMsg({text:'Department created!',ok:true}); }
+                        else setOrgMsg({text:d.error||'Error',ok:false});
+                      }} className="px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">
+                        <i className="bi bi-plus-lg"></i>
+                      </button>
+                    </div>
+                    {departments.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">No departments yet</p>
+                    ) : (
+                      <Paginator items={departments}>
+                        {pageItems => (
+                          <div className="space-y-1">
+                            {pageItems.map(d => (
+                              deptEditId === d.id ? (
+                                <div key={d.id} className="flex items-center gap-1">
+                                  <input value={deptEditName} onChange={e => setDeptEditName(e.target.value)}
+                                    className="flex-1 text-xs border border-purple-300 rounded px-2 py-1" />
+                                  <button onClick={async () => {
+                                    const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptEditName}) });
+                                    if (r.ok) { setDepartments(prev => prev.map(x => x.id === d.id ? {...x, name:deptEditName} : x)); setDeptEditId(null); setOrgMsg({text:'Department updated!',ok:true}); }
+                                    else setOrgMsg({text:'Update failed',ok:false});
+                                  }} className="text-green-600 hover:text-green-700 px-1"><i className="bi bi-check-lg text-xs"></i></button>
+                                  <button onClick={() => setDeptEditId(null)} className="text-gray-400 hover:text-gray-600 px-1"><i className="bi bi-x text-xs"></i></button>
+                                </div>
+                              ) : (
+                                <div key={d.id} className="flex items-center justify-between border border-gray-200 rounded px-2 py-1 group">
+                                  <span className="text-xs text-gray-700">{d.name}</span>
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => { setDeptEditId(d.id); setDeptEditName(d.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
+                                    <button onClick={async () => {
+                                      const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'DELETE' });
+                                      if (r.ok) { setDepartments(prev => prev.filter(x => x.id !== d.id)); setOrgMsg({text:'Department deleted',ok:true}); }
+                                      else setOrgMsg({text:'Delete failed',ok:false});
+                                    }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
+                                  </div>
+                                </div>
+                              )
+                            ))}
+                          </div>
+                        )}
+                      </Paginator>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {organisationTab === 'user' && (
+                <div className="space-y-4">
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Create User</p>
+                    <input value={userEmail} onChange={e => setUserEmail(e.target.value)} placeholder="Email"
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <input value={userPassword} onChange={e => setUserPassword(e.target.value)} placeholder="Password" type="password"
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <input value={userFullName} onChange={e => setUserFullName(e.target.value)} placeholder="Full name"
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <button onClick={async () => {
+                      if (!userEmail || !userPassword) return;
+                      const r = await fetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName}) });
+                      const d = await r.json();
+                      if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName(''); setOrgMsg({text:'User created!',ok:true}); }
+                      else setOrgMsg({text:d.error||'Error',ok:false});
+                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
+                      <i className="bi bi-person-plus mr-1"></i>Create User
+                    </button>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Users ({users.length})</h4>
+                    {users.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">No users yet</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {users.map(u => (
+                          <div key={u.id} className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2">
+                            <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center">
+                              <i className="bi bi-person text-purple-600 text-[10px]"></i>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium text-gray-800 truncate">{u.full_name || u.email}</p>
+                              <p className="text-[10px] text-gray-500 truncate">{u.email}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {organisationTab === 'permission' && (
+                <div className="space-y-4">
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Create Role</p>
+                    <input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Role name"
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <button onClick={async () => {
+                      if (!roleName || !selectedOrgId) return;
+                      const r = await fetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:roleName, organization_id:selectedOrgId}) });
+                      const d = await r.json();
+                      if (r.ok) { setRoles(prev => [...prev, d]); setRoleName(''); setOrgMsg({text:'Role created!',ok:true}); }
+                      else setOrgMsg({text:d.error||'Error',ok:false});
+                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
+                      <i className="bi bi-plus-lg mr-1"></i>Create Role
+                    </button>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Roles ({roles.length})</h4>
+                    {roles.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic">No roles yet</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {roles.map(r => (
+                          <div key={r.id} className="text-xs text-gray-700 border border-gray-200 rounded px-2 py-1">{r.name}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <hr className="border-gray-200" />
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Add Permission</p>
+                    <select value={permRoleId} onChange={e => setPermRoleId(e.target.value)}
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      <option value="">— Select role —</option>
+                      {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    <select value={permAction} onChange={e => setPermAction(e.target.value)}
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      {['read','write','execute','delete'].map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                    <select value={permResource} onChange={e => setPermResource(e.target.value)}
+                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      {['chat','agent','connector','reporting','organisation'].map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                    <button onClick={async () => {
+                      if (!permRoleId) return;
+                      const r = await fetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, action:permAction, resource:permResource}) });
+                      const d = await r.json();
+                      if (r.ok) setOrgMsg({text:'Permission added!',ok:true});
+                      else setOrgMsg({text:d.error||'Error',ok:false});
+                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
+                      <i className="bi bi-plus-lg mr-1"></i>Add Permission
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      case 'history':
+        return (
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">History</h3>
+            <div className="max-h-64 overflow-y-auto">
+              {searchHistory.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-400 mb-2">Recent searches</p>
+                  {searchHistory.map((query, index) => (
+                    <button
+                      key={index}
+                      className="w-full text-left px-2 py-1.5 rounded text-xs text-gray-600 hover:bg-purple-50 hover:text-purple-700 transition-colors truncate"
+                      title={query}
+                    >
+                      <i className="bi bi-clock-history mr-2 text-gray-400"></i>
+                      {query}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">No history yet.</p>
+              )}
+              {files.length > 0 && (
+                <>
+                  <hr className="my-3 border-gray-200" />
+                  <p className="text-xs text-gray-400 mb-2">Open files</p>
+                  <ul className="space-y-1">
+                    {renderFileTree(files)}
+                  </ul>
+                </>
+              )}
+              {recentDocuments.length > 0 && (
+                <>
+                  <hr className="my-3 border-gray-200" />
+                  <p className="text-xs text-gray-400 mb-2">Recent documents</p>
+                  {recentDocuments.map((doc) => (
+                    <button
+                      key={doc.id}
+                      onClick={() => { handleRecentDocumentClick(doc); setActivePanel(null); }}
+                      className="w-full text-left px-2 py-1.5 rounded text-xs text-blue-600 hover:bg-purple-50 hover:text-purple-700 transition-colors truncate"
+                      title={doc.file_name}
+                    >
+                      <i className="bi bi-file-earmark mr-2"></i>
+                      {doc.file_name}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      case 'settings':
+        return (
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Settings</h3>
+            <div className="space-y-4">
+              {/* Theme selection */}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Theme</p>
+                <div className="space-y-1">
+                  {[
+                    { value: 'white' as const, label: 'White', color: 'bg-white border border-gray-300' },
+                    { value: 'dark' as const, label: 'Dark', color: 'bg-gray-900' },
+                    { value: 'dark-blue' as const, label: 'Dark Blue', color: 'bg-blue-950' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTheme(opt.value)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+                        theme === opt.value
+                          ? 'bg-purple-50 text-purple-700 font-medium'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full ${opt.color} flex-shrink-0`}></div>
+                      {opt.label}
+                      {theme === opt.value && <i className="bi bi-check2 ml-auto text-purple-600"></i>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <hr className="border-gray-200" />
+
+              {/* Language selection */}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Language</p>
+                <div className="space-y-1">
+                  {[
+                    { code: 'en' as const, name: 'English', flag: '\uD83C\uDDEC\uD83C\uDDE7' },
+                    { code: 'fr' as const, name: 'Fran\u00e7ais', flag: '\uD83C\uDDEB\uD83C\uDDF7' },
+                    { code: 'es' as const, name: 'Espa\u00f1ol', flag: '\uD83C\uDDEA\uD83C\uDDF8' },
+                  ].map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => setLanguage(lang.code)}
+                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+                        language === lang.code
+                          ? 'bg-purple-50 text-purple-700 font-medium'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <span>{lang.flag}</span>
+                      {lang.name}
+                      {language === lang.code && <i className="bi bi-check2 ml-auto text-purple-600"></i>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      case 'user':
+        return (
+          <div className="p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">Account</h3>
+            {isAuthenticated && user ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  {user.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt={user.name || user.email}
+                      className="w-8 h-8 rounded-full object-cover border-2 border-purple-400"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                      <i className="bi bi-person-fill text-purple-600"></i>
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-800 truncate">
+                      {user.name || user.email}
+                    </div>
+                    {user.name && (
+                      <div className="text-xs text-gray-500 truncate">{user.email}</div>
+                    )}
+                  </div>
+                </div>
+                {user.plan && (
+                  <p className="text-xs text-gray-500">
+                    Plan: <span className="font-medium capitalize">{user.plan}</span>
+                  </p>
+                )}
+                <button
+                  onClick={() => {
+                    setFiles([]);
+                    setPendingFiles([]);
+                    setRecentDocuments([]);
+                    setError(null);
+                    setActivePanel(null);
+                    if (onLogout) onLogout();
+                    else logout();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-md text-xs text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <i className="bi bi-box-arrow-left mr-2"></i>
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500">Not signed in</p>
+                <button
+                  onClick={() => { setIsLoginModalOpen(true); setActivePanel(null); }}
+                  className="w-full px-3 py-2 rounded-md text-sm font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      default:
+        return null;
+    }
   };
 
   return (
   <>
-    {/* Mobile Hamburger Menu */}
-    <div className="lg:hidden">
-      {/* Hamburger Button */}
-      <button
-        onClick={toggleSidebar}
-        className="fixed top-4 left-4 z-50 bg-white shadow-lg rounded-md p-2 text-gray-700 hover:text-blue-500 transition-colors"
-      >
-        <svg
-          className="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            d="M4 6h16M4 12h16M4 18h16"
-          />
-        </svg>
-      </button>
-
-      {/* Mobile Overlay */}
-      {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-30"
-          onClick={toggleSidebar}
-        />
-      )}
-
-      {/* Mobile Sidebar */}
-      {isSidebarOpen && (
-        <div className="fixed inset-y-0 left-0 z-40 w-80 bg-white shadow-lg transform transition-transform duration-300 ease-in-out">
-          <div className="p-4 h-full flex flex-col">
-            {/* Header with close button */}
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-semibold text-gray-800">Menu</h2>
-              <button
-                onClick={toggleSidebar}
-                className="p-1 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-              >
-                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Error display */}
-            {error && (
-              <div className="mb-4 p-3 bg-yellow-500 text-white rounded-lg shadow-lg animate-slide-in-right">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-2 flex-1">
-                    <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                    <p className="text-sm font-medium">{error}</p>
-                  </div>
-                  <button
-                    onClick={() => setError(null)}
-                    className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
-                  >
-                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Loading state */}
-            {isLoading && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <div className="flex items-center space-x-2">
-                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <span className="text-sm text-blue-800">Processing files...</span>
-                </div>
-              </div>
-            )}
-
-            {/* Menu Items */}
-            <div className="space-y-4 mb-6">
-              {/* File dropdown */}
-              <div className="relative" ref={dropdownRef}>
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setIsMobileFileDropdownOpen((prev) => !prev);
-                    setIsMobileModelDropdownOpen(false);
-                  }}
-                  className="w-full flex items-center justify-between p-3 text-left bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <span className="font-medium text-gray-700">File</span>
-                  </div>
-                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {isMobileFileDropdownOpen  && (
-                  <div className="mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        fileInputRef.current?.click();
-                        setIsMobileFileDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-50 border-b border-gray-100"
-                    >
-                      Import a file
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        folderInputRef.current?.click();
-                        setIsMobileFileDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-50"
-                    >
-                      Import a folder
-                    </button>
-                  </div>
-                )}
-                
-              </div>
-
-              {/* Connector dropdown */}
-              <div className="relative" ref={modelDropdownRef}>
-                <button
-                  onClick={() => setIsMobileModelDropdownOpen(prev => !prev)}
-                  className={`w-full flex items-center justify-between p-3 text-left ${theme === 'white' ? 'bg-gray-50 hover:bg-gray-100' : theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600' : 'bg-blue-900 hover:bg-blue-800'} rounded-lg transition-colors`}
-                >
-                  <div className="flex items-center space-x-3">
-                    <svg className={`w-5 h-5 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    <span className={`font-medium ${getThemeClasses().text}`}>Connect</span>
-                  </div>
-                  <svg className={`w-4 h-4 ${getThemeClasses().textSecondary}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                
-                {isMobileModelDropdownOpen && (
-                  <div className={`mt-2 ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} ${getThemeClasses().border} rounded-lg shadow-lg overflow-hidden`}>
-                    <div className={`px-4 py-4 text-center ${getThemeClasses().textSecondary} text-sm`}>
-                      No connectors available yet.
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Sections expandables comme dans le desktop */}
-            <div className="flex-1 min-h-0 overflow-y-auto mt-4">
-              {/* Section 1: EXPLORER - Fichiers/Répertoires */}
-              <ExpandableSection
-                title="EXPLORER"
-                icon={<FileText size={16} className="text-gray-600" />}
-                isExpanded={isExplorerExpanded}
-                onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
-              >
-                <div className="max-h-48 overflow-y-auto overflow-x-hidden">
-                  {isLoading ? (
-                    <div className="flex items-center text-blue-600 text-sm py-2">
-                      <svg
-                        className="animate-spin h-4 w-4 mr-2"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          className="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                        ></circle>
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                      Loading files...
-                    </div>
-                  ) : files.length > 0 ? (
-                    <ul className="text-sm text-gray-600">
-                      {renderFileTree(files)}
-                    </ul>
-                  ) : recentDocuments.length > 0 ? (
-                    <div className="space-y-1">
-                      {recentDocuments.map((doc) => (
-                        <button
-                          key={doc.id}
-                          onClick={() => handleRecentDocumentClick(doc)}
-                          className="w-full text-left px-2 py-1.5 rounded text-sm text-blue-500 hover:underline hover:bg-gray-100 truncate"
-                          title={doc.file_name}
-                        >
-                          {doc.file_name}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm py-2">
-                      {t('sidebar.noFiles')}
-                    </p>
-                  )}
-                </div>
-              </ExpandableSection>
-
-              {/* Section 2: SEARCH - Historique de recherche */}
-              <ExpandableSection
-                title="SEARCH"
-                icon={<Search size={16} className="text-gray-600" />}
-                isExpanded={isSearchExpanded}
-                onToggle={() => setIsSearchExpanded(!isSearchExpanded)}
-              >
-                <div className="max-h-48 overflow-y-auto">
-                  {searchHistory.length > 0 ? (
-                    <div className="space-y-1">
-                      {searchHistory.map((query, index) => (
-                        <button
-                          key={index}
-                          onClick={() => {
-                            // Permettre de cliquer sur une recherche pour la réutiliser
-                            // Cette fonctionnalité peut être ajoutée plus tard
-                          }}
-                          className="w-full text-left px-2 py-1.5 rounded text-xs text-gray-600 hover:bg-gray-50 transition-colors truncate"
-                          title={query}
-                        >
-                          {query}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-gray-500 text-sm py-2">
-                      No search history
-                    </p>
-                  )}
-                </div>
-              </ExpandableSection>
-
-              {/* Section 3: USER INFO - Informations utilisateur */}
-              <ExpandableSection
-                title="USER INFO"
-                icon={<User size={16} className="text-gray-600" />}
-                isExpanded={isUserInfoExpanded}
-                onToggle={() => setIsUserInfoExpanded(!isUserInfoExpanded)}
-              >
-                <div className="max-h-40 overflow-y-auto">
-                  {isAuthenticated && user ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        {user.avatar && (
-                          <img
-                            src={user.avatar}
-                            alt={user.name || user.email}
-                            className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
-                          />
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <div className="text-gray-800 text-sm font-medium truncate">
-                            {user.name || user.email}
-                          </div>
-                          {user.name && (
-                            <div className="text-gray-600 text-xs truncate">
-                              {user.email}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {user.plan && (
-                        <div className="text-gray-600 text-xs">
-                          Plan: <span className="font-medium capitalize">{user.plan}</span>
-                        </div>
-                      )}
-                      {user.provider && (
-                        <div className="text-gray-600 text-xs">
-                          Provider: {user.provider}
-                        </div>
-                      )}
-                      <button
-                        onClick={() => {
-                          setFiles([]);
-                          setPendingFiles([]);
-                          setRecentDocuments([]);
-                          setError(null);
-                          if (onLogout) onLogout();
-                          else logout();
-                        }}
-                        className="text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
-                      >
-                        Disconnect
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-gray-500 text-sm py-2">
-                        Not authenticated
-                      </p>
-                      <button
-                        onClick={() => setIsLoginModalOpen(true)}
-                        className="w-full px-3 py-2 rounded-md text-sm font-medium transition-colors bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        Sign in
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </ExpandableSection>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Login Modal et Sign Up Modal - également pour mobile */}
-      {!isSignUpModalOpen && (
-        <LoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-          onSwitchToSignUp={() => {
-            setIsLoginModalOpen(false);
-            setTimeout(() => {
-              setIsSignUpModalOpen(true);
-            }, 300);
-          }}
-        />
-      )}
-      
-      {!isLoginModalOpen && (
-        <SignUpModal
-          isOpen={isSignUpModalOpen}
-          onClose={() => setIsSignUpModalOpen(false)}
-          onSwitchToLogin={() => {
-            setIsSignUpModalOpen(false);
-            setTimeout(() => {
-              setIsLoginModalOpen(true);
-            }, 300);
-          }}
-        />
-      )}
-    </div>
+    {/* Hidden file inputs */}
     <input
       type="file"
       ref={fileInputRef}
@@ -1621,366 +1555,226 @@ const Sidebar: React.FC<SidebarProps> = ({
       directory="true"
     />
 
-    {/* Desktop Sidebar - Nouvelle structure avec 3 sections */}
-    <div className={`hidden lg:block h-screen p-4 flex flex-col ${getThemeClasses().sidebar}`}>
-      {/* Error display */}
-      {error && (
-        <div className="mb-4 p-3 bg-yellow-500 text-white rounded-lg shadow-lg animate-slide-in-right">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2 flex-1">
-              <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-              </svg>
-              <p className="text-sm font-medium">{error}</p>
+    {/* Mobile Hamburger Menu */}
+    <div className="lg:hidden">
+      <button
+        onClick={toggleSidebar}
+        className="fixed top-4 left-4 z-50 bg-white shadow-lg rounded-md p-2 text-gray-700 hover:text-purple-500 transition-colors"
+      >
+        <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
+      {/* Mobile Overlay */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-30" onClick={toggleSidebar} />
+      )}
+
+      {/* Mobile Sidebar - same icon rail design */}
+      {isSidebarOpen && (
+        <div className="fixed inset-y-0 left-0 z-40 flex">
+          {/* Icon rail */}
+          <div className="w-16 bg-gray-100 border-r border-gray-200 flex flex-col items-center py-4 h-full">
+            {/* Logo */}
+            <div className="mb-6">
+              <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-blue-500 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold text-sm">F</span>
+              </div>
             </div>
+
+            {/* Nav icons */}
+            <nav className="flex-1 flex flex-col items-center gap-1">
+              {[
+                { id: 'connector' as SidebarPanel, icon: 'bi-command', label: 'Connector' },
+                { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: 'Agents' },
+                { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: 'Organisation' },
+                { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: 'History' },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => handleIconClick(item.id)}
+                  className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors group ${
+                    activePanel === item.id
+                      ? 'text-purple-600 bg-purple-50'
+                      : 'text-black hover:text-purple-500 hover:bg-gray-200'
+                  }`}
+                >
+                  {activePanel === item.id && (
+                    <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+                  )}
+                  <i className={`bi ${item.icon} text-lg font-bold`}></i>
+                  <span className="text-[9px] mt-0.5 leading-tight font-bold">{item.label}</span>
+                </button>
+              ))}
+            </nav>
+
+            {/* Settings icon */}
             <button
-              onClick={() => setError(null)}
-              className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+              onClick={() => handleIconClick('settings')}
+              className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${
+                activePanel === 'settings'
+                  ? 'text-purple-600 bg-purple-50'
+                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
+              }`}
             >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
+              {activePanel === 'settings' && (
+                <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+              )}
+              <i className="bi bi-gear text-lg font-bold"></i>
+              <span className="text-[9px] mt-0.5 leading-tight font-bold">Settings</span>
+            </button>
+
+            {/* User icon at bottom */}
+            <button
+              onClick={() => handleIconClick('user')}
+              className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors ${
+                activePanel === 'user'
+                  ? 'text-purple-600 bg-purple-50'
+                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
+              }`}
+            >
+              {activePanel === 'user' && (
+                <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+              )}
+              <i className="bi bi-person text-lg font-bold"></i>
+              <span className="text-[9px] mt-0.5 leading-tight font-bold">Account</span>
             </button>
           </div>
+
+          {/* Mobile flyout panel */}
+          {activePanel && (
+            <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto`}>
+              {renderFlyoutContent()}
+            </div>
+          )}
         </div>
       )}
+    </div>
 
-      {/* Loading state */}
-      {isLoading && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-          <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-            <span className="text-sm text-blue-800">Processing files...</span>
+    {/* Desktop Sidebar - Icon Rail + Flyout */}
+    <div className="hidden lg:flex h-screen" ref={iconRailRef}>
+      {/* Icon Rail */}
+      <div className="w-16 bg-gray-100 border-r border-gray-200 flex flex-col items-center py-4 h-full relative">
+        {/* Logo */}
+        <div className="mb-8">
+          <div className="w-9 h-9 bg-gradient-to-br from-purple-600 to-blue-500 rounded-lg flex items-center justify-center shadow-sm">
+            <span className="text-white font-bold text-sm">F</span>
           </div>
         </div>
-      )}
 
-      {/* Desktop Menu layout */}
-      <div className={`mb-4 ${isSidebarOpen ? 'flex justify-between items-center flex-wrap gap-2' : 'flex flex-col space-y-3'}`}>
-        {/* File dropdown */}
-        <div className="relative" ref={desktopDropdownRef}>
-          <a
-            href="#"
-            onClick={(e) => { 
-              e.preventDefault();
-              setIsDesktopFileDropdownOpen((prev) => !prev);
-            }}
-            className={`text-gray-700 hover:text-blue-500 ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : ''}`}
-          >
-            {isSidebarOpen ? 'File' : (
-              <div className="flex items-center space-x-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                <span className="text-xs">File</span>
-              </div>
-            )}
-          </a>
-          
-          {isDesktopFileDropdownOpen && (
-            <div className={`absolute bg-white shadow-lg border border-gray-200 rounded-md z-50 max-h-40 overflow-y-auto ${isSidebarOpen ? 'w-60 mt-1' : 'w-48 left-full top-0 ml-2'}`}>
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  fileInputRef.current?.click();
-                  setIsDesktopFileDropdownOpen(false);
-                }}
-                className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
-              >
-                Import a file
-              </button>
-              <button
-                onClick={(e) => {
-                  e.preventDefault();
-                  folderInputRef.current?.click();
-                  setIsDesktopFileDropdownOpen(false);
-                }}
-                className="block w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100"
-              >
-                Import a folder
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Navigation icons */}
+        <nav className="flex-1 flex flex-col items-center gap-1">
+          {[
+            { id: 'connector' as SidebarPanel, icon: 'bi-command', label: 'Connector' },
+            { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: 'Agents' },
+            { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: 'Organisation' },
+            { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: 'History' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleIconClick(item.id)}
+              className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 group ${
+                activePanel === item.id
+                  ? 'text-purple-600 bg-purple-50'
+                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
+              }`}
+              title={item.label}
+            >
+              {/* Purple right border indicator */}
+              {activePanel === item.id && (
+                <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+              )}
+              <i className={`bi ${item.icon} text-lg font-bold`}></i>
+              <span className="text-[9px] mt-0.5 leading-tight font-bold">{item.label}</span>
+            </button>
+          ))}
+        </nav>
 
-        {/* Export button */}
-        <a 
-          href="#" 
-          className={`text-gray-700 hover:text-blue-500 ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : ''}`}
+        {/* Settings icon */}
+        <button
+          onClick={() => handleIconClick('settings')}
+          className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 mb-1 ${
+            activePanel === 'settings'
+              ? 'text-purple-600 bg-purple-50'
+              : 'text-black hover:text-purple-500 hover:bg-gray-200'
+          }`}
+          title="Settings"
         >
-          {isSidebarOpen ? t('sidebar.export') : (
-            <div className="flex items-center space-x-1">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="text-xs">{t('sidebar.export')}</span>
-            </div>
-          )
-        }
-        </a>
+          {activePanel === 'settings' && (
+            <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+          )}
+          <i className="bi bi-gear text-lg font-bold"></i>
+          <span className="text-[9px] mt-0.5 leading-tight font-bold">Settings</span>
+        </button>
 
-        {/* Connector dropdown */}
-        <div className="relative" ref={desktopModelDropdownRef}>
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              setIsDesktopModelDropdownOpen(prev => !prev);
-            }}
-            className={`${getThemeClasses().text} ${theme !== 'white' ? 'hover:text-blue-300' : 'hover:text-blue-500'} ${!isSidebarOpen ? 'flex items-center justify-center w-full py-1 px-2 rounded hover:bg-gray-200' : 'flex items-center space-x-2'}`}
-          >
-            {isSidebarOpen ? (
-              <div className="flex items-center space-x-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                <span className={`text-sm font-medium truncate max-w-40`}>Connector</span>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
+        {/* User icon at bottom */}
+        <button
+          onClick={() => handleIconClick('user')}
+          className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 ${
+            activePanel === 'user'
+              ? 'text-purple-600 bg-purple-50'
+              : 'text-black hover:text-purple-500 hover:bg-gray-200'
+          }`}
+          title="Account"
+        >
+          {activePanel === 'user' && (
+            <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+          )}
+          <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+            {isAuthenticated && user?.avatar ? (
+              <img src={user.avatar} alt="" className="w-full h-full object-cover" />
             ) : (
-              <div className="flex items-center space-x-1">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                <span className="text-xs">Connector</span>
-              </div>
+              <i className="bi bi-person text-black font-bold"></i>
             )}
-          </a>
-          
-          {isDesktopModelDropdownOpen && (
-            <div className={`absolute ${theme === 'white' ? 'bg-white' : theme === 'dark' ? 'bg-gray-700' : 'bg-blue-900'} shadow-lg ${getThemeClasses().border} rounded-md z-50 overflow-hidden ${isSidebarOpen ? 'right-0 top-full w-56 mt-2' : 'left-full top-0 w-56 ml-2'}`}>
-              <div className={`px-4 py-4 text-center ${getThemeClasses().textSecondary} text-sm`}>
-                No connectors available yet.
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+          </div>
+        </button>
 
-      {/* Sections expandables avec hauteurs ajustables */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Section 1: EXPLORER - Fichiers/Répertoires */}
-        {isSidebarOpen && (
-          <ExpandableSection
-            title="EXPLORER"
-            icon={<FileText size={16} className={getThemeClasses().textSecondary} />}
-            isExpanded={isExplorerExpanded}
-            onToggle={() => setIsExplorerExpanded(!isExplorerExpanded)}
-          >
-            <div className="max-h-48 overflow-y-auto overflow-x-hidden">
-              {isLoading ? (
-                <div className={`flex items-center ${getThemeClasses().textSecondary} text-sm py-2`}>
-                  <svg
-                    className="animate-spin h-4 w-4 mr-2"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    ></circle>
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    ></path>
-                  </svg>
-                  Loading files...
-                </div>
-              ) : files.length > 0 ? (
-                <ul className={`text-sm ${getThemeClasses().textSecondary}`}>
-                  {renderFileTree(files)}
-                </ul>
-              ) : recentDocuments.length > 0 ? (
-                <div className="space-y-1">
-                  {recentDocuments.map((doc) => (
-                    <button
-                      key={doc.id}
-                      onClick={() => handleRecentDocumentClick(doc)}
-                      className={`w-full text-left px-2 py-1.5 rounded text-sm hover:underline truncate ${getThemeClasses().textSecondary} ${getThemeClasses().hover}`}
-                      title={doc.file_name}
-                    >
-                      {doc.file_name}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                  {t('sidebar.noFiles')}
-                </p>
-              )}
-            </div>
-          </ExpandableSection>
+        {/* Error indicator */}
+        {error && (
+          <div className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse" title={error}></div>
         )}
 
-        {/* Section 2: SEARCH - Historique de recherche */}
-        {isSidebarOpen && (
-          <ExpandableSection
-            title="SEARCH"
-            icon={<Search size={16} className={getThemeClasses().textSecondary} />}
-            isExpanded={isSearchExpanded}
-            onToggle={() => setIsSearchExpanded(!isSearchExpanded)}
-          >
-            <div className="max-h-48 overflow-y-auto">
-              {searchHistory.length > 0 ? (
-                <div className="space-y-1">
-                  {searchHistory.map((query, index) => (
-                    <button
-                      key={index}
-                      onClick={() => {
-                        // Permettre de cliquer sur une recherche pour la réutiliser
-                        // Cette fonctionnalité peut être ajoutée plus tard
-                      }}
-                      className={`w-full text-left px-2 py-1.5 rounded text-xs ${getThemeClasses().textSecondary} ${getThemeClasses().hover} transition-colors truncate`}
-                      title={query}
-                    >
-                      {query}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                  No search history
-                </p>
-              )}
-            </div>
-          </ExpandableSection>
-        )}
-
-        {/* Section 3: USER INFO - Informations utilisateur */}
-        {isSidebarOpen && (
-          <ExpandableSection
-            title="USER INFO"
-            icon={<User size={16} className={getThemeClasses().textSecondary} />}
-            isExpanded={isUserInfoExpanded}
-            onToggle={() => setIsUserInfoExpanded(!isUserInfoExpanded)}
-          >
-            <div className="max-h-40 overflow-y-auto">
-              {isAuthenticated && user ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    {user.avatar && (
-                      <img
-                        src={user.avatar}
-                        alt={user.name || user.email}
-                        className="w-8 h-8 rounded-full object-cover border-2 border-blue-500"
-                      />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className={`${getThemeClasses().text} text-sm font-medium truncate`}>
-                        {user.name || user.email}
-                      </div>
-                      {user.name && (
-                        <div className={`${getThemeClasses().textSecondary} text-xs truncate`}>
-                          {user.email}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  {user.plan && (
-                    <div className={`${getThemeClasses().textSecondary} text-xs`}>
-                      Plan: <span className="font-medium capitalize">{user.plan}</span>
-                    </div>
-                  )}
-                  {user.provider && (
-                    <div className={`${getThemeClasses().textSecondary} text-xs`}>
-                      Provider: {user.provider}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => {
-                      setFiles([]);
-                      setPendingFiles([]);
-                      setRecentDocuments([]);
-                      setError(null);
-                      if (onLogout) onLogout();
-                      else logout();
-                    }}
-                    className="text-xs text-red-500 hover:text-red-600 underline underline-offset-2"
-                  >
-                    Disconnect
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className={`${getThemeClasses().textSecondary} text-sm py-2`}>
-                    Not authenticated
-                  </p>
-                  <button
-                    onClick={() => setIsLoginModalOpen(true)}
-                    className={`w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      theme === 'white' 
-                        ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                        : theme === 'dark'
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                        : 'bg-blue-500 text-white hover:bg-blue-600'
-                    }`}
-                  >
-                    Sign in
-                  </button>
-                </div>
-              )}
-            </div>
-          </ExpandableSection>
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="absolute top-2 left-2 w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
         )}
       </div>
 
-      {/* Login Modal - Rendu seulement si le modal d'inscription n'est pas ouvert */}
-      {!isSignUpModalOpen && (
-        <LoginModal
-          isOpen={isLoginModalOpen}
-          onClose={() => setIsLoginModalOpen(false)}
-          onSwitchToSignUp={() => {
-            setIsLoginModalOpen(false);
-            setTimeout(() => {
-              setIsSignUpModalOpen(true);
-            }, 300);
-          }}
-        />
-      )}
-      
-      {/* Sign Up Modal - Rendu seulement si le modal de connexion n'est pas ouvert */}
-      {!isLoginModalOpen && (
-        <SignUpModal
-          isOpen={isSignUpModalOpen}
-          onClose={() => setIsSignUpModalOpen(false)}
-          onSwitchToLogin={() => {
-            setIsSignUpModalOpen(false);
-            setTimeout(() => {
-              setIsLoginModalOpen(true);
-            }, 300);
-          }}
-        />
-      )}
-      
-      {/* Toggle button */}
-      <div
-        onClick={toggleSidebar}
-        className={`${getThemeClasses().sidebar} ${getThemeClasses().text} p-2 h-10 flex items-center justify-center transition-all duration-300 absolute bottom-0 right-0 cursor-pointer ${getThemeClasses().hover}`}
-      >
-        <svg
-          className="h-5 w-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          xmlns="http://www.w3.org/2000/svg"
+      {/* Flyout Panel */}
+      {activePanel && (
+        <div
+          ref={flyoutRef}
+          className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200`}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="2"
-            d={isSidebarOpen ? 'M15 19l-7-7 7-7' : 'M9 5l7 7-7 7'}
-          />
-        </svg>
-      </div>
+          {renderFlyoutContent()}
+        </div>
+      )}
     </div>
+
+    {/* Login Modal */}
+    {!isSignUpModalOpen && (
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onSwitchToSignUp={() => {
+          setIsLoginModalOpen(false);
+          setTimeout(() => setIsSignUpModalOpen(true), 300);
+        }}
+      />
+    )}
+    
+    {/* Sign Up Modal */}
+    {!isLoginModalOpen && (
+      <SignUpModal
+        isOpen={isSignUpModalOpen}
+        onClose={() => setIsSignUpModalOpen(false)}
+        onSwitchToLogin={() => {
+          setIsSignUpModalOpen(false);
+          setTimeout(() => setIsLoginModalOpen(true), 300);
+        }}
+      />
+    )}
   </>);
 };
 

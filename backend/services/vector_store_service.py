@@ -7,8 +7,8 @@ import os
 from typing import Dict, List, Optional
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from config.models import OPENAI_API_KEY
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ import logging
 import asyncio
 import time
 from typing import Dict, List, Any
-from langchain.schema import Document
+from langchain_core.documents import Document
 import aiocache
 from config.models import DEFAULT_MODEL, OLLAMA_MODELS
 from services.api_clients import call_openai_api, call_mistral_api, call_ollama_api, call_gemini_api

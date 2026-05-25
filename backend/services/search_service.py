@@ -7,7 +7,7 @@ import re
 import requests
 import logging
 from typing import List
-from langchain.schema import Document
+from langchain_core.documents import Document
 from config.models import DEFAULT_MODEL
 from services.api_clients import call_openai_api
 

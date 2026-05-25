@@ -12,8 +12,8 @@ from io import BytesIO
 from openai import OpenAI
 from langchain_community.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from typing import Dict, List, Optional, Any
 import aiocache
 import asyncio
@@ -37,6 +37,7 @@ from utils.file_utils import (
     extract_text_from_docx, extract_text_from_pdf,
     extract_pages_from_pdf, extract_sections_from_docx,
 )
+from utils.docling_parser import parse_with_docling
 from utils.translations import translations
 from services.api_clients import (
     call_openai_api, call_mistral_api, call_ollama_api, call_gemini_api,
@@ -45,6 +46,7 @@ from services.api_clients import (
 from services.analysis_service import analyze_file_content, save_file_description
 from services.search_service import perform_online_search, search_serpapi, rerank_documents_with_llm
 from services.hybrid_retrieval import hybrid_retrieve_documents
+from services.langgraph_citation_service import run_answer_graph
 from services.vector_store_service import (
     vector_stores, embeddings, get_vector_store,
     create_vector_store, add_documents_to_vector_store,
@@ -2256,33 +2258,55 @@ async def upload_files():
         raw_bytes = file.read()
         doc_hash = compute_document_hash(raw_bytes)
 
-        # --- Page-aware extraction ---
+        # --- Docling structured extraction (PDF / DOCX) with basic fallback ---
         chunk_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
-        if extension == 'pdf':
-            pages = extract_pages_from_pdf(raw_bytes)
-            file_content = "\n".join(p["text"] for p in pages)
-            page_sections = pages
-        elif extension == 'docx':
-            page_sections = extract_sections_from_docx(raw_bytes)
-            file_content = extract_text_from_docx(BytesIO(raw_bytes))
-        else:
-            file_content = raw_bytes.decode('utf-8', errors='ignore')
-            page_sections = [{"page": 1, "text": file_content}]
+        chunks_with_meta: list = []
+        doc_meta: dict = {"parser": "basic", "num_pages": 1}
 
-        # Build flat chunk list with per-chunk metadata
-        chunks_with_meta = []
-        global_chunk_idx = 0
-        for section in page_sections:
-            section_chunks = chunk_splitter.create_documents([section["text"]])
-            for chunk_doc in section_chunks:
-                if chunk_doc.page_content.strip():
-                    chunks_with_meta.append({
-                        "text": chunk_doc.page_content,
-                        "page": section["page"],
-                        "chunk_id": f"chunk_{global_chunk_idx}",
-                        "chunk_index": global_chunk_idx,
-                    })
-                    global_chunk_idx += 1
+        if extension in ('pdf', 'docx'):
+            docling_result = parse_with_docling(raw_bytes, extension, file_name)
+        else:
+            docling_result = None
+
+        if docling_result is not None:
+            # --- Docling path: structure-aware chunks ---
+            chunks_with_meta, file_content, doc_meta = docling_result
+            logger.info(
+                "\u2705 Docling parsed %s: %d chunks, parser=%s",
+                file_name, len(chunks_with_meta), doc_meta.get("parser"),
+            )
+        else:
+            # --- Fallback: basic page-level extraction ---
+            if extension == 'pdf':
+                page_sections = extract_pages_from_pdf(raw_bytes)
+                file_content = "\n".join(p["text"] for p in page_sections)
+                doc_meta["num_pages"] = len(page_sections)
+            elif extension == 'docx':
+                page_sections = extract_sections_from_docx(raw_bytes)
+                file_content = extract_text_from_docx(BytesIO(raw_bytes))
+                doc_meta["num_pages"] = len(page_sections)
+            else:
+                file_content = raw_bytes.decode('utf-8', errors='ignore')
+                page_sections = [{"page": 1, "text": file_content}]
+
+            global_chunk_idx = 0
+            for section in page_sections:
+                for chunk_doc in chunk_splitter.create_documents([section["text"]]):
+                    if chunk_doc.page_content.strip():
+                        chunks_with_meta.append({
+                            "text":         chunk_doc.page_content,
+                            "page":         section["page"],
+                            "chunk_id":     f"chunk_{global_chunk_idx}",
+                            "chunk_index":  global_chunk_idx,
+                            "element_type": "text",
+                            "headings":     [],
+                            "section":      "",
+                        })
+                        global_chunk_idx += 1
+            logger.info(
+                "\u26a0\ufe0f Basic extraction for %s: %d chunks",
+                file_name, len(chunks_with_meta),
+            )
 
         description = await analyze_file_content(file_content, file_name, is_binary, extension, selected_model, language)
         await save_file_description(file_name, description)
@@ -2305,17 +2329,28 @@ async def upload_files():
             source='upload',
         )
 
+        # Ensure globally unique chunk IDs across multiple uploaded documents.
+        # Preferred prefix: persisted document UUID. Fallback: content hash.
+        doc_id_prefix = persist_result.get('document_id') or doc_hash
+        for idx, chunk in enumerate(chunks_with_meta):
+            chunk['chunk_id'] = f"{doc_id_prefix}_chunk_{idx}"
+            chunk['chunk_index'] = idx
+
         if persist_result.get('stored') and persist_result.get('document_id') and persist_result.get('organization_id'):
             chunk_texts = [c["text"] for c in chunks_with_meta]
             per_chunk_meta = [
                 {
-                    "document_id": persist_result['document_id'],
-                    "file_name": file_name,
-                    "page": c["page"],
-                    "chunk_id": c["chunk_id"],
-                    "session_id": session_id,
-                    "model_used": selected_model,
-                    "source": "upload",
+                    "document_id":  persist_result['document_id'],
+                    "file_name":    file_name,
+                    "page":         c["page"],
+                    "chunk_id":     c["chunk_id"],
+                    "element_type": c.get("element_type", "text"),
+                    "headings":     c.get("headings", []),
+                    "section":      c.get("section", ""),
+                    "session_id":   session_id,
+                    "model_used":   selected_model,
+                    "source":       "upload",
+                    "parser":       doc_meta.get("parser", "basic"),
                 }
                 for c in chunks_with_meta
             ]
@@ -2344,11 +2379,14 @@ async def upload_files():
             Document(
                 page_content=c["text"],
                 metadata={
-                    "document_id": file_name,
-                    "file_name": file_name,
-                    "page": c["page"],
-                    "chunk_id": c["chunk_id"],
-                    "session_id": session_id,
+                    "document_id":  file_name,
+                    "file_name":    file_name,
+                    "page":         c["page"],
+                    "chunk_id":     c["chunk_id"],
+                    "element_type": c.get("element_type", "text"),
+                    "section":      c.get("section", ""),
+                    "headings":     c.get("headings", []),
+                    "session_id":   session_id,
                 }
             )
             for c in chunks_with_meta
@@ -2373,14 +2411,15 @@ async def upload_files():
             logger.info("✅ FAISS index built and saved for %s (%d chunks)", file_name, len(faiss_docs))
 
         results.append({
-            "file_name": file_name,
-            "description": description,
-            "model_used": selected_model,
-            "storage": persist_result,
-            "chunks": chunk_store_result,
-            "pages_indexed": len(page_sections),
-            "chunks_indexed": len(chunks_with_meta),
-            "cache_hit": cached_vs is not None,
+            "file_name":     file_name,
+            "description":   description,
+            "model_used":    selected_model,
+            "storage":       persist_result,
+            "chunks":        chunk_store_result,
+            "pages_indexed": doc_meta.get("num_pages", len(set(c["page"] for c in chunks_with_meta))),
+            "chunks_indexed":len(chunks_with_meta),
+            "cache_hit":     cached_vs is not None,
+            "parser":        doc_meta.get("parser", "basic"),
         })
 
     if texts:
@@ -2539,32 +2578,36 @@ def search_semantic_documents_sync(vector_store, user_query: str, session_id: st
                     continue
                 seen.add(key)
                 
-                # Extraire les informations de page depuis les métadonnées
+                # Extraire les informations de page/section depuis les métadonnées Docling
                 page_number = d.metadata.get("page_number")
                 is_page_chunk = d.metadata.get("is_page_chunk", False)
-                
+                section = d.metadata.get("section") or ""
+                chunk_id = d.metadata.get("chunk_id")
+
                 result_dict = {
                     "fileName": fn,
                     "content": (d.page_content or "")[:2500]
                 }
-                
-                # Ajouter les informations de page si disponibles
+
                 if page_number is not None:
                     result_dict["pageNumber"] = page_number
                     result_dict["isPageChunk"] = is_page_chunk
-                
+
                 # Si c'est un chunk de page, extraire le numéro de page du contenu ou des métadonnées
                 if is_page_chunk and page_number is None:
-                    # Essayer d'extraire de la métadonnée ou du contenu
                     content_preview = d.page_content or ""
                     if "[Page" in content_preview and "de" in content_preview:
-                        # Extraire le numéro de page du format "[Page X de filename]"
                         import re
                         match = re.search(r'\[Page\s+(\d+)', content_preview)
                         if match:
                             result_dict["pageNumber"] = int(match.group(1))
                             result_dict["isPageChunk"] = True
-                
+
+                if section:
+                    result_dict["section"] = section
+                if chunk_id is not None:
+                    result_dict["chunkId"] = chunk_id
+
                 out.append(result_dict)
             return out
 
@@ -3029,12 +3072,13 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         raw_content = doc.get('content', '') or ''
         if raw_content is None:
             raw_content = ''
-        page_number = doc.get('pageNumber')  # Extraire le numéro de page si disponible
+        page_number = doc.get('pageNumber')  # page number from Docling/basic chunking
         chunk_id = doc.get('chunkId')
+        section = doc.get('section') or ''   # heading hierarchy e.g. "Chapter 2 > Safety"
         
         if file_label not in docs_by_file:
             docs_by_file[file_label] = []
-        docs_by_file[file_label].append((raw_content, page_number, chunk_id))
+        docs_by_file[file_label].append((raw_content, page_number, chunk_id, section))
     
     # Construire un résumé structuré par fichier (les premiers sont les plus pertinents)
     # IMPORTANT: Préserver le maximum de contenu pour capturer les informations comme les adresses
@@ -3042,11 +3086,13 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         # Annoter chaque chunk avec son numéro de page AVANT de les combiner
         # Ainsi le modèle peut identifier exactement quelle page contient quelle information
         annotated_chunks = []
-        for raw_content, page_number, chunk_id in contents_with_pages:
+        for raw_content, page_number, chunk_id, section in contents_with_pages:
+            parts = []
             if page_number is not None:
-                prefix = f"[p.{page_number}] "
-            else:
-                prefix = ""
+                parts.append(f"p.{page_number}")
+            if section:
+                parts.append(section)
+            prefix = f"[{' | '.join(parts)}] " if parts else ""
             annotated_chunks.append(f"{prefix}{raw_content}")
 
         pages = [c[1] for c in contents_with_pages if c[1] is not None]
@@ -3076,7 +3122,7 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         
         # Marquer les documents les plus pertinents (premiers dans la liste)
         relevance_marker = "⭐" if idx <= 3 else "🔍" if idx <= 8 else ""
-        # Ajouter les informations de page si disponibles (depuis les contenus)
+        # Header: page range + unique sections
         page_info = ""
         if pages:
             unique_pages = sorted(set(pages))
@@ -3084,6 +3130,11 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                 page_info = f" 📄 Page {unique_pages[0]}"
             else:
                 page_info = f" 📄 Pages {', '.join(map(str, unique_pages))}"
+        unique_sections = list(dict.fromkeys(
+            c[3] for c in contents_with_pages if c[3]
+        ))
+        if unique_sections:
+            page_info += f" 🗂 {' / '.join(unique_sections[:3])}"
         
         contextual_docs.append(f"{relevance_marker} [{idx}] {file_label}{page_info}:\n{content}")
 
@@ -3109,6 +3160,9 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
     if file_content is None:
         file_content = ""
     trimmed_main_content = file_content[:main_max_len] + ("..." if len(file_content) > main_max_len else "")
+
+    # Déterminer si le contenu vient entièrement des chunks (PDF/DOCX indexé via Docling)
+    content_is_chunked_only = not trimmed_main_content.strip() and bool(contextual_docs)
 
     # Construire un résumé compact de l'historique de conversation (si fourni)
     history_section = ""
@@ -3161,6 +3215,34 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                       f"L'information demandée peut être dans N'IMPORTE LEQUEL de ces documents. " \
                       f"ANALYSE TOUS LES DOCUMENTS avant de conclure qu'une information est absente.\n\n" if num_other_docs > 0 else ""
 
+    # ── Build the main-doc and chunks sections depending on whether we have raw content ──
+    if content_is_chunked_only:
+        # Binary file (PDF/DOCX): full content is in Docling chunks — make this crystal-clear to the model
+        main_doc_section = (
+            f"=== DOCUMENT ANALYSÉ: {file_name} ===\n"
+            f"⚠️ Ce document (PDF/DOCX) a été parsé par Docling et découpé en chunks ci-dessous.\n"
+            f"🚨 RÈGLE ABSOLUE: L'intégralité du contenu de '{file_name}' EST dans les chunks ci-dessous. "
+            f"NE DIS JAMAIS 'je ne trouve pas l'information' avant d'avoir lu CHAQUE chunk. "
+            f"Si l'information est dans les chunks, elle EST dans le document.\n\n"
+        )
+        chunks_section_header = (
+            f"=== CONTENU COMPLET DE '{file_name}' (CHUNKS DOCLING, classés par pertinence) ===\n"
+            f"🔴 CRITIQUE: Ces chunks CONSTITUENT le document '{file_name}'. Ce sont les pages du document, pas des fichiers externes.\n"
+            f"Chaque chunk est préfixé [p.X | Section] indiquant sa page et section d'origine.\n"
+            f"ANALYSE CHAQUE CHUNK pour répondre à la question. La réponse EST là.\n"
+        )
+    else:
+        main_doc_section = (
+            f"=== DOCUMENT PRINCIPAL (FICHIER SÉLECTIONNÉ) ===\n"
+            f"{t['main_file']}: {file_name}\n"
+            f"{t['file_content']}:\n{trimmed_main_content}\n\n"
+        )
+        chunks_section_header = (
+            f"=== AUTRES DOCUMENTS DU DOSSIER (RÉCUPÉRÉS PAR RECHERCHE SÉMANTIQUE) ===\n"
+            f"⚠️ IMPORTANT: Ces documents ont été récupérés car ils sont potentiellement pertinents. "
+            f"ANALYSE-LES MÉTICULEUSEMENT.\n"
+        )
+
     prompt = (
         f"{t['local_analysis_mode']}\n"
         f"{t['no_external_search']}\n\n"
@@ -3169,13 +3251,8 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         f"{person_filter_instructions}"
         f"=== CONTEXTE DU PROJET ===\n"
         f"{t['project_structure']}:\n{repo_structure}\n\n"
-        f"=== DOCUMENT PRINCIPAL (FICHIER SÉLECTIONNÉ) ===\n"
-        f"{t['main_file']}: {file_name}\n"
-        f"⚠️ NOTE: Ce fichier est celui actuellement sélectionné, mais l'information peut être dans d'autres fichiers.\n"
-        f"{t['file_content']}:\n{trimmed_main_content}\n\n"
-        f"=== AUTRES DOCUMENTS DU DOSSIER (RÉCUPÉRÉS PAR RECHERCHE SÉMANTIQUE) ===\n"
-        f"⚠️ IMPORTANT: Ces documents ont été récupérés car ils sont potentiellement pertinents pour ta question. "
-        f"ANALYSE-TOUS MÉTICULEUSEMENT, même si l'information semble absente du document principal.\n"
+        f"{main_doc_section}"
+        f"{chunks_section_header}"
         f"{directory_content_summary}\n\n"
         f"=== QUESTION À TRAITER ===\n"
         f"{t['question']}: {user_query}\n\n"
@@ -3183,48 +3260,44 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
         f"{t['base_response_only']}\n"
         f"🔍 PROCÉDURE DE RECHERCHE OBLIGATOIRE:\n"
     )
-    
-    # Construire la première étape de la procédure (éviter les backslashes dans f-string)
+
     if person_names_in_query:
         step1_text = "Si la question concerne une personne spécifique, vérifie d'abord que le document principal contient le nom de cette personne. Sinon, cherche dans les autres documents."
     else:
-        step1_text = f"Commence par analyser le document principal ({file_name})."
-    
+        step1_text = f"Lis TOUS les chunks de '{file_name}' listés ci-dessus." if content_is_chunked_only else f"Commence par analyser le document principal ({file_name})."
+
     prompt += (
         f"1. {step1_text}\n"
-        f"2. Si l'information n'est pas trouvée, PARCOURS SYSTÉMATIQUEMENT TOUS les autres documents listés ci-dessus.\n"
-        f"3. Les documents marqués ⭐ sont les plus pertinents selon la recherche sémantique - commence par ceux-là.\n"
-        f"4. Ne conclus JAMAIS qu'une information est absente avant d'avoir analysé TOUS les documents fournis.\n"
-        f"5. Si tu trouves l'information dans un autre document, cite explicitement le nom du fichier source.\n"
-        f"6. 📌 CITATION DE SOURCE OBLIGATOIRE: Chaque élément factuel de ta réponse DOIT être accompagné de sa source.\n"
-        f"   Format OBLIGATOIRE: **[Nom du fichier, p.X]** (exemple: **[rapport_2024.pdf, p.12]**).\n"
-        f"   Les chunks de contexte sont préfixés par [p.X] pour indiquer leur page d'origine.\n"
-        f"   Si un chunk n'a pas de préfixe de page, indique uniquement le nom du fichier: **[Nom du fichier]**.\n"
-        f"7. Si l'information est dans plusieurs documents, mentionne tous les fichiers concernés avec leurs pages.\n"
-        f"8. CITATION EXACTE OBLIGATOIRE: Quand tu cites une information spécifique trouvée dans un document, "
-        f"entoure l'extrait EXACT (texte verbatim du document, entre 5 et 50 mots) avec les marqueurs spéciaux 【extrait exact】. "
-        f"Exemple: Le contrat stipule que 【le salaire mensuel brut est fixé à 3 500 euros】. "
-        f"N'invente JAMAIS de citation - utilise UNIQUEMENT le texte tel qu'il apparaît dans le document. "
-        f"Cela permet à l'utilisateur de cliquer sur la citation pour la retrouver dans le document original.\n\n"
-        f"- Les documents sont classés par pertinence sémantique: les premiers sont les plus liés à ta question.\n"
-        f"- Mais même les documents moins pertinents peuvent contenir l'information recherchée - ne les ignore pas.\n"
+        f"2. {'Ne passe pas à une conclusion sans avoir parcouru CHAQUE chunk.' if content_is_chunked_only else 'Si l information n est pas trouvée, PARCOURS SYSTÉMATIQUEMENT TOUS les autres documents listés.'}\n"
+        f"3. Les chunks marqués ⭐ sont les plus pertinents - commence par ceux-là, mais lis aussi les autres.\n"
+        f"4. Ne conclus JAMAIS qu'une information est absente avant d'avoir analysé TOUS les chunks fournis.\n"
+        f"5. 📌 CITATION INLINE OBLIGATOIRE: Place la source IMMÉDIATEMENT après chaque fait, dans le même paragraphe.\n"
+        f"   Format: **[{file_name}, p.X]** ou **[{file_name}, p.X | Section]** si la section est disponible.\n"
+        f"   Exemple: Le salaire brut mensuel est de 3 500 € **[contrat.pdf, p.4 | Article 6 > Rémunération]**.\n"
+        f"   ❌ NE regroupe PAS toutes les sources à la fin — chaque fait doit avoir sa source INLINE.\n"
+        f"6. CITATION VERBATIM: Pour les données clés (montants, dates, noms), entoure le texte exact du document avec 【 】.\n"
+        f"   Exemple: Le contrat stipule que 【le salaire mensuel brut est fixé à 3 500 euros】 **[contrat.pdf, p.4]**.\n"
+        f"   N'invente JAMAIS de citation — copie exactement le texte du chunk.\n"
+        f"7. Si une information ne peut ni être lue ni déduite des chunks ci-dessus APRÈS AVOIR TOUT ANALYSÉ, "
+        f"répond explicitement qu'elle n'apparaît pas dans les documents fournis.\n"
+        f"- Tu peux faire des calculs (totaux, salaire mensuel/annuel, etc.) à partir des montants présents dans les chunks.\n"
         f"{t['missing_info_clarify']}\n"
         f"{t['no_speculation']}\n"
         f"{t['focus_local_analysis']}\n"
-        f"- Tu peux faire des calculs (totaux, moyennes, salaire mensuel/annuel, etc.) "
-        f"à partir des montants et périodes présents dans les documents, mais explique "
-        f"clairement ton raisonnement et les formules utilisées.\n"
-        f"- Si une information n'est pas directement présente mais peut être déduite "
-        f"par un calcul simple à partir des données (par exemple, convertir un salaire "
-        f"par paie en salaire mensuel), effectue le calcul et montre les étapes.\n"
-        f"- Si une information ne peut ni être lue ni déduite des textes ci-dessus APRÈS AVOIR ANALYSÉ TOUS LES DOCUMENTS, "
-        f"répond explicitement qu'elle n'apparaît pas dans les documents fournis.\n\n"
         f"{t['emoji']}"
     )
 
     try:
-        # Utiliser execute_model_query_with_fallback pour garantir la pertinence
-        result, model_used = await execute_model_query_with_fallback(prompt, selected_model, user_query)
+        # LangGraph pipeline:
+        # 1) generate answer with model fallback
+        # 2) enforce source block from directory_content metadata (document/page/section)
+        result, model_used = await run_answer_graph(
+            prompt=prompt,
+            selected_model=selected_model,
+            user_query=user_query,
+            directory_content=directory_content,
+            model_executor=execute_model_query_with_fallback,
+        )
         logger.info(f"✅ Modèle utilisé pour la réponse: {model_used}")
         
         # Détection automatique si l'information n'est pas disponible et recherche en ligne si activée
@@ -3265,7 +3338,6 @@ async def query_model_local_mode(file_name: str, file_content: str, directory_co
                             f"💡 **Note**: Cette réponse combine les informations des documents locaux avec des données trouvées en ligne, "
                             f"car certaines informations n'étaient pas disponibles dans les documents fournis.\n"
                         )
-                        
                         logger.info("✅ Réponse enrichie avec des données en ligne")
                     else:
                         logger.info("⚠️ Aucun résultat trouvé en ligne ou clé API manquante")
@@ -4799,228 +4871,123 @@ async def query_model_online_mode(user_query: str, selected_model: str = DEFAULT
 @app.route('/index-directory', methods=['POST'])
 async def index_directory():
     """
-    Indexe les fichiers d'un repertoire avec OpenAI embeddings
+    Indexe les fichiers d'un répertoire avec Docling + OpenAI embeddings.
+    Accepte multipart/form-data: champ 'files' (multiple), champ 'language'.
     """
     try:
-        data = request.get_json()
-        files = data.get('files', [])
         session_id = request.headers.get('Session-ID', 'default')
         user_email = _extract_user_email_from_auth_header()
-        language = data.get('language', 'en')
+        language = request.form.get('language', 'en')
 
-        if not files:
+        uploaded_files = request.files.getlist('files')
+        if not uploaded_files:
             return jsonify({
                 "error": "Aucun fichier fourni pour l'indexation",
-                'files_received': len(files)
+                'files_received': 0
             }), 400
-        
-        logger.info(f"📂 Indexation de {len(files)} fichiers pour la session {session_id}")
+
+        logger.info(f"📂 Indexation Docling de {len(uploaded_files)} fichier(s) pour la session {session_id}")
         documents = []
-        images_processed_count = 0
-        ocr_enabled = os.getenv('ENABLE_OCR', 'false').lower() == 'true'
-        
-        for file_data in files:
-            if not file_data.get('content') or not file_data.get('fileName'):
-                logger.warning(f"Fichier ignoré (contenu ou nom manquant): {file_data.get('fileName', 'inconnu')}")
+        files_indexed_names = []
+
+        for uploaded_file in uploaded_files:
+            filename = uploaded_file.filename or 'document'
+            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+            raw_bytes = uploaded_file.read()
+
+            if not raw_bytes:
+                logger.warning(f"Fichier ignoré (vide): {filename}")
                 continue
 
-            # Extraire le contenu texte principal
-            main_content = file_data['content']
-            has_images = file_data.get('hasImages', False)
-            images = file_data.get('images', [])
-            metadata_info = file_data.get('metadata', {})
-            
-            # Si le fichier contient des images, essayer d'extraire le texte des images (OCR optionnel)
-            image_texts = []
-            file_images_processed = 0
-            if has_images and images and ocr_enabled:
-                logger.info(f"🖼️ Traitement de {len(images)} image(s) pour {file_data['fileName']}")
-                try:
-                    # Importer les bibliothèques OCR si disponibles
-                    try:
-                        from PIL import Image
-                        import io
-                        import base64
-                        
-                        # Essayer d'utiliser TrOCR ou pytesseract pour l'OCR
-                        ocr_available = False
-                        processor = None
-                        model = None
-                        
-                        try:
-                            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-                            processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
-                            model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
-                            ocr_available = True
-                            logger.info("✅ TrOCR disponible pour l'extraction de texte des images")
-                        except (ImportError, Exception) as e:
-                            ocr_available = False
-                            logger.warning(f"⚠️ TrOCR non disponible, OCR désactivé pour les images: {str(e)}")
-                        
-                        if ocr_available and processor and model:
-                            for img_idx, img_data in enumerate(images):
-                                try:
-                                    if img_data.get('dataUri'):
-                                        # Extraire les données base64
-                                        data_uri = img_data['dataUri']
-                                        if data_uri.startswith('data:'):
-                                            base64_data = data_uri.split(',')[1]
-                                            image_bytes = base64.b64decode(base64_data)
-                                            image = Image.open(io.BytesIO(image_bytes))
-                                            
-                                            # Utiliser TrOCR pour extraire le texte
-                                            pixel_values = processor(image, return_tensors="pt").pixel_values
-                                            generated_ids = model.generate(pixel_values)
-                                            generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-                                            
-                                            if generated_text.strip():
-                                                image_texts.append(f"[Image {img_idx + 1}: {generated_text.strip()}]")
-                                                file_images_processed += 1
-                                                images_processed_count += 1
-                                                logger.info(f"✅ Texte extrait de l'image {img_idx + 1}: {generated_text[:50]}...")
-                                except Exception as img_error:
-                                    logger.warning(f"⚠️ Erreur lors du traitement de l'image {img_idx + 1}: {str(img_error)}")
-                                    continue
-                    except ImportError:
-                        logger.warning("⚠️ PIL/Pillow non disponible, OCR désactivé pour les images")
-                        
-                except Exception as ocr_error:
-                    logger.warning(f"⚠️ Erreur lors de l'initialisation OCR: {str(ocr_error)}")
-            
-            # Combiner le contenu principal avec les textes extraits des images
-            if image_texts:
-                main_content += "\n\n=== TEXTE EXTRAIT DES IMAGES ===\n" + "\n".join(image_texts)
-            
-            # Construire les métadonnées enrichies
-            document_metadata = {
-                    'fileName': file_data['fileName'],
-                'file_size': metadata_info.get('file_size', len(main_content)),
-                'word_count': metadata_info.get('wordCount'),
-                'page_count': metadata_info.get('pageCount'),
-                'has_scanned_content': metadata_info.get('hasScannedContent', False),
-                'scanned_pages': metadata_info.get('scannedPages'),  # Pages scannées (PDF)
-                'invoice_pages': metadata_info.get('invoicePages'),  # Pages de factures (PDF)
-                'has_images': has_images,
-                'images_count': len(images) if images else 0,
-                'images_ocr_processed': file_images_processed,
-                    'indexed_at': datetime.utcnow().isoformat()
-                }
-            
-            # Ajouter des métadonnées sur les images si disponibles
-            if images:
-                document_metadata['image_descriptions'] = [
-                    img.get('description', f"Image {idx + 1}") 
-                    for idx, img in enumerate(images)
-                ]
-                # Ajouter les informations de page pour les images
-                images_with_pages = [img for img in images if img.get('pageNumber')]
-                if images_with_pages:
-                    images_by_page_dict = {}
-                    for img in images_with_pages:
-                        page_num = str(img.get('pageNumber'))
-                        if page_num not in images_by_page_dict:
-                            images_by_page_dict[page_num] = []
-                        images_by_page_dict[page_num].append({
-                            'id': img.get('id'),
-                            'description': img.get('description')
-                        })
-                    document_metadata['images_by_page'] = images_by_page_dict
-            
-            # Ajouter des informations sur les pages si disponibles
-            pages_info = file_data.get('pages', [])
-            if pages_info:
-                document_metadata['pages_info'] = [
-                    {
-                        'page_number': page.get('pageNumber'),
-                        'word_count': page.get('wordCount'),
-                        'char_count': page.get('charCount'),
-                        'has_images': page.get('hasImages', False),
-                        'images_count': len(page.get('images', [])) if page.get('images') else 0
+            # — Docling parse + chunk avec métadonnées riches —
+            parse_result = parse_with_docling(raw_bytes, ext, filename)
+
+            if parse_result:
+                chunks_with_meta, full_text, docling_meta = parse_result
+                num_pages = docling_meta.get('num_pages', 0)
+                logger.info(f"✅ Docling: {filename} → {num_pages} page(s), {len(chunks_with_meta)} chunk(s)")
+
+                for chunk in chunks_with_meta:
+                    if not chunk.get('text', '').strip():
+                        continue
+                    doc_metadata = {
+                        'fileName': filename,
+                        'page_number': chunk.get('page'),
+                        'section': chunk.get('section', ''),
+                        'chunk_id': chunk.get('chunk_id', ''),
+                        'element_type': chunk.get('element_type', 'text'),
+                        'headings': chunk.get('headings', []),
+                        'indexed_at': datetime.utcnow().isoformat(),
                     }
-                    for page in pages_info
-                ]
-                
-                # Ajouter des chunks par page pour permettre la recherche granulaire par page
-                # Optionnel: permet de rechercher et référencer une page spécifique
-                if len(pages_info) > 1:
-                    logger.info(f"📄 Document {file_data['fileName']} divisé en {len(pages_info)} pages pour indexation granulaire")
-                    
-                    # Créer des documents additionnels par page pour recherche granulaire
-                    # Le document principal reste inchangé, mais on ajoute des références par page
-                    for page in pages_info:
-                        page_content = page.get('content', '')
-                        if page_content:
-                            # Ajouter un préfixe pour identifier la page dans le contenu
-                            page_document = Document(
-                                page_content=f"[Page {page.get('pageNumber')} de {file_data['fileName']}]\n\n{page_content}",
-                                metadata={
-                                    **document_metadata,
-                                    'page_number': page.get('pageNumber'),
-                                    'is_page_chunk': True,
-                                    'original_file': file_data['fileName']
-                                }
-                            )
-                            documents.append(page_document)
+                    documents.append(Document(
+                        page_content=chunk['text'],
+                        metadata=doc_metadata
+                    ))
 
-            documents.append(Document(
-                page_content=main_content,
-                metadata=document_metadata
-            ))
+                files_indexed_names.append(filename)
+                aws_persistence_service.persist_document(
+                    file_name=filename,
+                    content=full_text,
+                    metadata={'num_pages': num_pages, 'parser': 'docling'},
+                    user_email=user_email,
+                    session_id=session_id,
+                    source='index-directory',
+                )
+            else:
+                # — Fallback: extraction basique si Docling indisponible —
+                logger.warning(f"⚠️ Docling indisponible pour {filename}, fallback extraction basique")
+                try:
+                    if ext == 'pdf':
+                        fallback_text = extract_text_from_pdf(raw_bytes)
+                    elif ext == 'docx':
+                        from io import BytesIO as _BytesIO
+                        fallback_text = extract_text_from_docx(type('_F', (), {'read': lambda self: raw_bytes})())
+                    else:
+                        fallback_text = raw_bytes.decode('utf-8', errors='replace')
 
-            aws_persistence_service.persist_document(
-                file_name=file_data['fileName'],
-                content=main_content,
-                metadata=document_metadata,
-                user_email=user_email,
-                session_id=session_id,
-                source='index-directory',
-            )
+                    if fallback_text and fallback_text.strip():
+                        documents.append(Document(
+                            page_content=fallback_text,
+                            metadata={
+                                'fileName': filename,
+                                'indexed_at': datetime.utcnow().isoformat(),
+                                'parser': 'fallback',
+                            }
+                        ))
+                        files_indexed_names.append(filename)
+                except Exception as fb_err:
+                    logger.error(f"❌ Fallback extraction échouée pour {filename}: {fb_err}")
+
         if not documents:
             return jsonify({
                 "error": "Aucun fichier valide à indexer",
-                'files_processed':0
+                'files_processed': 0
             }), 400
-        
-        logger.info(f"🗂️ {len(documents)} documents prêts pour l'indexation")
 
-        # Diviser les documents en chunks avec stratégie améliorée pour préserver le contexte
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,  # Augmenté pour préserver plus de contexte
-            chunk_overlap=150,  # Plus de chevauchement pour préserver les phrases complètes
-            length_function=len,
-            separators=["\n\n\n", "\n\n", "\n", ". ", " ", ""]  # Meilleure préservation des paragraphes
-        )
-        split_docs = text_splitter.split_documents(documents)
-        logger.info(f"✂️ Documents divisés en {len(split_docs)} chunks (chunk_size=2000, overlap=300)")
-        
-        # Vérifier la clé OpenAI
+        logger.info(f"🗂️ {len(documents)} chunks Docling prêts pour l'embedding")
+
+        # — Embeddings OpenAI —
         openai_api_key = os.getenv('OPENAI_API_KEY')
         if not openai_api_key:
             return jsonify({
                 'error': 'Clé API OpenAI non configurée sur le serveur',
                 'suggestion': 'Contactez l\'administrateur pour configurer OPENAI_API_KEY'
             }), 500
-        
-        # Créer les embeddings avec un modèle plus récent et performant
-        logger.info("🧠 Création des embeddings avec OpenAI...")
-        # Utiliser text-embedding-3-small ou text-embedding-ada-002 selon disponibilité
+
         try:
-            # Essayer d'abord le modèle plus récent (meilleure qualité sémantique)
-            embeddings = OpenAIEmbeddings(
+            embeddings_model = OpenAIEmbeddings(
                 api_key=openai_api_key,
-                model="text-embedding-3-large"  # Plus performant que ada-002
+                model="text-embedding-3-large"
             )
-            logger.info("✅ Utilisation de text-embedding-3-large pour meilleure qualité sémantique")
-        except Exception as e:
-            logger.warning(f"text-embedding-3-large non disponible, fallback vers ada-002: {str(e)}")
-            embeddings = OpenAIEmbeddings(
+            logger.info("✅ Utilisation de text-embedding-3-large")
+        except Exception:
+            embeddings_model = OpenAIEmbeddings(
                 api_key=openai_api_key,
                 model="text-embedding-ada-002"
             )
-        
-        # Test rapide de l'API
+
         try:
-            test_embedding = await embeddings.aembed_query("test")
+            test_embedding = await embeddings_model.aembed_query("test")
             logger.info(f"✅ API OpenAI fonctionnelle, dimension: {len(test_embedding)}")
         except Exception as e:
             logger.error(f"❌ Erreur de test API OpenAI: {str(e)}")
@@ -5028,36 +4995,35 @@ async def index_directory():
                 'error': f'Erreur API OpenAI: {str(e)}',
                 'suggestion': 'Vérifiez votre clé API et votre quota'
             }), 500
-        
-        # Inférer des actions suggérées pour ce corpus
+
+        # — Inférence des actions suggérées —
         logger.info("🧠 Inférence des actions suggérées pour le corpus...")
-        language = data.get('language', 'en')
-        inferred_actions = await infer_corpus_actions(split_docs, language=language)
-        
-        # Créer le vector store
-        logger.info("🗃️ Création du vector store...")
-        vector_store = await FAISS.afrom_documents(split_docs, embeddings)
-        
-        # Stocker le vector store et les actions pour cette session
+        inferred_actions = await infer_corpus_actions(documents, language=language)
+
+        # — Création du vector store FAISS —
+        logger.info("🗃️ Création du vector store FAISS...")
+        vector_store_obj = await FAISS.afrom_documents(documents, embeddings_model)
+
         vector_stores[session_id] = {
-            'store': vector_store,
+            'store': vector_store_obj,
             'created_at': datetime.utcnow().isoformat(),
-            'files_count': len(files),
-            'chunks_count': len(split_docs),
-            'files_indexed': [f['fileName'] for f in files],
+            'files_count': len(files_indexed_names),
+            'chunks_count': len(documents),
+            'files_indexed': files_indexed_names,
             'auto_actions': inferred_actions
         }
-        
-        logger.info(f"✅ Indexation terminée pour la session {session_id}")
-        if images_processed_count > 0:
-            logger.info(f"🖼️ {images_processed_count} image(s) traitée(s) avec OCR")
-        
+
+        logger.info(
+            f"✅ Indexation Docling terminée — session {session_id}: "
+            f"{len(files_indexed_names)} fichier(s), {len(documents)} chunks"
+        )
+
         return jsonify({
             'success': True,
             'session_id': session_id,
-            'indexed_files_count': len(files),
-            'chunks_count': len(split_docs),
-            'files_indexed': [f['fileName'] for f in files],
+            'indexed_files_count': len(files_indexed_names),
+            'chunks_count': len(documents),
+            'files_indexed': files_indexed_names,
             'vector_store_ready': True,
             'suggested_actions': inferred_actions.get('suggested_actions', []),
             'corpus_domain': inferred_actions.get('domain', 'unknown'),
@@ -5065,10 +5031,8 @@ async def index_directory():
             'detected_type_label': inferred_actions.get('detected_type_label', 'Document'),
             'detected_type_confidence': inferred_actions.get('detected_type_confidence', 0),
             'type_distribution': inferred_actions.get('type_distribution', {}),
-            'images_ocr_processed': images_processed_count,
-            'ocr_enabled': ocr_enabled
         }), 200
-        
+
     except Exception as e:
         logger.error(f"❌ Erreur lors de l'indexation: {str(e)}")
         return jsonify({
@@ -5278,7 +5242,7 @@ async def handle_query():
                             corpus_docs = []
                             for doc_dict in directory_content:
                                 # Create a Document object from the dict
-                                from langchain.schema import Document
+                                from langchain_core.documents import Document
                                 doc = Document(
                                     page_content=doc_dict.get('content', ''),
                                     metadata={
@@ -5336,6 +5300,7 @@ async def handle_query():
                                     seen_docs.add(doc_key)
                                     page_number = doc.metadata.get("page") or doc.metadata.get("page_number")
                                     chunk_id = doc.metadata.get("chunk_id")
+                                    section = doc.metadata.get("section")
                                     result_dict = {
                                         "fileName": file_name_from_meta,
                                         "content": doc.page_content[:2500]
@@ -5344,6 +5309,8 @@ async def handle_query():
                                         result_dict["pageNumber"] = page_number
                                     if chunk_id is not None:
                                         result_dict["chunkId"] = chunk_id
+                                    if section:
+                                        result_dict["section"] = section
                                     directory_content.append(result_dict)
                             
                             logger.info(f"📚 {len(directory_content)} documents uniques ajoutés depuis le vector store de session")
@@ -5395,10 +5362,13 @@ async def handle_query():
                         }
                         page_number = doc.metadata.get("page") or doc.metadata.get("page_number")
                         chunk_id = doc.metadata.get("chunk_id")
+                        section = doc.metadata.get("section")
                         if page_number is not None:
                             result_dict["pageNumber"] = page_number
                         if chunk_id is not None:
                             result_dict["chunkId"] = chunk_id
+                        if section:
+                            result_dict["section"] = section
                         directory_content.append(result_dict)
                     logger.info(f"📚 {len(relevant_docs)} documents ajoutés depuis le vector store global")
                 except Exception as e:
@@ -5783,27 +5753,51 @@ async def extract_structured():
 
 @app.route('/summarize_file_stream', methods=['POST'])
 def summarize_file_stream():
-    """Génère un résumé d'un fichier avec streaming (4 lignes max)"""
+    """Génère un résumé d'un fichier avec streaming (4 lignes max).
+    Accepte multipart/form-data: champ 'file', champ 'language'.
+    """
     try:
-        data = request.get_json()
-        file_name = data.get('file_name', '')
-        file_content = data.get('file_content', '')
-        language = data.get('language', 'en')
-        
+        uploaded_file = request.files.get('file')
+        language = request.form.get('language', 'en')
+
+        if not uploaded_file:
+            return jsonify({"error": "Aucun fichier fourni"}), 400
+
+        file_name = uploaded_file.filename or 'document'
+        ext = file_name.rsplit('.', 1)[-1].lower() if '.' in file_name else ''
+        raw_bytes = uploaded_file.read()
+
         # Get translations for the selected language
         t = translations.get(language, translations['en'])
-        
-        if not file_content:
+
+        # — Docling parse to extract text —
+        file_content = ""
+        parse_result = parse_with_docling(raw_bytes, ext, file_name)
+        if parse_result:
+            _, full_text, _ = parse_result
+            file_content = full_text
+        else:
+            try:
+                if ext == 'pdf':
+                    file_content = extract_text_from_pdf(raw_bytes)
+                elif ext == 'docx':
+                    file_content = extract_text_from_docx(type('_F', (), {'read': lambda self: raw_bytes})())
+                else:
+                    file_content = raw_bytes.decode('utf-8', errors='replace')
+            except Exception:
+                file_content = ""
+
+        if not file_content or not file_content.strip():
             error_msg = t.get('no_content_provided', 'No content provided')
             return jsonify({"error": error_msg}), 400
-        
+
         # Build language-specific prompt
         lang_names = {'en': 'English', 'fr': 'French', 'es': 'Spanish'}
         lang_name = lang_names.get(language, language)
         prompt_text = t['summarize_file_prompt'].format(language=lang_name)
         summary_label = t['summarize_file_summary_label']
         system_content = t['summarize_file_system'].format(language=lang_name)
-        
+
         prompt = f"""{prompt_text}
 
 Document: {file_name}

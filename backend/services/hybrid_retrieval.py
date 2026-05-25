@@ -13,7 +13,7 @@ import re
 from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 
 _STOPWORDS = {

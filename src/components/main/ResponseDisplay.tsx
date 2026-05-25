@@ -371,25 +371,35 @@ const ResponseDisplay: React.FC<ResponseDisplayProps> = ({
                       >
                         <MarkdownResponse content={message.aiResponse} />
                         
-                        {/* Affichage des pages référencées */}
-                        {message.pagesReferenced && message.pagesReferenced.length > 0 && !isStreaming && (
-                          <div className="mt-3 pt-3 border-t border-gray-200">
-                            <div className="text-xs text-gray-600 font-medium mb-1">
-                              📄 Pages référencées:
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {message.pagesReferenced.map((page, idx) => (
-                                <span 
+                        {/* Sources utilisées — déduplication par (fileName, pageNumber) */}
+                        {message.pagesReferenced && message.pagesReferenced.length > 0 && !isStreaming && (() => {
+                          const seen = new Set<string>();
+                          const unique = message.pagesReferenced!.filter(p => {
+                            const key = `${p.fileName}::${p.pageNumber}`;
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                          });
+                          const shown = unique.slice(0, 6);
+                          const extra = unique.length - shown.length;
+                          return (
+                            <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-1.5">
+                              <span className="text-xs text-gray-400 font-medium shrink-0">Sources:</span>
+                              {shown.map((page, idx) => (
+                                <span
                                   key={idx}
-                                  className="inline-flex items-center px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-xs font-medium border border-blue-200"
-                                  title={`Information extraite de la page ${page.pageNumber} de ${page.fileName}`}
+                                  className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-xs border border-blue-100"
+                                  title={`${page.fileName} — page ${page.pageNumber}`}
                                 >
-                                  📄 {page.fileName} - Page {page.pageNumber}
+                                  p.{page.pageNumber}
                                 </span>
                               ))}
+                              {extra > 0 && (
+                                <span className="text-xs text-gray-400">+{extra} autres</span>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
                         
                         {/* Indicateur de streaming */}
                         {isStreaming && (
