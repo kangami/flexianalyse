@@ -2,7 +2,7 @@ from .organization import Organization
 from .department import Department
 from .user import User, UserSession
 from .role import Role, Membership
-from .permission import Permission, Policy
+from .permission import Permission, Policy, RolePermission
 from .connector import Connector, ConnectorCredentials, ToolScope
 from .resource import Resource, ResourceBinding
 from .rate_limit import RateLimit
@@ -18,6 +18,7 @@ __all__ = [
     "Membership",
     "Permission",
     "Policy",
+    "RolePermission",
     "Connector",
     "ConnectorCredentials",
     "ToolScope",

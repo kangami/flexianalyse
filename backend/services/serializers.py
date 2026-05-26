@@ -1,5 +1,6 @@
 """Conversions dataclass → dict pour la sérialisation JSON."""
 from models import Organization, Department, User, Role, Permission
+from models.permission import RolePermission
 
 
 def org_to_dict(o: Organization) -> dict:
@@ -19,4 +20,8 @@ def role_to_dict(r: Role) -> dict:
 
 
 def perm_to_dict(p: Permission) -> dict:
-    return {"id": str(p.id), "role_id": str(p.role_id), "action": p.action, "resource": p.resource, "scope": p.scope, "allowed": p.allowed, "created_at": p.created_at.isoformat() if p.created_at else None}
+    return {"id": str(p.id), "action": p.action, "resource": p.resource, "scope": p.scope, "allowed": p.allowed, "created_at": p.created_at.isoformat() if p.created_at else None}
+
+
+def role_perm_to_dict(rp: RolePermission) -> dict:
+    return {"role_id": str(rp.role_id), "permission_id": str(rp.permission_id), "created_at": rp.created_at.isoformat() if rp.created_at else None}

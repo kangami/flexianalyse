@@ -8,6 +8,7 @@ from repositories import (
     MembershipRepository,
     PermissionRepository,
     PolicyRepository,
+    RolePermissionRepository,
     ConnectorRepository,
     ConnectorCredentialsRepository,
     ToolScopeRepository,
@@ -80,6 +81,12 @@ class ServiceLocator:
         if "permissions" not in self._repos:
             self._repos["permissions"] = PermissionRepository(self.db)
         return self._repos["permissions"]
+
+    @property
+    def role_permissions(self) -> RolePermissionRepository:
+        if "role_permissions" not in self._repos:
+            self._repos["role_permissions"] = RolePermissionRepository(self.db)
+        return self._repos["role_permissions"]
 
     @property
     def policies(self) -> PolicyRepository:

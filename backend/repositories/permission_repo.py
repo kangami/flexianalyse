@@ -1,6 +1,6 @@
 from typing import Optional, List
 from uuid import UUID
-from models.permission import Permission, Policy
+from models.permission import Permission, Policy, RolePermission
 from .base import BaseRepository
 
 
@@ -16,22 +16,31 @@ class PermissionRepository(BaseRepository[Permission]):
         )
         return Permission(**row) if row else None
 
+    def find_by_action_resource(self, action: str, resource: str) -> Optional[Permission]:
+        row = self.db.fetch_one(
+            "SELECT * FROM permissions WHERE action = %s AND resource = %s AND deleted_at IS NULL",
+            (action, resource)
+        )
+        return Permission(**row) if row else None
+
     def list_by_role(self, role_id: UUID) -> List[Permission]:
         rows = self.db.fetch_all(
-            """SELECT * FROM permissions
-               WHERE role_id = %s AND deleted_at IS NULL
-               AND now() BETWEEN valid_from AND valid_to
-               ORDER BY resource, action""",
+            """SELECT p.* FROM permissions p
+               JOIN role_permissions rp ON rp.permission_id = p.id
+               WHERE rp.role_id = %s AND p.deleted_at IS NULL
+               AND now() BETWEEN p.valid_from AND p.valid_to
+               ORDER BY p.resource, p.action""",
             (role_id,)
         )
         return [Permission(**r) for r in rows]
 
     def check_permission(self, role_id: UUID, action: str, resource: str) -> bool:
         row = self.db.fetch_one(
-            """SELECT 1 FROM permissions
-               WHERE role_id = %s AND action = %s AND resource = %s
-               AND allowed = true AND deleted_at IS NULL
-               AND now() BETWEEN valid_from AND valid_to
+            """SELECT 1 FROM permissions p
+               JOIN role_permissions rp ON rp.permission_id = p.id
+               WHERE rp.role_id = %s AND p.action = %s AND p.resource = %s
+               AND p.allowed = true AND p.deleted_at IS NULL
+               AND now() BETWEEN p.valid_from AND p.valid_to
                LIMIT 1""",
             (role_id, action, resource)
         )
@@ -46,9 +55,9 @@ class PermissionRepository(BaseRepository[Permission]):
 
     def create(self, entity: Permission) -> Permission:
         row = self.db.fetch_one(
-            """INSERT INTO permissions (role_id, action, resource, scope, allowed, valid_from, valid_to, version)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
-            (entity.role_id, entity.action, entity.resource, entity.scope,
+            """INSERT INTO permissions (action, resource, scope, allowed, valid_from, valid_to, version)
+               VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (entity.action, entity.resource, entity.scope,
              entity.allowed, entity.valid_from, entity.valid_to, entity.version)
         )
         return Permission(**row)
@@ -72,6 +81,33 @@ class PermissionRepository(BaseRepository[Permission]):
     def hard_delete(self, id: UUID) -> bool:
         result = self.db.execute("DELETE FROM permissions WHERE id = %s", (id,))
         return result.rowcount > 0
+
+
+class RolePermissionRepository:
+    """Accès à la table de jonction role_permissions."""
+
+    def __init__(self, db_connection):
+        self.db = db_connection
+
+    def link(self, role_id: UUID, permission_id: UUID) -> bool:
+        result = self.db.execute(
+            "INSERT INTO role_permissions (role_id, permission_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (role_id, permission_id)
+        )
+        return result.rowcount > 0
+
+    def unlink(self, role_id: UUID, permission_id: UUID) -> bool:
+        result = self.db.execute(
+            "DELETE FROM role_permissions WHERE role_id = %s AND permission_id = %s",
+            (role_id, permission_id)
+        )
+        return result.rowcount > 0
+
+    def list_by_role(self, role_id: UUID) -> List[RolePermission]:
+        rows = self.db.fetch_all(
+            "SELECT * FROM role_permissions WHERE role_id = %s", (role_id,)
+        )
+        return [RolePermission(**r) for r in rows]
 
 
 class PolicyRepository(BaseRepository[Policy]):

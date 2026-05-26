@@ -11,6 +11,27 @@ import { auth } from '../../lib/firebase';
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
 
+const PERM_RESOURCES = ['organizations', 'users', 'memberships', 'departments', 'teams', 'roles', 'permissions', 'connectors', 'documents', 'cases', 'analyses', 'prompts', 'ai_agents', 'audit_logs', 'settings', 'billing'] as const;
+
+const RESOURCE_ACTIONS: Record<string, readonly string[]> = {
+  organizations: ['read', 'create', 'update', 'manage'],
+  users:         ['read', 'create', 'update', 'delete', 'manage', 'export'],
+  memberships:   ['read', 'create', 'update', 'delete', 'assign', 'manage'],
+  departments:   ['read', 'create', 'update', 'delete', 'assign', 'manage'],
+  teams:         ['read', 'create', 'update', 'delete', 'assign', 'manage'],
+  roles:         ['read', 'create', 'update', 'delete', 'assign', 'manage'],
+  permissions:   ['read', 'assign'],
+  connectors:    ['read', 'create', 'update', 'delete', 'manage', 'sync', 'authorize'],
+  documents:     ['read', 'create', 'update', 'delete', 'assign', 'manage', 'export'],
+  cases:         ['read', 'create', 'update', 'delete', 'assign', 'manage', 'export'],
+  analyses:      ['read', 'create', 'delete', 'execute', 'export'],
+  prompts:       ['read', 'create', 'update', 'delete', 'execute', 'manage'],
+  ai_agents:     ['read', 'create', 'update', 'delete', 'execute', 'manage'],
+  audit_logs:    ['read', 'export'],
+  settings:      ['read', 'update', 'manage'],
+  billing:       ['read', 'update', 'manage', 'export'],
+};
+
 interface FileNode {
   name: string;
   children?: FileNode[];
@@ -1372,21 +1393,27 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <hr className="border-gray-200" />
                   <div className="border border-gray-200 rounded-lg p-3">
                     <p className="text-xs font-semibold text-gray-700 mb-2">Add Permission</p>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Roles</label>
                     <select value={permRoleId} onChange={e => setPermRoleId(e.target.value)}
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
                       <option value="">— Select role —</option>
                       {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                    <select value={permAction} onChange={e => setPermAction(e.target.value)}
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
-                      {['read','write','execute','delete'].map(a => <option key={a} value={a}>{a}</option>)}
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Resources</label>
+                    <select value={permResource} onChange={e => { setPermResource(e.target.value); setPermAction(''); }}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      <option value="">— Select resource —</option>
+                      {PERM_RESOURCES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
-                    <select value={permResource} onChange={e => setPermResource(e.target.value)}
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
-                      {['chat','agent','connector','reporting','organisation'].map(r => <option key={r} value={r}>{r}</option>)}
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Actions</label>
+                    <select value={permAction} onChange={e => setPermAction(e.target.value)}
+                      disabled={!permResource}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white disabled:bg-gray-100 disabled:text-gray-400">
+                      <option value="">— Select action —</option>
+                      {(RESOURCE_ACTIONS[permResource] || []).map(a => <option key={a} value={a}>{a}</option>)}
                     </select>
                     <button onClick={async () => {
-                      if (!permRoleId) return;
+                      if (!permRoleId || !permResource || !permAction) return;
                       const r = await fetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, action:permAction, resource:permResource}) });
                       const d = await r.json();
                       if (r.ok) setOrgMsg({text:'Permission added!',ok:true});

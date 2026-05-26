@@ -85,16 +85,27 @@ WHERE status = 'active' AND deleted_at IS NULL;
 -- =====================================================
 CREATE TABLE permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
-    action TEXT,      -- read, write, execute
-    resource TEXT,    -- drive, jira, chat, connector
-    scope TEXT,       -- org, project, folder, etc
+    action TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    scope TEXT DEFAULT 'org',
     allowed BOOLEAN DEFAULT true,
     valid_from TIMESTAMP DEFAULT now(),
     valid_to TIMESTAMP DEFAULT 'infinity',
     version INT DEFAULT 1,
     created_at TIMESTAMP DEFAULT now(),
-    deleted_at TIMESTAMP DEFAULT NULL  -- Soft delete
+    deleted_at TIMESTAMP DEFAULT NULL,  -- Soft delete
+    
+    UNIQUE(action, resource)
+);
+
+-- =====================================================
+-- 🔗 ROLE_PERMISSIONS (many-to-many junction)
+-- =====================================================
+CREATE TABLE role_permissions (
+    role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+    permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT now(),
+    PRIMARY KEY (role_id, permission_id)
 );
 
 -- =====================================================
@@ -356,6 +367,16 @@ CREATE INDEX idx_permissions_role_resource ON permissions(role_id, resource) WHE
 -- =====================================================
 -- 🔧 TRIGGER pour vérifier la cohérence role/organization
 -- =====================================================
+
+
+-- =====================================================
+-- 🔧 enforce Uniquenes around name field 
+-- =====================================================
+ALTER TABLE organizations ADD CONSTRAINT uq_org_name UNIQUE (name);
+
+ALTER TABLE departments ADD CONSTRAINT uq_dept_name_per_org 
+  UNIQUE (organization_id, name);
+
 
 CREATE OR REPLACE FUNCTION check_membership_role_organization()
 RETURNS TRIGGER AS $$
