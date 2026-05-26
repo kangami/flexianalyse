@@ -1,5 +1,6 @@
 import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
 import { Paginator } from '../ui/Paginator';
+import { RequiredField } from '../ui/RequiredField';
 import { FolderOpen, Folder } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -1366,8 +1367,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="space-y-4">
                   <div className="border border-gray-200 rounded-lg p-3">
                     <p className="text-xs font-semibold text-gray-700 mb-2">Create Role</p>
-                    <input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Role name"
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    <RequiredField label="Organisation">
+                      <select value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)} required
+                        className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                        <option value="">— Select organisation —</option>
+                        {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                      </select>
+                    </RequiredField>
+                    <RequiredField label="Role Name">
+                      <input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Role name" required
+                        className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
+                    </RequiredField>
                     <button onClick={async () => {
                       if (!roleName || !selectedOrgId) return;
                       const r = await fetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:roleName, organization_id:selectedOrgId}) });
