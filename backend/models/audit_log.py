@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime, timezone
-from uuid import UUID
 from enum import StrEnum
-from typing import ClassVar, Optional, Any
+from config.extensions import db
 
 
 class AuditAction(StrEnum):
@@ -14,16 +13,15 @@ class AuditAction(StrEnum):
     DENIED = "denied"
 
 
-@dataclass
-class AuditLog:
-    """Log d'audit (table partitionnée par année)."""
-    TABLE: ClassVar[str] = "audit_logs"
-    
-    id: UUID
-    organization_id: Optional[UUID] = None
-    user_id: Optional[UUID] = None
-    action: Optional[AuditAction] = None
-    resource: Optional[str] = None
-    tool: Optional[str] = None
-    metadata: dict = field(default_factory=dict)  # JSONB
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+class AuditLog(db.Model):
+    """Log d'audit."""
+    __tablename__ = 'audit_logs'
+
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=True)
+    user_id = db.Column(db.Uuid, db.ForeignKey('users.id'), nullable=True)
+    action = db.Column(db.String, nullable=True)
+    resource = db.Column(db.String, nullable=True)
+    tool = db.Column(db.String, nullable=True)
+    audit_metadata = db.Column(db.JSON, default=dict)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

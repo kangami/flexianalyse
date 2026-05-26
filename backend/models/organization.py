@@ -1,15 +1,13 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
-from uuid import UUID
-from typing import Optional
+from config.extensions import db
 
 
-@dataclass
-class Organization:
-    """ Organisation — tenant racine du multi-tenant."""
-    id: UUID
-    name: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+class Organization(db.Model):
+    """Organisation — tenant racine du multi-tenant."""
+    __tablename__ = 'organizations'
 
-    TABLE = "organizations"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    name = db.Column(db.String, nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)

@@ -1,31 +1,29 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
-from uuid import UUID
-from typing import Optional
+from config.extensions import db
 
 
-@dataclass
-class Role:
+class Role(db.Model):
     """Rôle au sein d'une organisation (admin, member, external...)."""
-    id: UUID
-    organization_id: UUID
-    name: str
-    is_system: bool = False
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'roles'
+    __table_args__ = (db.UniqueConstraint('organization_id', 'name', name='uq_role_name_per_org'),)
 
-    TABLE = "roles"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    name = db.Column(db.String, nullable=False)
+    is_system = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class Membership:
+class Membership(db.Model):
     """Lien user ↔ organisation avec un rôle (multi-tenant)."""
-    id: UUID
-    user_id: UUID
-    organization_id: UUID
-    role_id: Optional[UUID] = None
-    status: str = "active"
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'memberships'
 
-    TABLE = "memberships"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(db.Uuid, db.ForeignKey('users.id'), nullable=False)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    role_id = db.Column(db.Uuid, db.ForeignKey('roles.id'), nullable=True)
+    status = db.Column(db.String, default='active')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)

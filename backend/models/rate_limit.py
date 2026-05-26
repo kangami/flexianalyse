@@ -1,20 +1,18 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
-from uuid import UUID
-from typing import Optional
+from config.extensions import db
 
 
-@dataclass
-class RateLimit:
-    """🚦 Rate limiting par organisation et type de connecteur."""
-    id: UUID
-    organization_id: UUID
-    connector_type: str       # google_drive, jira
-    max_requests: int = 100
-    window_seconds: int = 60
-    current_count: int = 0
-    reset_at: Optional[datetime] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+class RateLimit(db.Model):
+    """Rate limiting par organisation et type de connecteur."""
+    __tablename__ = 'rate_limits'
 
-    TABLE = "rate_limits"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    connector_type = db.Column(db.String, nullable=False)
+    max_requests = db.Column(db.Integer, default=100)
+    window_seconds = db.Column(db.Integer, default=60)
+    current_count = db.Column(db.Integer, default=0)
+    reset_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)

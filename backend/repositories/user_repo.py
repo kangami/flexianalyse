@@ -1,5 +1,8 @@
+from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+from sqlalchemy import select, func
+from config.extensions import db
 from models.user import User, UserSession
 from .base import BaseRepository
 
@@ -7,105 +10,108 @@ from .base import BaseRepository
 class UserRepository(BaseRepository[User]):
     """Accès aux données de la table users."""
 
-    def __init__(self, db_connection):
-        self.db = db_connection
-
     def get_by_id(self, id: UUID) -> Optional[User]:
-        row = self.db.fetch_one(
-            "SELECT * FROM users WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return User(**row) if row else None
+        return db.session.scalars(
+            select(User).where(User.id == id, User.deleted_at.is_(None))
+        ).first()
 
     def get_by_email(self, email: str) -> Optional[User]:
-        row = self.db.fetch_one(
-            "SELECT * FROM users WHERE email = %s AND deleted_at IS NULL", (email,)
-        )
-        return User(**row) if row else None
+        return db.session.scalars(
+            select(User).where(User.email == email, User.deleted_at.is_(None))
+        ).first()
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[User]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [User(**r) for r in rows]
+        return list(db.session.scalars(
+            select(User).where(User.deleted_at.is_(None))
+            .order_by(User.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: User) -> User:
-        row = self.db.fetch_one(
-            """INSERT INTO users (email, password_hash, full_name) VALUES (%s, %s, %s) RETURNING *""",
-            (entity.email, entity.password_hash, entity.full_name)
-        )
-        return User(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def update(self, entity: User) -> User:
-        row = self.db.fetch_one(
-            """UPDATE users SET email = %s, full_name = %s WHERE id = %s AND deleted_at IS NULL RETURNING *""",
-            (entity.email, entity.full_name, entity.id)
-        )
-        return User(**row) if row else None
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def soft_delete(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "UPDATE users SET deleted_at = now() WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.scalars(
+            select(User).where(User.id == id, User.deleted_at.is_(None))
+        ).first()
+        if not entity:
+            return False
+        entity.deleted_at = datetime.utcnow()
+        db.session.commit()
+        return True
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute("DELETE FROM users WHERE id = %s", (id,))
-        return result.rowcount > 0
+        entity = db.session.get(User, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True
 
 
 class UserSessionRepository(BaseRepository[UserSession]):
     """Accès aux données de la table user_sessions."""
 
-    def __init__(self, db_connection):
-        self.db = db_connection
-
     def get_by_id(self, id: UUID) -> Optional[UserSession]:
-        row = self.db.fetch_one(
-            "SELECT * FROM user_sessions WHERE id = %s", (id,)
-        )
-        return UserSession(**row) if row else None
+        return db.session.get(UserSession, id)
 
     def get_by_refresh_token_hash(self, token_hash: str) -> Optional[UserSession]:
-        row = self.db.fetch_one(
-            "SELECT * FROM user_sessions WHERE refresh_token_hash = %s AND revoked_at IS NULL AND expires_at > now()",
-            (token_hash,)
-        )
-        return UserSession(**row) if row else None
+        return db.session.scalars(
+            select(UserSession)
+            .where(
+                UserSession.refresh_token_hash == token_hash,
+                UserSession.revoked_at.is_(None),
+                UserSession.expires_at > func.now(),
+            )
+        ).first()
 
     def list_by_user(self, user_id: UUID) -> List[UserSession]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM user_sessions WHERE user_id = %s AND revoked_at IS NULL ORDER BY created_at DESC",
-            (user_id,)
-        )
-        return [UserSession(**r) for r in rows]
+        return list(db.session.scalars(
+            select(UserSession)
+            .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+            .order_by(UserSession.created_at.desc())
+        ).all())
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[UserSession]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM user_sessions ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [UserSession(**r) for r in rows]
+        return list(db.session.scalars(
+            select(UserSession)
+            .order_by(UserSession.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: UserSession) -> UserSession:
-        row = self.db.fetch_one(
-            """INSERT INTO user_sessions (user_id, refresh_token_hash, expires_at, user_agent, ip_address)
-               VALUES (%s, %s, %s, %s, %s) RETURNING *""",
-            (entity.user_id, entity.refresh_token_hash, entity.expires_at, entity.user_agent, entity.ip_address)
-        )
-        return UserSession(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def revoke(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "UPDATE user_sessions SET revoked_at = now() WHERE id = %s AND revoked_at IS NULL", (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.scalars(
+            select(UserSession).where(UserSession.id == id, UserSession.revoked_at.is_(None))
+        ).first()
+        if not entity:
+            return False
+        entity.revoked_at = datetime.utcnow()
+        db.session.commit()
+        return True
 
     def revoke_all_for_user(self, user_id: UUID) -> int:
-        result = self.db.execute(
-            "UPDATE user_sessions SET revoked_at = now() WHERE user_id = %s AND revoked_at IS NULL", (user_id,)
-        )
-        return result.rowcount
+        sessions = db.session.scalars(
+            select(UserSession).where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        ).all()
+        now = datetime.utcnow()
+        for s in sessions:
+            s.revoked_at = now
+        db.session.commit()
+        return len(sessions)
 
     def update(self, entity: UserSession) -> UserSession:
         raise NotImplementedError("Use revoke() instead")
@@ -114,5 +120,9 @@ class UserSessionRepository(BaseRepository[UserSession]):
         return self.revoke(id)
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute("DELETE FROM user_sessions WHERE id = %s", (id,))
-        return result.rowcount > 0
+        entity = db.session.get(UserSession, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True

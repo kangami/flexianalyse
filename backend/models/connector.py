@@ -1,48 +1,44 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime, timezone
-from uuid import UUID
-from typing import Optional
+from config.extensions import db
 
 
-@dataclass
-class Connector:
+class Connector(db.Model):
     """Connecteur MCP (Google Drive, Jira, Slack, Notion...)."""
-    id: UUID
-    organization_id: UUID
-    type: str         # google_drive, jira, slack, notion
-    name: str
-    status: str = "active"
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'connectors'
 
-    TABLE = "connectors"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    type = db.Column(db.String, nullable=False)
+    name = db.Column(db.String, nullable=False)
+    status = db.Column(db.String, default='active')
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class ConnectorCredentials:
+class ConnectorCredentials(db.Model):
     """Credentials chiffrés d'un connecteur."""
-    id: UUID
-    connector_id: UUID
-    encrypted_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    expires_at: Optional[datetime] = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'connector_credentials'
 
-    TABLE = "connector_credentials"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    connector_id = db.Column(db.Uuid, db.ForeignKey('connectors.id'), nullable=False)
+    encrypted_token = db.Column(db.Text, nullable=True)
+    refresh_token = db.Column(db.Text, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class ToolScope:
+class ToolScope(db.Model):
     """Périmètre de données autorisé pour un connecteur."""
-    id: UUID
-    connector_id: UUID
-    scope_type: str   # drive_folder, jira_project, slack_channel
-    external_id: str  # folderId, projectKey, channelId
-    name: str
-    is_allowed: bool = True
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'tool_scopes'
 
-    TABLE = "tool_scopes"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    connector_id = db.Column(db.Uuid, db.ForeignKey('connectors.id'), nullable=False)
+    scope_type = db.Column(db.String, nullable=False)
+    external_id = db.Column(db.String, nullable=False)
+    name = db.Column(db.String, nullable=False)
+    is_allowed = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)

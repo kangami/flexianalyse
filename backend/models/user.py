@@ -1,32 +1,29 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
-from uuid import UUID
-from typing import Optional
+from config.extensions import db
 
 
-@dataclass
-class User:
+class User(db.Model):
     """Utilisateur de la plateforme."""
-    id: UUID
-    email: str
-    password_hash: Optional[str] = None
-    full_name: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'users'
 
-    TABLE = "users"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    email = db.Column(db.String, nullable=False, unique=True)
+    password_hash = db.Column(db.Text, nullable=True)
+    full_name = db.Column(db.String, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class UserSession:
-    """🔐 Session utilisateur (refresh token)."""
-    id: UUID
-    user_id: UUID
-    refresh_token_hash: str
-    expires_at: datetime
-    revoked_at: Optional[datetime] = None
-    user_agent: Optional[str] = None
-    ip_address: Optional[str] = None  # INET in PG
-    created_at: datetime = field(default_factory=datetime.utcnow)
+class UserSession(db.Model):
+    """Session utilisateur (refresh token)."""
+    __tablename__ = 'user_sessions'
 
-    TABLE = "user_sessions"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    user_id = db.Column(db.Uuid, db.ForeignKey('users.id'), nullable=False)
+    refresh_token_hash = db.Column(db.Text, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    user_agent = db.Column(db.Text, nullable=True)
+    ip_address = db.Column(db.String, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

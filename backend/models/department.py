@@ -1,16 +1,15 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime, timezone
-from typing import ClassVar, Optional
-from uuid import UUID
+from config.extensions import db
 
 
-@dataclass
-class Department:
+class Department(db.Model):
     """Département au sein d'une organisation (IT, Sales, RH...)."""
-    TABLE: ClassVar[str] = "departments"
+    __tablename__ = 'departments'
+    __table_args__ = (db.UniqueConstraint('organization_id', 'name', name='uq_dept_name_per_org'),)
 
-    id: UUID
-    organization_id: UUID
-    name: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    deleted_at: Optional[datetime] = None  # Soft delete
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    name = db.Column(db.String, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)

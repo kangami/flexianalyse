@@ -1,35 +1,31 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
-from uuid import UUID
-from typing import Optional, Any
+from config.extensions import db
 
 
-@dataclass
-class Resource:
+class Resource(db.Model):
     """Ressource unifiée (fichier, ticket, message, doc...)."""
-    id: UUID
-    organization_id: UUID
-    connector_id: Optional[UUID] = None
-    external_id: Optional[str] = None
-    type: Optional[str] = None   # file, ticket, message, doc
-    title: Optional[str] = None
-    metadata: dict = field(default_factory=dict)  # JSONB
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    updated_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
-    search_vector: Optional[Any] = None    # TSVECTOR (PG interne)
+    __tablename__ = 'resources'
 
-    TABLE = "resources"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
+    connector_id = db.Column(db.Uuid, db.ForeignKey('connectors.id'), nullable=True)
+    external_id = db.Column(db.String, nullable=True)
+    type = db.Column(db.String, nullable=True)
+    title = db.Column(db.String, nullable=True)
+    ressource_metadata = db.Column(db.JSON, default=dict)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class ResourceBinding:
+class ResourceBinding(db.Model):
     """Binding sécurité entre ressource et périmètre outil."""
-    id: UUID
-    resource_id: UUID
-    tool_scope_id: UUID
-    access_level: str  # read, write
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'resource_bindings'
 
-    TABLE = "resource_bindings"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    resource_id = db.Column(db.Uuid, db.ForeignKey('resources.id'), nullable=False)
+    tool_scope_id = db.Column(db.Uuid, db.ForeignKey('tool_scopes.id'), nullable=False)
+    access_level = db.Column(db.String, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)

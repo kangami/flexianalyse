@@ -1,5 +1,8 @@
+from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+from sqlalchemy import select, func
+from config.extensions import db
 from models.organization import Organization
 from .base import BaseRepository
 
@@ -7,54 +10,51 @@ from .base import BaseRepository
 class OrganizationRepository(BaseRepository[Organization]):
     """Accès aux données de la table organizations."""
 
-    def __init__(self, db_connection):
-        self.db = db_connection
-
     def get_by_id(self, id: UUID) -> Optional[Organization]:
-        row = self.db.fetch_one(
-            "SELECT * FROM organizations WHERE id = %s AND deleted_at IS NULL",
-            (id,)
-        )
-        return Organization(**row) if row else None
+        return db.session.scalars(
+            select(Organization)
+            .where(Organization.id == id, Organization.deleted_at.is_(None))
+        ).first()
 
     def get_by_name(self, name: str) -> Optional[Organization]:
-        row = self.db.fetch_one(
-            "SELECT * FROM organizations WHERE LOWER(name) = LOWER(%s) AND deleted_at IS NULL",
-            (name,)
-        )
-        return Organization(**row) if row else None
+        return db.session.scalars(
+            select(Organization)
+            .where(func.lower(Organization.name) == name.lower(), Organization.deleted_at.is_(None))
+        ).first()
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[Organization]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM organizations WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [Organization(**r) for r in rows]
+        return list(db.session.scalars(
+            select(Organization)
+            .where(Organization.deleted_at.is_(None))
+            .order_by(Organization.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: Organization) -> Organization:
-        row = self.db.fetch_one(
-            """INSERT INTO organizations (name) VALUES (%s) RETURNING *""",
-            (entity.name,)
-        )
-        return Organization(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def update(self, entity: Organization) -> Organization:
-        row = self.db.fetch_one(
-            """UPDATE organizations SET name = %s WHERE id = %s AND deleted_at IS NULL RETURNING *""",
-            (entity.name, entity.id)
-        )
-        return Organization(**row) if row else None
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def soft_delete(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "UPDATE organizations SET deleted_at = now() WHERE id = %s AND deleted_at IS NULL",
-            (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.scalars(
+            select(Organization).where(Organization.id == id, Organization.deleted_at.is_(None))
+        ).first()
+        if not entity:
+            return False
+        entity.deleted_at = datetime.utcnow()
+        db.session.commit()
+        return True
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "DELETE FROM organizations WHERE id = %s",
-            (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.get(Organization, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True

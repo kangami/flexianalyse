@@ -1,6 +1,6 @@
 """Logique métier — Départements."""
 from uuid import UUID
-from models import Department
+from models.department import Department
 from services.serializers import dept_to_dict
 
 
@@ -18,7 +18,7 @@ class DepartmentService:
     def create(self, name: str, org_id: str) -> dict:
         if self._loc.departments.get_by_name_in_org(UUID(org_id), name):
             raise ValueError(f"Department '{name}' already exists in this organisation.")
-        dept = Department(id=UUID(int=0), organization_id=UUID(org_id), name=name)
+        dept = Department(organization_id=UUID(org_id), name=name)
         created = self._loc.departments.create(dept)
         return dept_to_dict(created)
 

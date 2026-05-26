@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
 from enum import StrEnum
-from uuid import UUID
-from typing import Optional, Any
+from config.extensions import db
 
 
 class Action(StrEnum):
@@ -37,46 +36,44 @@ class Resource(StrEnum):
     BILLING       = "billing"
 
 
-@dataclass
-class Permission:
-    """Permission IAM-style avec versioning temporel."""
-    id: UUID
-    action: Action
-    resource: Resource
-    scope: str = "org"
-    allowed: bool = True
-    valid_from: datetime = field(default_factory=datetime.utcnow)
-    valid_to: datetime = field(default_factory=lambda: datetime.max)
-    version: int = 1
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+class Permission(db.Model):
+    """Permission IAM-style (catalogue unique action+resource)."""
+    __tablename__ = 'permissions'
+    __table_args__ = (db.UniqueConstraint('action', 'resource', name='uq_perm_action_resource'),)
 
-    TABLE = "permissions"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    action = db.Column(db.String, nullable=False)
+    resource = db.Column(db.String, nullable=False)
+    scope = db.Column(db.String, default='org')
+    allowed = db.Column(db.Boolean, default=True)
+    valid_from = db.Column(db.DateTime, default=datetime.utcnow)
+    valid_to = db.Column(db.DateTime, nullable=True)
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)
 
 
-@dataclass
-class RolePermission:
+class RolePermission(db.Model):
     """Junction many-to-many entre rôles et permissions."""
-    role_id: UUID
-    permission_id: UUID
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    __tablename__ = 'role_permissions'
 
-    TABLE = "role_permissions"
+    role_id = db.Column(db.Uuid, db.ForeignKey('roles.id'), primary_key=True)
+    permission_id = db.Column(db.Uuid, db.ForeignKey('permissions.id'), primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-@dataclass
-class Policy:
+class Policy(db.Model):
     """Policy engine avancé avec conditions JSONB et priorité."""
-    id: UUID
-    organization_id: UUID
-    name: str
-    effect: str       # allow / deny
-    condition: dict = field(default_factory=dict)  # JSONB
-    priority: int = 0
-    valid_from: datetime = field(default_factory=datetime.utcnow)
-    valid_to: datetime = field(default_factory=lambda: datetime.max)
-    version: int = 1
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    deleted_at: Optional[datetime] = None  # Soft delete
+    __tablename__ = 'policies'
 
-    TABLE = "policies"
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=True)
+    name = db.Column(db.String, nullable=True)
+    effect = db.Column(db.String, nullable=True)
+    condition = db.Column(db.JSON, default=dict)
+    priority = db.Column(db.Integer, default=0)
+    valid_from = db.Column(db.DateTime, default=datetime.utcnow)
+    valid_to = db.Column(db.DateTime, nullable=True)
+    version = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)

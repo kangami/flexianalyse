@@ -1,10 +1,9 @@
 from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
-import logging
 from config.settings import configure_app
+from config.extensions import db, migrate
 from routes import register_routes
-from controllers import init_app
 
 load_dotenv()
 
@@ -14,6 +13,14 @@ def create_app():
     # Configuration
     configure_app(app)
     
+    # Flask-SQLAlchemy + Flask-Migrate
+    db.init_app(app)
+    migrate.init_app(app, db)
+
+    # Import all models so Flask-Migrate can detect them
+    with app.app_context():
+        import models  # noqa: F401
+
     # CORS
     CORS(app, resources={
         r"/*": {
@@ -27,9 +34,6 @@ def create_app():
     
     # Enregistrement des routes
     register_routes(app)
-    
-    # Initialisation DB + ServiceLocator
-    init_app()
     
     return app
 

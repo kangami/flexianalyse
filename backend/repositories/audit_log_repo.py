@@ -1,65 +1,66 @@
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
+from sqlalchemy import select
+from config.extensions import db
 from models.audit_log import AuditLog
 from .base import BaseRepository
 
 
 class AuditLogRepository(BaseRepository[AuditLog]):
-    """Accès aux données de la table audit_logs (partitionnée)."""
-
-    def __init__(self, db_connection):
-        self.db = db_connection
+    """Accès aux données de la table audit_logs."""
 
     def get_by_id(self, id: UUID) -> Optional[AuditLog]:
-        row = self.db.fetch_one(
-            "SELECT * FROM audit_logs WHERE id = %s", (id,)
-        )
-        return AuditLog(**row) if row else None
+        return db.session.get(AuditLog, id)
 
     def list_by_organization(self, organization_id: UUID, limit: int = 100, offset: int = 0) -> List[AuditLog]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM audit_logs WHERE organization_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (organization_id, limit, offset)
-        )
-        return [AuditLog(**r) for r in rows]
+        return list(db.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.organization_id == organization_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def list_by_user(self, user_id: UUID, limit: int = 100, offset: int = 0) -> List[AuditLog]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM audit_logs WHERE user_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (user_id, limit, offset)
-        )
-        return [AuditLog(**r) for r in rows]
+        return list(db.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.user_id == user_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def list_by_action(self, organization_id: UUID, action: str, limit: int = 100) -> List[AuditLog]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM audit_logs WHERE organization_id = %s AND action = %s ORDER BY created_at DESC LIMIT %s",
-            (organization_id, action, limit)
-        )
-        return [AuditLog(**r) for r in rows]
+        return list(db.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.organization_id == organization_id, AuditLog.action == action)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        ).all())
 
     def list_by_date_range(self, organization_id: UUID, start: datetime, end: datetime, limit: int = 500) -> List[AuditLog]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM audit_logs WHERE organization_id = %s AND created_at BETWEEN %s AND %s ORDER BY created_at DESC LIMIT %s",
-            (organization_id, start, end, limit)
-        )
-        return [AuditLog(**r) for r in rows]
+        return list(db.session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.organization_id == organization_id,
+                AuditLog.created_at >= start,
+                AuditLog.created_at <= end,
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit)
+        ).all())
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[AuditLog]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [AuditLog(**r) for r in rows]
+        return list(db.session.scalars(
+            select(AuditLog)
+            .order_by(AuditLog.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: AuditLog) -> AuditLog:
-        row = self.db.fetch_one(
-            """INSERT INTO audit_logs (organization_id, user_id, action, resource, tool, metadata)
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
-            (entity.organization_id, entity.user_id, entity.action,
-             entity.resource, entity.tool, entity.metadata)
-        )
-        return AuditLog(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def update(self, entity: AuditLog) -> AuditLog:
         raise NotImplementedError("Audit logs are append-only")
@@ -68,5 +69,9 @@ class AuditLogRepository(BaseRepository[AuditLog]):
         raise NotImplementedError("Audit logs are append-only — use retention policies instead")
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute("DELETE FROM audit_logs WHERE id = %s", (id,))
-        return result.rowcount > 0
+        entity = db.session.get(AuditLog, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True

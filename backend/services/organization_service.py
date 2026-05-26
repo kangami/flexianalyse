@@ -1,6 +1,6 @@
 """Logique métier — Organisations."""
 from uuid import UUID
-from models import Organization
+from models.organization import Organization
 from services.serializers import org_to_dict
 
 
@@ -14,7 +14,7 @@ class OrganizationService:
     def create(self, name: str) -> dict:
         if self._loc.organizations.get_by_name(name):
             raise ValueError(f"Organisation '{name}' already exists.")
-        org = Organization(id=UUID(int=0), name=name)
+        org = Organization(name=name)
         created = self._loc.organizations.create(org)
         return org_to_dict(created)
 

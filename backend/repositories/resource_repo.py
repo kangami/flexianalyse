@@ -1,5 +1,8 @@
+from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+from sqlalchemy import select, text
+from config.extensions import db
 from models.resource import Resource, ResourceBinding
 from .base import BaseRepository
 
@@ -7,137 +10,138 @@ from .base import BaseRepository
 class ResourceRepository(BaseRepository[Resource]):
     """Accès aux données de la table resources."""
 
-    def __init__(self, db_connection):
-        self.db = db_connection
-
     def get_by_id(self, id: UUID) -> Optional[Resource]:
-        row = self.db.fetch_one(
-            "SELECT * FROM resources WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return Resource(**row) if row else None
+        return db.session.scalars(
+            select(Resource).where(Resource.id == id, Resource.deleted_at.is_(None))
+        ).first()
 
     def get_by_external_id(self, connector_id: UUID, external_id: str) -> Optional[Resource]:
-        row = self.db.fetch_one(
-            "SELECT * FROM resources WHERE connector_id = %s AND external_id = %s AND deleted_at IS NULL",
-            (connector_id, external_id)
-        )
-        return Resource(**row) if row else None
+        return db.session.scalars(
+            select(Resource)
+            .where(
+                Resource.connector_id == connector_id,
+                Resource.external_id == external_id,
+                Resource.deleted_at.is_(None),
+            )
+        ).first()
 
     def list_by_organization(self, organization_id: UUID, limit: int = 100, offset: int = 0) -> List[Resource]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resources WHERE organization_id = %s AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT %s OFFSET %s",
-            (organization_id, limit, offset)
-        )
-        return [Resource(**r) for r in rows]
+        return list(db.session.scalars(
+            select(Resource)
+            .where(Resource.organization_id == organization_id, Resource.deleted_at.is_(None))
+            .order_by(Resource.updated_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def list_by_connector(self, connector_id: UUID) -> List[Resource]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resources WHERE connector_id = %s AND deleted_at IS NULL ORDER BY updated_at DESC",
-            (connector_id,)
-        )
-        return [Resource(**r) for r in rows]
+        return list(db.session.scalars(
+            select(Resource)
+            .where(Resource.connector_id == connector_id, Resource.deleted_at.is_(None))
+            .order_by(Resource.updated_at.desc())
+        ).all())
 
     def search_fulltext(self, organization_id: UUID, query: str, limit: int = 50) -> List[Resource]:
-        rows = self.db.fetch_all(
+        stmt = text(
             """SELECT * FROM resources
-               WHERE organization_id = %s AND deleted_at IS NULL
-               AND search_vector @@ plainto_tsquery('french', %s)
-               ORDER BY ts_rank(search_vector, plainto_tsquery('french', %s)) DESC
-               LIMIT %s""",
-            (organization_id, query, query, limit)
+               WHERE organization_id = :org_id AND deleted_at IS NULL
+               AND search_vector @@ plainto_tsquery('french', :query)
+               ORDER BY ts_rank(search_vector, plainto_tsquery('french', :query)) DESC
+               LIMIT :limit"""
         )
-        return [Resource(**r) for r in rows]
+        rows = db.session.execute(stmt, {"org_id": organization_id, "query": query, "limit": limit}).mappings().all()
+        return [Resource(**dict(r)) for r in rows]
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[Resource]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resources WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [Resource(**r) for r in rows]
+        return list(db.session.scalars(
+            select(Resource).where(Resource.deleted_at.is_(None))
+            .order_by(Resource.updated_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: Resource) -> Resource:
-        row = self.db.fetch_one(
-            """INSERT INTO resources (organization_id, connector_id, external_id, type, title, metadata)
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING *""",
-            (entity.organization_id, entity.connector_id, entity.external_id,
-             entity.type, entity.title, entity.metadata)
-        )
-        return Resource(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def update(self, entity: Resource) -> Resource:
-        row = self.db.fetch_one(
-            """UPDATE resources SET title = %s, metadata = %s, updated_at = now()
-               WHERE id = %s AND deleted_at IS NULL RETURNING *""",
-            (entity.title, entity.metadata, entity.id)
-        )
-        return Resource(**row) if row else None
+        entity.updated_at = datetime.utcnow()
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def soft_delete(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "UPDATE resources SET deleted_at = now() WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.scalars(
+            select(Resource).where(Resource.id == id, Resource.deleted_at.is_(None))
+        ).first()
+        if not entity:
+            return False
+        entity.deleted_at = datetime.utcnow()
+        db.session.commit()
+        return True
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute("DELETE FROM resources WHERE id = %s", (id,))
-        return result.rowcount > 0
+        entity = db.session.get(Resource, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True
 
 
 class ResourceBindingRepository(BaseRepository[ResourceBinding]):
     """Accès aux données de la table resource_bindings."""
 
-    def __init__(self, db_connection):
-        self.db = db_connection
-
     def get_by_id(self, id: UUID) -> Optional[ResourceBinding]:
-        row = self.db.fetch_one(
-            "SELECT * FROM resource_bindings WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return ResourceBinding(**row) if row else None
+        return db.session.scalars(
+            select(ResourceBinding)
+            .where(ResourceBinding.id == id, ResourceBinding.deleted_at.is_(None))
+        ).first()
 
     def list_by_resource(self, resource_id: UUID) -> List[ResourceBinding]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resource_bindings WHERE resource_id = %s AND deleted_at IS NULL",
-            (resource_id,)
-        )
-        return [ResourceBinding(**r) for r in rows]
+        return list(db.session.scalars(
+            select(ResourceBinding)
+            .where(ResourceBinding.resource_id == resource_id, ResourceBinding.deleted_at.is_(None))
+        ).all())
 
     def list_by_tool_scope(self, tool_scope_id: UUID) -> List[ResourceBinding]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resource_bindings WHERE tool_scope_id = %s AND deleted_at IS NULL",
-            (tool_scope_id,)
-        )
-        return [ResourceBinding(**r) for r in rows]
+        return list(db.session.scalars(
+            select(ResourceBinding)
+            .where(ResourceBinding.tool_scope_id == tool_scope_id, ResourceBinding.deleted_at.is_(None))
+        ).all())
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[ResourceBinding]:
-        rows = self.db.fetch_all(
-            "SELECT * FROM resource_bindings WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT %s OFFSET %s",
-            (limit, offset)
-        )
-        return [ResourceBinding(**r) for r in rows]
+        return list(db.session.scalars(
+            select(ResourceBinding).where(ResourceBinding.deleted_at.is_(None))
+            .order_by(ResourceBinding.created_at.desc())
+            .limit(limit).offset(offset)
+        ).all())
 
     def create(self, entity: ResourceBinding) -> ResourceBinding:
-        row = self.db.fetch_one(
-            """INSERT INTO resource_bindings (resource_id, tool_scope_id, access_level)
-               VALUES (%s, %s, %s) RETURNING *""",
-            (entity.resource_id, entity.tool_scope_id, entity.access_level)
-        )
-        return ResourceBinding(**row)
+        db.session.add(entity)
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def update(self, entity: ResourceBinding) -> ResourceBinding:
-        row = self.db.fetch_one(
-            """UPDATE resource_bindings SET access_level = %s
-               WHERE id = %s AND deleted_at IS NULL RETURNING *""",
-            (entity.access_level, entity.id)
-        )
-        return ResourceBinding(**row) if row else None
+        db.session.commit()
+        db.session.refresh(entity)
+        return entity
 
     def soft_delete(self, id: UUID) -> bool:
-        result = self.db.execute(
-            "UPDATE resource_bindings SET deleted_at = now() WHERE id = %s AND deleted_at IS NULL", (id,)
-        )
-        return result.rowcount > 0
+        entity = db.session.scalars(
+            select(ResourceBinding).where(ResourceBinding.id == id, ResourceBinding.deleted_at.is_(None))
+        ).first()
+        if not entity:
+            return False
+        entity.deleted_at = datetime.utcnow()
+        db.session.commit()
+        return True
 
     def hard_delete(self, id: UUID) -> bool:
-        result = self.db.execute("DELETE FROM resource_bindings WHERE id = %s", (id,))
-        return result.rowcount > 0
+        entity = db.session.get(ResourceBinding, id)
+        if not entity:
+            return False
+        db.session.delete(entity)
+        db.session.commit()
+        return True
