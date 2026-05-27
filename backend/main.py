@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from config.settings import configure_app
@@ -28,9 +28,20 @@ def create_app():
                 "http://flexianalyse.com", 
                 "http://localhost:5173", 
                 "https://flexianalyse.com"
-            ]
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "Session-ID"]
         }
     })
+
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = jsonify({"ok": True})
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Session-ID"
+            return response, 200
     
     # Enregistrement des routes
     register_routes(app)

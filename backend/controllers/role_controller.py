@@ -21,6 +21,24 @@ def register(api_bp):
             return jsonify({"error": "name and organization_id are required"}), 400
         return jsonify(role_service.create(name, organization_id)), 201
 
+    @api_bp.route("/roles/<role_id>", methods=["PUT"])
+    def update_role(role_id):
+        data = request.get_json() or {}
+        name = data.get("name")
+        organization_id = data.get("organization_id")
+        if not name or not organization_id:
+            return jsonify({"error": "name and organization_id are required"}), 400
+        updated = role_service.update(role_id, name, organization_id)
+        if not updated:
+            return jsonify({"error": "Role not found"}), 404
+        return jsonify(updated)
+
+    @api_bp.route("/roles/<role_id>", methods=["DELETE"])
+    def delete_role(role_id):
+        if role_service.delete(role_id):
+            return jsonify({"ok": True})
+        return jsonify({"error": "Role not found"}), 404
+
     @api_bp.route("/permissions", methods=["GET"])
     def list_permissions():
         role_id = request.args.get("role_id")

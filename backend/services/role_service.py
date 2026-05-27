@@ -22,6 +22,18 @@ class RoleService:
         created = self._loc.roles.create(role)
         return role_to_dict(created)
 
+    def update(self, role_id: str, name: str, org_id: str) -> dict | None:
+        role = self._loc.roles.get_by_id(UUID(role_id))
+        if not role:
+            return None
+        role.name = name
+        role.organization_id = UUID(org_id)
+        updated = self._loc.roles.update(role)
+        return role_to_dict(updated)
+
+    def delete(self, role_id: str) -> bool:
+        return self._loc.roles.soft_delete(UUID(role_id))
+
 
 class PermissionService:
     def __init__(self, locator):
