@@ -12,10 +12,11 @@ def register(api_bp):
         email = data.get("email")
         password = data.get("password")
         full_name = data.get("full_name")
+        role_id = data.get("role_id")
         if not email or not password:
             return jsonify({"error": "email and password are required"}), 400
         try:
-            return jsonify(user_service.create(email, password, full_name)), 201
+            return jsonify(user_service.create_with_role(email, password, full_name, role_id)), 201
         except ValueError as e:
             return jsonify({"error": str(e)}), 409
 

@@ -405,11 +405,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([]);
   const [departments, setDepartments] = useState<{ id: string; organization_id: string; name: string }[]>([]);
   const [roles, setRoles] = useState<{ id: string; organization_id: string; name: string }[]>([]);
-  const [users, setUsers] = useState<{ id: string; email: string; full_name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: string; email: string; full_name: string; role_id: string }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [orgName, setOrgName] = useState('');
   const [deptName, setDeptName] = useState('');
   const [userEmail, setUserEmail] = useState('');
+  const [userRoleId, setUserRoleId] = useState('');
   const [userPassword, setUserPassword] = useState('');
   const [userFullName, setUserFullName] = useState('');
   const [permRoleId, setPermRoleId] = useState('');
@@ -1350,6 +1351,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="space-y-4">
                   <div className="border border-gray-200 rounded-lg p-3">
                     <p className="text-xs font-semibold text-gray-700 mb-2">Create User</p>
+                    <select value={userRoleId} onChange={e => setUserRoleId(e.target.value)}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
+                      <option value="">— Select role —</option>
+                      {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
                     <input value={userEmail} onChange={e => setUserEmail(e.target.value)} placeholder="Email"
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
                     <input value={userPassword} onChange={e => setUserPassword(e.target.value)} placeholder="Password" type="password"
@@ -1357,10 +1363,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <input value={userFullName} onChange={e => setUserFullName(e.target.value)} placeholder="Full name"
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
                     <button onClick={async () => {
-                      if (!userEmail || !userPassword) return;
-                      const r = await fetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName}) });
+                      if (!userEmail || !userPassword || !userRoleId) return;
+                      const r = await fetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName, role_id:userRoleId}) });
                       const d = await r.json();
-                      if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName(''); setOrgMsg({text:'User created!',ok:true}); }
+                      if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName('');setUserRoleId(''); setOrgMsg({text:'User created!',ok:true}); }
                       else setOrgMsg({text:d.error||'Error',ok:false});
                     }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
                       <i className="bi bi-person-plus mr-1"></i>Create User
