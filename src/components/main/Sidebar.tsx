@@ -1,5 +1,6 @@
 import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
 import { Paginator } from '../ui/Paginator';
+import { FlexiGrid, type FlexiGridColumn } from '../ui/FlexiGrid';
 import { FolderOpen, Folder } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -408,7 +409,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [orgName, setOrgName] = useState('');
   const [deptName, setDeptName] = useState('');
-  const [roleName, setRoleName] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userPassword, setUserPassword] = useState('');
   const [userFullName, setUserFullName] = useState('');
@@ -420,6 +420,33 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [deptEditName, setDeptEditName] = useState('');
   const [orgEditId, setOrgEditId] = useState<string | null>(null);
   const [orgEditName, setOrgEditName] = useState('');
+
+  const roleColumns: FlexiGridColumn<{ id: string; organization_id: string; name: string }>[] = useMemo(() => [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (item, isEditing, editState, setEditState) =>
+        isEditing ? (
+          <input value={editState.name || ''} onChange={e => setEditState({ ...editState, name: e.target.value })}
+            className="w-full border border-purple-300 rounded px-1 py-0.5 text-xs" />
+        ) : (
+          <span>{item.name}</span>
+        ),
+    },
+    {
+      key: 'organization_id',
+      header: 'Organisation',
+      render: (item, isEditing, editState, setEditState) =>
+        isEditing ? (
+          <select value={editState.organization_id || ''} onChange={e => setEditState({ ...editState, organization_id: e.target.value })}
+            className="w-full border border-purple-300 rounded px-1 py-0.5 text-xs bg-white">
+            {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        ) : (
+          <span>{orgs.find(o => o.id === item.organization_id)?.name || item.organization_id}</span>
+        ),
+    },
+  ], [orgs]);
 
   const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
   const flyoutRef = useRef<HTMLDivElement>(null);
@@ -1365,31 +1392,40 @@ const Sidebar: React.FC<SidebarProps> = ({
               {organisationTab === 'permission' && (
                 <div className="space-y-4">
                   <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Create Role</p>
-                    <input value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Role name"
-                      className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
-                    <button onClick={async () => {
-                      if (!roleName || !selectedOrgId) return;
-                      const r = await fetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:roleName, organization_id:selectedOrgId}) });
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Manage Role</p>
+                    <FlexiGrid
+                    columns={roleColumns}
+                    data={roles}
+                    emptyState={{ organization_id: orgs[0]?.id || '', name: '' }}
+                    onCreate={async (item) => {
+                      const r = await fetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
                       const d = await r.json();
-                      if (r.ok) { setRoles(prev => [...prev, d]); setRoleName(''); setOrgMsg({text:'Role created!',ok:true}); }
-                      else setOrgMsg({text:d.error||'Error',ok:false});
-                    }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
-                      <i className="bi bi-plus-lg mr-1"></i>Create Role
-                    </button>
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Roles ({roles.length})</h4>
-                    {roles.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic">No roles yet</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {roles.map(r => (
-                          <div key={r.id} className="text-xs text-gray-700 border border-gray-200 rounded px-2 py-1">{r.name}</div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                      if (r.ok) { setRoles(prev => [...prev, d]); setOrgMsg({text:'Role created!',ok:true}); return d; }
+                      else { setOrgMsg({text:d.error||'Error',ok:false}); return null; }
+                    }}
+                    onUpdate={async (id, item) => {
+                      const r = await fetch(`${API}/api/v2/roles/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
+                      const d = await r.json();
+                      if (r.ok) { setRoles(prev => prev.map(rl => rl.id === id ? d : rl)); setOrgMsg({text:'Role updated!',ok:true}); return d; }
+                      else { setOrgMsg({text:d.error||'Error',ok:false}); return null; }
+                    }}
+                    onDelete={async (id) => {
+                      const res = await fetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
+                      if (res.ok) { setRoles(prev => prev.filter(rl => rl.id !== id)); setOrgMsg({text:'Role deleted!',ok:true}); return true; }
+                      else { const d = await res.json(); setOrgMsg({text:d.error||'Error',ok:false}); return false; }
+                    }}
+                    onBulkDelete={async (ids) => {
+                      let ok = true;
+                      for (const id of ids) {
+                        const res = await fetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
+                        if (res.ok) setRoles(prev => prev.filter(rl => rl.id !== id));
+                        else ok = false;
+                      }
+                      if (ok) setOrgMsg({text:'Roles deleted!',ok:true});
+                      return ok;
+                    }}
+                  />
+                                                          </div>
                   <hr className="border-gray-200" />
                   <div className="border border-gray-200 rounded-lg p-3">
                     <p className="text-xs font-semibold text-gray-700 mb-2">Add Permission</p>

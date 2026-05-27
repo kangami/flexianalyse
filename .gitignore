@@ -40,6 +40,11 @@ firebase-service-account.json
 # Config
 *.conf
 
-# Venv
+# Virtualenv
 venv/
-__pycache__
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+backend/__pycache__/
