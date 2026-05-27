@@ -47,3 +47,4 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+backend/__pycache__/
