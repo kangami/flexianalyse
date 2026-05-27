@@ -85,6 +85,9 @@ class PermissionRepository(BaseRepository[Permission]):
 class RolePermissionRepository:
     """Accès à la table de jonction role_permissions."""
 
+    def find_link(self, role_id: UUID, permission_id: UUID) -> Optional[RolePermission]:
+        return db.session.get(RolePermission, (role_id, permission_id))
+
     def link(self, role_id: UUID, permission_id: UUID) -> bool:
         existing = db.session.get(RolePermission, (role_id, permission_id))
         if existing:
@@ -106,6 +109,9 @@ class RolePermissionRepository:
         return list(db.session.scalars(
             select(RolePermission).where(RolePermission.role_id == role_id)
         ).all())
+
+    def list_all(self) -> List[RolePermission]:
+        return list(db.session.scalars(select(RolePermission)).all())
 
 
 class PolicyRepository(BaseRepository[Policy]):

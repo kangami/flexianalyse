@@ -1,6 +1,7 @@
 import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback } from 'react';
 import { Paginator } from '../ui/Paginator';
 import { FlexiGrid, type FlexiGridColumn } from '../ui/FlexiGrid';
+import { FlexiMultiReferentiel } from '../ui/FlexiMultiReferentiel';
 import { FolderOpen, Folder } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -414,13 +415,34 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [userPassword, setUserPassword] = useState('');
   const [userFullName, setUserFullName] = useState('');
   const [permRoleId, setPermRoleId] = useState('');
-  const [permAction, setPermAction] = useState('read');
+  const [permActions, setPermActions] = useState<string[]>([]);
   const [permResource, setPermResource] = useState('chat');
+  const [permValidFrom, setPermValidFrom] = useState('');
+  const [permValidTo, setPermValidTo] = useState('');
+  const [permissions, setPermissions] = useState<{ id: string; action: string; resource: string; role_id?: string; role_name?: string }[]>([]);
   const [orgMsg, setOrgMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [deptEditId, setDeptEditId] = useState<string | null>(null);
   const [deptEditName, setDeptEditName] = useState('');
   const [orgEditId, setOrgEditId] = useState<string | null>(null);
   const [orgEditName, setOrgEditName] = useState('');
+
+  const permissionColumns: FlexiGridColumn<{ id: string; action: string; resource: string; role_id?: string; role_name?: string }>[] = useMemo(() => [
+    {
+      key: 'role_name',
+      header: 'Role',
+      render: (item) => <span>{item.role_name || roles.find(r => r.id === item.role_id)?.name || 'N/A'}</span>,
+    },
+    {
+      key: 'resource',
+      header: 'Resource',
+      render: (item) => <span>{item.resource}</span>,
+    },
+    {
+      key: 'action',
+      header: 'Actions',
+      render: (item) => <span className="text-purple-600 font-medium">{item.action}</span>,
+    },
+  ], [roles]);
 
   const roleColumns: FlexiGridColumn<{ id: string; organization_id: string; name: string }>[] = useMemo(() => [
     {
@@ -461,6 +483,13 @@ const Sidebar: React.FC<SidebarProps> = ({
       fetch(`${API}/api/v2/roles`).then(r => r.json()).then(d => setRoles(d.data || [])).catch(() => {});
     }
   }, [activePanel]);
+
+  // Load permissions when permission tab opens
+  useEffect(() => {
+    if (activePanel === 'organisation' && organisationTab === 'permission') {
+      fetch(`${API}/api/v2/permissions`).then(r => r.json()).then(d => setPermissions(d.data || [])).catch(() => {});
+    }
+  }, [activePanel, organisationTab, API]);
 
   // Auto-dismiss orgMsg after 5s
   useEffect(() => {
@@ -1442,27 +1471,76 @@ const Sidebar: React.FC<SidebarProps> = ({
                       {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase">Resources</label>
-                    <select value={permResource} onChange={e => { setPermResource(e.target.value); setPermAction(''); }}
+                    <select value={permResource} onChange={e => { setPermResource(e.target.value); setPermActions([]); }}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
                       <option value="">— Select resource —</option>
                       {PERM_RESOURCES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Actions</label>
-                    <select value={permAction} onChange={e => setPermAction(e.target.value)}
+                    <FlexiMultiReferentiel
+                      label="Actions"
+                      availableItems={[...(RESOURCE_ACTIONS[permResource] || [])]}
+                      selectedItems={permActions}
+                      onItemSelect={action => setPermActions([...permActions, action])}
+                      onItemRemove={action => setPermActions(permActions.filter(a => a !== action))}
                       disabled={!permResource}
-                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white disabled:bg-gray-100 disabled:text-gray-400">
-                      <option value="">— Select action —</option>
-                      {(RESOURCE_ACTIONS[permResource] || []).map(a => <option key={a} value={a}>{a}</option>)}
-                    </select>
+                      placeholder="— Select actions —"
+                      className="mt-1 mb-2"
+                    />
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Valid From</label>
+                    <input type="date" value={permValidFrom} onChange={e => setPermValidFrom(e.target.value)}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white" />
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Valid To</label>
+                    <input type="date" value={permValidTo} onChange={e => setPermValidTo(e.target.value)}
+                      className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white" />
                     <button onClick={async () => {
-                      if (!permRoleId || !permResource || !permAction) return;
-                      const r = await fetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, action:permAction, resource:permResource}) });
+                      if (!permRoleId || !permResource || permActions.length === 0) return;
+                      const r = await fetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, actions:permActions, resource:permResource, valid_from:permValidFrom||null, valid_to:permValidTo||null}) });
                       const d = await r.json();
-                      if (r.ok) setOrgMsg({text:'Permission added!',ok:true});
-                      else setOrgMsg({text:d.error||'Error',ok:false});
+                      if (r.ok) {
+                        let msg = '';
+                        if (d.total_created > 0) {
+                          msg = `✓ ${d.total_created} permission${d.total_created > 1 ? 's' : ''} added!`;
+                        }
+                        if (d.total_duplicates > 0) {
+                          if (msg) msg += ` ⚠ ${d.total_duplicates} already exist${d.total_duplicates > 1 ? '' : 's'}.`;
+                          else msg = `⚠ All permissions already exist for this role.`;
+                        }
+                        setOrgMsg({text: msg, ok: true});
+                        // Clear form fields
+                        setPermRoleId('');
+                        setPermActions([]);
+                        setPermResource('');
+                        setPermValidFrom('');
+                        setPermValidTo('');
+                      } else {
+                        setOrgMsg({text:d.error||'Error',ok:false});
+                      }
                     }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
                       <i className="bi bi-plus-lg mr-1"></i>Add Permission
                     </button>
+                  </div>
+                  <hr className="border-gray-200 mt-4" />
+                  <div className="border border-gray-200 rounded-lg p-3">
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Saved Permissions</p>
+                    <FlexiGrid
+                      columns={permissionColumns}
+                      data={permissions}
+                      emptyState={{ id: '', action: '', resource: '' }}
+                      onCreate={async () => null}
+                      onUpdate={async () => null}
+                      onDelete={async (id) => {
+                        const r = await fetch(`${API}/api/v2/permissions/${id}`, { method: 'DELETE' });
+                        if (r.ok) {
+                          setPermissions(prev => prev.filter(p => p.id !== id));
+                          setOrgMsg({text: 'Permission deleted!', ok: true});
+                          return true;
+                        } else {
+                          setOrgMsg({text: 'Error deleting permission', ok: false});
+                          return false;
+                        }
+                      }}
+                      disableCreate={true}
+                    />
                   </div>
                 </div>
               )}

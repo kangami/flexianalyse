@@ -20,6 +20,7 @@ interface FlexiGridProps<T extends { id: string }> {
   onDelete: (id: string) => Promise<boolean>;
   onBulkDelete?: (ids: string[]) => Promise<boolean>;
   getId?: (item: T) => string;
+  disableCreate?: boolean;
 }
 
 export function FlexiGrid<T extends { id: string }>({
@@ -31,6 +32,7 @@ export function FlexiGrid<T extends { id: string }>({
   onDelete,
   onBulkDelete,
   getId = (item) => item.id,
+  disableCreate = false,
 }: FlexiGridProps<T>) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<Partial<T>>({} as Partial<T>);
@@ -101,7 +103,7 @@ export function FlexiGrid<T extends { id: string }>({
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <button onClick={startAdd} disabled={isAdding}
+        <button onClick={startAdd} disabled={isAdding || disableCreate}
           className="text-green-600 hover:text-green-800 disabled:text-gray-300 disabled:cursor-not-allowed" title="Add row">
           <i className="bi bi-plus-lg text-sm"></i>
         </button>

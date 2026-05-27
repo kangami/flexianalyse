@@ -1,5 +1,6 @@
 """Logique métier — Rôles et Permissions."""
 from uuid import UUID
+from datetime import datetime
 from models.role import Role
 from models.permission import Permission
 from models.permission import Action, Resource, RolePermission
@@ -46,6 +47,23 @@ class PermissionService:
             perms = self._loc.permissions.list_all()
         return [perm_to_dict(p) for p in perms]
 
+    def list_all_with_roles(self) -> list[dict]:
+        """List all permissions with their associated roles."""
+        role_perms = self._loc.role_permissions.list_all()
+        results = []
+        for rp in role_perms:
+            role = self._loc.roles.get_by_id(rp.role_id)
+            perm = self._loc.permissions.get_by_id(rp.permission_id)
+            if role and perm:
+                results.append({
+                    "id": str(perm.id),
+                    "action": perm.action,
+                    "resource": perm.resource,
+                    "role_id": str(rp.role_id),
+                    "role_name": role.name,
+                })
+        return results
+
     def create(self, role_id: str, action: str, resource: str, scope: str = "org") -> dict:
         perm = self._loc.permissions.find_by_action_resource(action, resource)
         if not perm:
@@ -53,3 +71,62 @@ class PermissionService:
             perm = self._loc.permissions.create(perm)
         self._loc.role_permissions.link(UUID(role_id), perm.id)
         return perm_to_dict(perm)
+
+    def create_bulk(
+        self,
+        role_id: str,
+        actions: list[str],
+        resource: str,
+        scope: str = "org",
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+    ) -> dict:
+        """Create multiple permissions for a role.
+        
+        - Checks that action+resource combo doesn't already exist
+        - Prevents duplicate role-permission assignments
+        - Supports validity date ranges
+        - Tracks new vs duplicate assignments
+        """
+        created = []
+        duplicates = []
+        role_uuid = UUID(role_id)
+        
+        for action in actions:
+            # Check if permission (action, resource) exists
+            perm = self._loc.permissions.find_by_action_resource(action, resource)
+            
+            if not perm:
+                # Create new permission if it doesn't exist
+                perm = Permission(
+                    action=Action(action),
+                    resource=Resource(resource),
+                    scope=scope,
+                )
+                if valid_from:
+                    perm.valid_from = datetime.fromisoformat(valid_from)
+                if valid_to:
+                    perm.valid_to = datetime.fromisoformat(valid_to)
+                perm = self._loc.permissions.create(perm)
+            
+            # Check if this role-permission link already exists
+            existing = self._loc.role_permissions.find_link(role_uuid, perm.id)
+            if not existing:
+                # Only create the link if it doesn't exist
+                self._loc.role_permissions.link(role_uuid, perm.id)
+                created.append({"action": action, "resource": resource})
+            else:
+                # This role already has this permission
+                duplicates.append({"action": action, "resource": resource})
+        
+        return {
+            "role_id": role_id,
+            "created": created,
+            "duplicates": duplicates,
+            "total_created": len(created),
+            "total_duplicates": len(duplicates),
+        }
+
+    def delete(self, permission_id: str) -> bool:
+        """Soft delete a permission."""
+        return self._loc.permissions.soft_delete(UUID(permission_id))
