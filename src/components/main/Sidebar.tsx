@@ -1506,6 +1506,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                           else msg = `⚠ All permissions already exist for this role.`;
                         }
                         setOrgMsg({text: msg, ok: true});
+                        // Refresh permissions list
+                        fetch(`${API}/api/v2/permissions`).then(res => res.json()).then(data => setPermissions(data.data || [])).catch(() => {});
                         // Clear form fields
                         setPermRoleId('');
                         setPermActions([]);
