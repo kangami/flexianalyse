@@ -2,6 +2,7 @@ import React, { useState, useRef, ChangeEvent, useEffect, useMemo, useCallback }
 import { Paginator } from '../ui/Paginator';
 import { FlexiGrid, type FlexiGridColumn } from '../ui/FlexiGrid';
 import { FlexiMultiReferentiel } from '../ui/FlexiMultiReferentiel';
+import { LanguageSwitcher } from '../ui/LanguageSwitcher';
 import { FolderOpen, Folder } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -382,7 +383,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   addFileToSidebar,
   onLogout
 }) => {
-  const { language, setLanguage } = useLanguage();
+  const { language, setLanguage, t } = useLanguage();
   const { theme, setTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
   const [files, setFiles] = useState<FileNode[]>([]);
@@ -1227,9 +1228,9 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* Horizontal Tabs */}
             <div className="flex border-b border-gray-200 bg-gray-50">
               {[
-                { id: 'organisation' as OrganisationTab, label: 'Organisation', icon: 'bi-buildings' },
-                { id: 'user' as OrganisationTab, label: 'User', icon: 'bi-people' },
-                { id: 'permission' as OrganisationTab, label: 'Permission', icon: 'bi-shield-lock' },
+                { id: 'organisation' as OrganisationTab, label: t('org.tab.organisation'), icon: 'bi-buildings' },
+                { id: 'user' as OrganisationTab, label: t('org.tab.user'), icon: 'bi-people' },
+                { id: 'permission' as OrganisationTab, label: t('org.tab.permission'), icon: 'bi-shield-lock' },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1259,31 +1260,31 @@ const Sidebar: React.FC<SidebarProps> = ({
               {organisationTab === 'organisation' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Active Organisation</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">{t('org.activeOrganisation')}</label>
                     <select value={selectedOrgId} onChange={e => setSelectedOrgId(e.target.value)}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 bg-white">
-                      {orgs.length === 0 && <option value="">— No organisations —</option>}
+                      {orgs.length === 0 && <option value="">{t('org.noOrganisations')}</option>}
                       {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                     </select>
                   </div>
                   <hr className="border-gray-200" />
                   <div>
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Organisations</h4>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">{t('org.manage')}</h4>
                     <div className="flex gap-1 mb-2">
-                      <input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Organisation name"
+                      <input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder={t('org.organisationName')}
                         className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
                       <button onClick={async () => {
                         if (!orgName) return;
                         const r = await fetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
                         const d = await r.json();
-                        if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:'Organisation created!',ok:true}); }
+                        if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:t('org.created'),ok:true}); }
                         else setOrgMsg({text:d.error||'Error',ok:false});
                       }} className="px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">
                         <i className="bi bi-plus-lg"></i>
                       </button>
                     </div>
                     {orgs.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic">No organisations yet</p>
+                      <p className="text-xs text-gray-400 italic">{t('sidebar.noFiles')}</p>
                     ) : (
                       <Paginator items={orgs}>
                         {pageItems => (
@@ -1296,8 +1297,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <button onClick={async () => {
                                     const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgEditName}) });
                                     const d = await r.json();
-                                    if (r.ok) { setOrgs(prev => prev.map(x => x.id === o.id ? {...x, name:orgEditName} : x)); setOrgEditId(null); setOrgMsg({text:'Organisation updated!',ok:true}); }
-                                    else setOrgMsg({text:d.error||'Update failed',ok:false});
+                                    if (r.ok) { setOrgs(prev => prev.map(x => x.id === o.id ? {...x, name:orgEditName} : x)); setOrgEditId(null); setOrgMsg({text:t('org.updated'),ok:true}); }
+                                    else setOrgMsg({text:d.error||t('org.deleteError'),ok:false});
                                   }} className="text-green-600 hover:text-green-700 px-1"><i className="bi bi-check-lg text-xs"></i></button>
                                   <button onClick={() => setOrgEditId(null)} className="text-gray-400 hover:text-gray-600 px-1"><i className="bi bi-x text-xs"></i></button>
                                 </div>
@@ -1308,8 +1309,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <button onClick={() => { setOrgEditId(o.id); setOrgEditName(o.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
                                     <button onClick={async () => {
                                       const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'DELETE' });
-                                      if (r.ok) { setOrgs(prev => prev.filter(x => x.id !== o.id)); if (selectedOrgId === o.id) setSelectedOrgId(''); setOrgMsg({text:'Organisation deleted',ok:true}); }
-                                      else setOrgMsg({text:'Delete failed',ok:false});
+                                      if (r.ok) { setOrgs(prev => prev.filter(x => x.id !== o.id)); if (selectedOrgId === o.id) setSelectedOrgId(''); setOrgMsg({text:t('org.deleted'),ok:true}); }
+                                      else setOrgMsg({text:t('org.deleteError'),ok:false});
                                     }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
                                   </div>
                                 </div>
@@ -1322,22 +1323,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                   <hr className="border-gray-200" />
                   <div>
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Departments</h4>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">{t('org.manageDepartments')}</h4>
                     <div className="flex gap-1 mb-2">
-                      <input value={deptName} onChange={e => setDeptName(e.target.value)} placeholder="Department name"
+                      <input value={deptName} onChange={e => setDeptName(e.target.value)} placeholder={t('org.departmentName')}
                         className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
                       <button onClick={async () => {
                         if (!deptName || !selectedOrgId) return;
                         const r = await fetch(`${API}/api/v2/departments`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptName, organization_id:selectedOrgId}) });
                         const d = await r.json();
-                        if (r.ok) { setDepartments(prev => [...prev, d]); setDeptName(''); setOrgMsg({text:'Department created!',ok:true}); }
+                        if (r.ok) { setDepartments(prev => [...prev, d]); setDeptName(''); setOrgMsg({text:t('org.created'),ok:true}); }
                         else setOrgMsg({text:d.error||'Error',ok:false});
                       }} className="px-3 py-1.5 text-xs font-medium text-purple-600 border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">
                         <i className="bi bi-plus-lg"></i>
                       </button>
                     </div>
                     {departments.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic">No departments yet</p>
+                      <p className="text-xs text-gray-400 italic">{t('org.noDepartments')}</p>
                     ) : (
                       <Paginator items={departments}>
                         {pageItems => (
@@ -1349,8 +1350,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     className="flex-1 text-xs border border-purple-300 rounded px-2 py-1" />
                                   <button onClick={async () => {
                                     const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptEditName}) });
-                                    if (r.ok) { setDepartments(prev => prev.map(x => x.id === d.id ? {...x, name:deptEditName} : x)); setDeptEditId(null); setOrgMsg({text:'Department updated!',ok:true}); }
-                                    else setOrgMsg({text:'Update failed',ok:false});
+                                    if (r.ok) { setDepartments(prev => prev.map(x => x.id === d.id ? {...x, name:deptEditName} : x)); setDeptEditId(null); setOrgMsg({text:t('org.deptUpdated'),ok:true}); }
+                                    else setOrgMsg({text:t('org.deleteError'),ok:false});
                                   }} className="text-green-600 hover:text-green-700 px-1"><i className="bi bi-check-lg text-xs"></i></button>
                                   <button onClick={() => setDeptEditId(null)} className="text-gray-400 hover:text-gray-600 px-1"><i className="bi bi-x text-xs"></i></button>
                                 </div>
@@ -1361,8 +1362,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     <button onClick={() => { setDeptEditId(d.id); setDeptEditName(d.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
                                     <button onClick={async () => {
                                       const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'DELETE' });
-                                      if (r.ok) { setDepartments(prev => prev.filter(x => x.id !== d.id)); setOrgMsg({text:'Department deleted',ok:true}); }
-                                      else setOrgMsg({text:'Delete failed',ok:false});
+                                      if (r.ok) { setDepartments(prev => prev.filter(x => x.id !== d.id)); setOrgMsg({text:t('org.deptDeleted'),ok:true}); }
+                                      else setOrgMsg({text:t('org.deleteError'),ok:false});
                                     }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
                                   </div>
                                 </div>
@@ -1379,32 +1380,32 @@ const Sidebar: React.FC<SidebarProps> = ({
               {organisationTab === 'user' && (
                 <div className="space-y-4">
                   <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Create User</p>
+                    <p className="text-xs font-semibold text-gray-700 mb-2">{t('org.manageUsers')}</p>
                     <select value={userRoleId} onChange={e => setUserRoleId(e.target.value)}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
-                      <option value="">— Select role —</option>
+                      <option value="">{t('org.selectRole')}</option>
                       {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                    <input value={userEmail} onChange={e => setUserEmail(e.target.value)} placeholder="Email"
+                    <input value={userEmail} onChange={e => setUserEmail(e.target.value)} placeholder={t('org.email')}
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
-                    <input value={userPassword} onChange={e => setUserPassword(e.target.value)} placeholder="Password" type="password"
+                    <input value={userPassword} onChange={e => setUserPassword(e.target.value)} placeholder={t('org.password')} type="password"
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
-                    <input value={userFullName} onChange={e => setUserFullName(e.target.value)} placeholder="Full name"
+                    <input value={userFullName} onChange={e => setUserFullName(e.target.value)} placeholder={t('org.fullName')}
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
                     <button onClick={async () => {
                       if (!userEmail || !userPassword || !userRoleId) return;
                       const r = await fetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName, role_id:userRoleId}) });
                       const d = await r.json();
-                      if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName('');setUserRoleId(''); setOrgMsg({text:'User created!',ok:true}); }
+                      if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName('');setUserRoleId(''); setOrgMsg({text:t('org.userCreated'),ok:true}); }
                       else setOrgMsg({text:d.error||'Error',ok:false});
                     }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
-                      <i className="bi bi-person-plus mr-1"></i>Create User
+                      <i className="bi bi-person-plus mr-1"></i>{t('org.createUser')}
                     </button>
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Users ({users.length})</h4>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">{t('org.tab.user')} ({users.length})</h4>
                     {users.length === 0 ? (
-                      <p className="text-xs text-gray-400 italic">No users yet</p>
+                      <p className="text-xs text-gray-400 italic">{t('org.noUsers')}</p>
                     ) : (
                       <div className="space-y-1">
                         {users.map(u => (
@@ -1426,8 +1427,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 
               {organisationTab === 'permission' && (
                 <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('permission.title')}</h3>
+                  </div>
                   <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Manage Role</p>
+                    <p className="text-xs font-semibold text-gray-700 mb-2">{t('role.title')}</p>
                     <FlexiGrid
                     columns={roleColumns}
                     data={roles}
@@ -1463,33 +1467,33 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                           </div>
                   <hr className="border-gray-200" />
                   <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Add Permission</p>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Roles</label>
+                    <p className="text-xs font-semibold text-gray-700 mb-2">{t('permission.add')}</p>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">{t('permission.roleLabel')}</label>
                     <select value={permRoleId} onChange={e => setPermRoleId(e.target.value)}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
-                      <option value="">— Select role —</option>
+                      <option value="">{t('permission.selectRole')}</option>
                       {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Resources</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">{t('permission.resourceLabel')}</label>
                     <select value={permResource} onChange={e => { setPermResource(e.target.value); setPermActions([]); }}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white">
-                      <option value="">— Select resource —</option>
+                      <option value="">{t('permission.selectResource')}</option>
                       {PERM_RESOURCES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                     <FlexiMultiReferentiel
-                      label="Actions"
+                      label={t('permission.actionLabel')}
                       availableItems={[...(RESOURCE_ACTIONS[permResource] || [])]}
                       selectedItems={permActions}
                       onItemSelect={action => setPermActions([...permActions, action])}
                       onItemRemove={action => setPermActions(permActions.filter(a => a !== action))}
                       disabled={!permResource}
-                      placeholder="— Select actions —"
+                      placeholder={t('permission.selectActions')}
                       className="mt-1 mb-2"
                     />
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Valid From</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">{t('permission.validFromLabel')}</label>
                     <input type="date" value={permValidFrom} onChange={e => setPermValidFrom(e.target.value)}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white" />
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase">Valid To</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase">{t('permission.validToLabel')}</label>
                     <input type="date" value={permValidTo} onChange={e => setPermValidTo(e.target.value)}
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white" />
                     <button onClick={async () => {
@@ -1499,11 +1503,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                       if (r.ok) {
                         let msg = '';
                         if (d.total_created > 0) {
-                          msg = `✓ ${d.total_created} permission${d.total_created > 1 ? 's' : ''} added!`;
+                          msg = t('permission.created.count', {count: d.total_created, plural: d.total_created > 1 ? 's' : ''});
                         }
                         if (d.total_duplicates > 0) {
-                          if (msg) msg += ` ⚠ ${d.total_duplicates} already exist${d.total_duplicates > 1 ? '' : 's'}.`;
-                          else msg = `⚠ All permissions already exist for this role.`;
+                          if (msg) msg += ` ${t('permission.duplicate.count', {count: d.total_duplicates, plural: d.total_duplicates > 1 ? '' : ''})}`;
+                          else msg = t('permission.duplicate.all');
                         }
                         setOrgMsg({text: msg, ok: true});
                         // Refresh permissions list
@@ -1518,12 +1522,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                         setOrgMsg({text:d.error||'Error',ok:false});
                       }
                     }} className="w-full px-3 py-1.5 text-xs font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700">
-                      <i className="bi bi-plus-lg mr-1"></i>Add Permission
+                      <i className="bi bi-plus-lg mr-1"></i>{t('permission.add')}
                     </button>
                   </div>
                   <hr className="border-gray-200 mt-4" />
                   <div className="border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-gray-700 mb-2">Saved Permissions</p>
+                    <p className="text-xs font-semibold text-gray-700 mb-2">{t('permission.saved')}</p>
                     <FlexiGrid
                       columns={permissionColumns}
                       data={permissions}
@@ -1534,10 +1538,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                         const r = await fetch(`${API}/api/v2/permissions/${id}`, { method: 'DELETE' });
                         if (r.ok) {
                           setPermissions(prev => prev.filter(p => p.id !== id));
-                          setOrgMsg({text: 'Permission deleted!', ok: true});
+                          setOrgMsg({text: t('permission.deleted'), ok: true});
                           return true;
                         } else {
-                          setOrgMsg({text: 'Error deleting permission', ok: false});
+                          setOrgMsg({text: t('permission.errorDeleting'), ok: false});
                           return false;
                         }
                       }}
@@ -1552,11 +1556,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       case 'history':
         return (
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">History</h3>
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('sidebar.history')}</h3>
             <div className="max-h-64 overflow-y-auto">
               {searchHistory.length > 0 ? (
                 <div className="space-y-1">
-                  <p className="text-xs text-gray-400 mb-2">Recent searches</p>
+                  <p className="text-xs text-gray-400 mb-2">{t('sidebar.recent.searches')}</p>
                   {searchHistory.map((query, index) => (
                     <button
                       key={index}
@@ -1569,12 +1573,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-gray-500">No history yet.</p>
+                <p className="text-xs text-gray-500">{t('sidebar.noHistory')}</p>
               )}
               {files.length > 0 && (
                 <>
                   <hr className="my-3 border-gray-200" />
-                  <p className="text-xs text-gray-400 mb-2">Open files</p>
+                  <p className="text-xs text-gray-400 mb-2">{t('sidebar.openFiles')}</p>
                   <ul className="space-y-1">
                     {renderFileTree(files)}
                   </ul>
@@ -1583,7 +1587,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {recentDocuments.length > 0 && (
                 <>
                   <hr className="my-3 border-gray-200" />
-                  <p className="text-xs text-gray-400 mb-2">Recent documents</p>
+                  <p className="text-xs text-gray-400 mb-2">{t('sidebar.recentDocuments')}</p>
                   {recentDocuments.map((doc) => (
                     <button
                       key={doc.id}
@@ -1603,16 +1607,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       case 'settings':
         return (
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">Settings</h3>
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('sidebar.settings')}</h3>
             <div className="space-y-4">
               {/* Theme selection */}
               <div>
-                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Theme</p>
+                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{t('settings.theme')}</p>
                 <div className="space-y-1">
                   {[
-                    { value: 'white' as const, label: 'White', color: 'bg-white border border-gray-300' },
-                    { value: 'dark' as const, label: 'Dark', color: 'bg-gray-900' },
-                    { value: 'dark-blue' as const, label: 'Dark Blue', color: 'bg-blue-950' },
+                    { value: 'white' as const, label: t('settings.themeWhite'), color: 'bg-white border border-gray-300' },
+                    { value: 'dark' as const, label: t('settings.themeDark'), color: 'bg-gray-900' },
+                    { value: 'dark-blue' as const, label: t('settings.themeDarkBlue'), color: 'bg-blue-950' },
                   ].map((opt) => (
                     <button
                       key={opt.value}
@@ -1635,28 +1639,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
               {/* Language selection */}
               <div>
-                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Language</p>
-                <div className="space-y-1">
-                  {[
-                    { code: 'en' as const, name: 'English', flag: '\uD83C\uDDEC\uD83C\uDDE7' },
-                    { code: 'fr' as const, name: 'Fran\u00e7ais', flag: '\uD83C\uDDEB\uD83C\uDDF7' },
-                    { code: 'es' as const, name: 'Espa\u00f1ol', flag: '\uD83C\uDDEA\uD83C\uDDF8' },
-                  ].map((lang) => (
-                    <button
-                      key={lang.code}
-                      onClick={() => setLanguage(lang.code)}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
-                        language === lang.code
-                          ? 'bg-purple-50 text-purple-700 font-medium'
-                          : 'text-gray-700 hover:bg-gray-100'
-                      }`}
-                    >
-                      <span>{lang.flag}</span>
-                      {lang.name}
-                      {language === lang.code && <i className="bi bi-check2 ml-auto text-purple-600"></i>}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{t('settings.language')}</p>
+                <LanguageSwitcher />
               </div>
             </div>
           </div>
@@ -1664,7 +1648,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       case 'user':
         return (
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">Account</h3>
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('account.title')}</h3>
             {isAuthenticated && user ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
@@ -1690,7 +1674,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 {user.plan && (
                   <p className="text-xs text-gray-500">
-                    Plan: <span className="font-medium capitalize">{user.plan}</span>
+                    {t('account.plan')}: <span className="font-medium capitalize">{user.plan}</span>
                   </p>
                 )}
                 <button
@@ -1706,17 +1690,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                   className="w-full text-left px-3 py-2 rounded-md text-xs text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <i className="bi bi-box-arrow-left mr-2"></i>
-                  Sign out
+                  {t('account.signOut')}
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-xs text-gray-500">Not signed in</p>
+                <p className="text-xs text-gray-500">{t('account.notSignedIn')}</p>
                 <button
                   onClick={() => { setIsLoginModalOpen(true); setActivePanel(null); }}
                   className="w-full px-3 py-2 rounded-md text-sm font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
                 >
-                  Sign in
+                  {t('account.signIn')}
                 </button>
               </div>
             )}
@@ -1778,10 +1762,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* Nav icons */}
             <nav className="flex-1 flex flex-col items-center gap-1">
               {[
-                { id: 'connector' as SidebarPanel, icon: 'bi-command', label: 'Connector' },
-                { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: 'Agents' },
-                { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: 'Organisation' },
-                { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: 'History' },
+                { id: 'connector' as SidebarPanel, icon: 'bi-command', label: t('sidebar.connector') },
+                { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: t('sidebar.agents') },
+                { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
+                { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
               ].map((item) => (
                 <button
                   key={item.id}
@@ -1814,7 +1798,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
               )}
               <i className="bi bi-gear text-lg font-bold"></i>
-              <span className="text-[9px] mt-0.5 leading-tight font-bold">Settings</span>
+              <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
             </button>
 
             {/* User icon at bottom */}
@@ -1830,7 +1814,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
               )}
               <i className="bi bi-person text-lg font-bold"></i>
-              <span className="text-[9px] mt-0.5 leading-tight font-bold">Account</span>
+              <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.account')}</span>
             </button>
           </div>
 
@@ -1858,10 +1842,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* Navigation icons */}
         <nav className="flex-1 flex flex-col items-center gap-1">
           {[
-            { id: 'connector' as SidebarPanel, icon: 'bi-command', label: 'Connector' },
-            { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: 'Agents' },
-            { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: 'Organisation' },
-            { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: 'History' },
+            { id: 'connector' as SidebarPanel, icon: 'bi-command', label: t('sidebar.connector') },
+            { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: t('sidebar.agents') },
+            { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
+            { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
           ].map((item) => (
             <button
               key={item.id}
@@ -1891,13 +1875,13 @@ const Sidebar: React.FC<SidebarProps> = ({
               ? 'text-purple-600 bg-purple-50'
               : 'text-black hover:text-purple-500 hover:bg-gray-200'
           }`}
-          title="Settings"
+          title={t('sidebar.settings')}
         >
           {activePanel === 'settings' && (
             <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
           )}
           <i className="bi bi-gear text-lg font-bold"></i>
-          <span className="text-[9px] mt-0.5 leading-tight font-bold">Settings</span>
+          <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
         </button>
 
         {/* User icon at bottom */}
@@ -1908,7 +1892,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               ? 'text-purple-600 bg-purple-50'
               : 'text-black hover:text-purple-500 hover:bg-gray-200'
           }`}
-          title="Account"
+          title={t('sidebar.account')}
         >
           {activePanel === 'user' && (
             <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
