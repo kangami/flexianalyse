@@ -406,7 +406,7 @@ html, body {
 
 .theme-white {
 
-  background: linear-gradient(to bottom right, #ffffff, #f8fafc);
+  background: #ffffff;
 
   color: #1f2937;
 
@@ -424,7 +424,7 @@ html, body {
 
 .theme-dark {
 
-  background: linear-gradient(to bottom right, #111827, #1f2937, #111827);
+  background: #1f2937;
 
   color: #f3f4f6;
 
@@ -442,9 +442,9 @@ html, body {
 
 .theme-dark-blue {
 
-  background: linear-gradient(to bottom right, #0c1226, #1e3a8a, #0c1226);
+  background: #1e3a8a;
 
-  color: #e0e7ff;
+  color: #dbeafe;
 
 }
 

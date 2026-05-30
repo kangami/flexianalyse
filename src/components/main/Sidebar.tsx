@@ -386,6 +386,39 @@ const Sidebar: React.FC<SidebarProps> = ({
   const { language, setLanguage, t } = useLanguage();
   const { theme, setTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
+
+  // Helper function for theme-aware tab colors
+  const getTabColors = () => {
+    switch (theme) {
+      case 'dark':
+        return {
+          borderColor: '#4b5563',
+          bgColor: '#374151',
+          hoverBgColor: '#4b5563',
+          textColor: '#d1d5db',
+          hoverTextColor: '#f3f4f6',
+        };
+      case 'dark-blue':
+        return {
+          borderColor: '#3b82f6',
+          bgColor: '#1e3a8a',
+          hoverBgColor: '#1e40af',
+          textColor: '#c7d2fe',
+          hoverTextColor: '#e0e7ff',
+        };
+      default: // white
+        return {
+          borderColor: '#e5e7eb',
+          bgColor: '#f9fafb',
+          hoverBgColor: '#f3f4f6',
+          textColor: '#6b7280',
+          hoverTextColor: '#374151',
+        };
+    }
+  };
+
+  const tabColors = getTabColors();
+
   const [files, setFiles] = useState<FileNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -1226,7 +1259,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         return (
           <div className="flex flex-col h-full">
             {/* Horizontal Tabs */}
-            <div className="flex border-b border-gray-200 bg-gray-50">
+            <div className="flex border-b transition-colors" style={{ borderColor: tabColors.borderColor, backgroundColor: tabColors.bgColor }}>
               {[
                 { id: 'organisation' as OrganisationTab, label: t('org.tab.organisation'), icon: 'bi-buildings' },
                 { id: 'user' as OrganisationTab, label: t('org.tab.user'), icon: 'bi-people' },
@@ -1235,11 +1268,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setOrganisationTab(tab.id)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-semibold transition-colors ${
-                    organisationTab === tab.id
-                      ? 'text-purple-600 border-b-2 border-purple-600 bg-white'
-                      : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                  }`}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2.5 text-xs font-semibold transition-colors`}
+                  style={{
+                    color: organisationTab === tab.id ? '#a855f7' : (theme !== 'white' ? '#ffffff' : tabColors.textColor),
+                    backgroundColor: organisationTab === tab.id ? (theme === 'white' ? '#ffffff' : (theme === 'dark' ? '#1f2937' : '#1e3a8a')) : 'transparent',
+                    borderBottom: organisationTab === tab.id ? '2px solid #a855f7' : 'none',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (organisationTab !== tab.id) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = tabColors.hoverBgColor;
+                      (e.target as HTMLButtonElement).style.color = theme !== 'white' ? '#ffffff' : tabColors.hoverTextColor;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (organisationTab !== tab.id) {
+                      (e.target as HTMLButtonElement).style.backgroundColor = 'transparent';
+                      (e.target as HTMLButtonElement).style.color = theme !== 'white' ? '#ffffff' : tabColors.textColor;
+                    }
+                  }}
                 >
                   <i className={`bi ${tab.icon} text-sm`}></i>
                   {tab.label}
@@ -1612,24 +1659,30 @@ const Sidebar: React.FC<SidebarProps> = ({
               {/* Theme selection */}
               <div>
                 <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{t('settings.theme')}</p>
-                <div className="space-y-1">
+                <div className="flex items-center gap-1.5">
                   {[
-                    { value: 'white' as const, label: t('settings.themeWhite'), color: 'bg-white border border-gray-300' },
-                    { value: 'dark' as const, label: t('settings.themeDark'), color: 'bg-gray-900' },
-                    { value: 'dark-blue' as const, label: t('settings.themeDarkBlue'), color: 'bg-blue-950' },
+                    { value: 'white' as const, bgColor: '#ffffff', borderColor: '#e5e7eb' },
+                    { value: 'dark' as const, bgColor: '#1f2937', borderColor: '#374151' },
+                    { value: 'dark-blue' as const, bgColor: '#1e3a8a', borderColor: '#1e40af' },
                   ].map((opt) => (
                     <button
                       key={opt.value}
                       onClick={() => setTheme(opt.value)}
-                      className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${
+                      title={`${opt.value.charAt(0).toUpperCase() + opt.value.slice(1).replace('-', ' ')} theme`}
+                      className={`w-6 h-6 rounded transition-all ${
                         theme === opt.value
-                          ? 'bg-purple-50 text-purple-700 font-medium'
-                          : 'text-gray-700 hover:bg-gray-100'
+                          ? 'ring-2 ring-purple-500 ring-offset-1'
+                          : 'hover:ring-2 hover:ring-gray-300'
                       }`}
+                      style={{
+                        backgroundColor: opt.bgColor,
+                        borderColor: opt.borderColor,
+                        border: '1px solid ' + opt.borderColor,
+                      }}
                     >
-                      <div className={`w-4 h-4 rounded-full ${opt.color} flex-shrink-0`}></div>
-                      {opt.label}
-                      {theme === opt.value && <i className="bi bi-check2 ml-auto text-purple-600"></i>}
+                      {theme === opt.value && (
+                        <i className="bi bi-check text-purple-600 text-xs font-bold"></i>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -1766,15 +1819,32 @@ const Sidebar: React.FC<SidebarProps> = ({
                 { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: t('sidebar.agents') },
                 { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
                 { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
-              ].map((item) => (
+              ].map((item) => {
+                const isInactive = activePanel !== item.id;
+                const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+                const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+                return (
                 <button
                   key={item.id}
                   onClick={() => handleIconClick(item.id)}
                   className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors group ${
                     activePanel === item.id
                       ? 'text-purple-600 bg-purple-50'
-                      : 'text-black hover:text-purple-500 hover:bg-gray-200'
+                      : ''
                   }`}
+                  style={{
+                    color: activePanel === item.id ? '#a855f7' : inactiveColor,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (isInactive) {
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (isInactive) {
+                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                    }
+                  }}
                 >
                   {activePanel === item.id && (
                     <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
@@ -1782,40 +1852,77 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <i className={`bi ${item.icon} text-lg font-bold`}></i>
                   <span className="text-[9px] mt-0.5 leading-tight font-bold">{item.label}</span>
                 </button>
-              ))}
+              );
+              })}
             </nav>
 
             {/* Settings icon */}
-            <button
-              onClick={() => handleIconClick('settings')}
-              className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${
-                activePanel === 'settings'
-                  ? 'text-purple-600 bg-purple-50'
-                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
-              }`}
-            >
-              {activePanel === 'settings' && (
-                <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-              )}
-              <i className="bi bi-gear text-lg font-bold"></i>
-              <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
-            </button>
+            {(() => {
+              const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+              const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+              return (
+              <button
+                onClick={() => handleIconClick('settings')}
+                className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${
+                  activePanel === 'settings'
+                    ? 'text-purple-600 bg-purple-50'
+                    : ''
+                }`}
+                style={{
+                  color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
+                }}
+                onMouseEnter={(e) => {
+                  if (activePanel !== 'settings') {
+                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (activePanel !== 'settings') {
+                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {activePanel === 'settings' && (
+                  <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+                )}
+                <i className="bi bi-gear text-lg font-bold"></i>
+                <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
+              </button>
+            )})()}
 
             {/* User icon at bottom */}
-            <button
-              onClick={() => handleIconClick('user')}
-              className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors ${
-                activePanel === 'user'
-                  ? 'text-purple-600 bg-purple-50'
-                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
-              }`}
-            >
-              {activePanel === 'user' && (
-                <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-              )}
-              <i className="bi bi-person text-lg font-bold"></i>
-              <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.account')}</span>
-            </button>
+            {(() => {
+              const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+              const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+              return (
+              <button
+                onClick={() => handleIconClick('user')}
+                className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors ${
+                  activePanel === 'user'
+                    ? 'text-purple-600 bg-purple-50'
+                    : ''
+                }`}
+                style={{
+                  color: activePanel === 'user' ? '#a855f7' : inactiveColor,
+                }}
+                onMouseEnter={(e) => {
+                  if (activePanel !== 'user') {
+                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (activePanel !== 'user') {
+                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {activePanel === 'user' && (
+                  <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+                )}
+                <i className="bi bi-person text-lg font-bold"></i>
+                <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.account')}</span>
+              </button>
+            )})()}
           </div>
 
           {/* Mobile flyout panel */}
@@ -1846,16 +1953,33 @@ const Sidebar: React.FC<SidebarProps> = ({
             { id: 'agents' as SidebarPanel, icon: 'bi-outlet', label: t('sidebar.agents') },
             { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
             { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
-          ].map((item) => (
+          ].map((item) => {
+            const isInactive = activePanel !== item.id;
+            const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+            const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+            return (
             <button
               key={item.id}
               onClick={() => handleIconClick(item.id)}
               className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 group ${
                 activePanel === item.id
                   ? 'text-purple-600 bg-purple-50'
-                  : 'text-black hover:text-purple-500 hover:bg-gray-200'
+                  : ''
               }`}
               title={item.label}
+              style={{
+                color: activePanel === item.id ? '#a855f7' : inactiveColor,
+              }}
+              onMouseEnter={(e) => {
+                if (isInactive) {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (isInactive) {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                }
+              }}
             >
               {/* Purple right border indicator */}
               {activePanel === item.id && (
@@ -1864,47 +1988,84 @@ const Sidebar: React.FC<SidebarProps> = ({
               <i className={`bi ${item.icon} text-lg font-bold`}></i>
               <span className="text-[9px] mt-0.5 leading-tight font-bold">{item.label}</span>
             </button>
-          ))}
+          );
+          })}
         </nav>
 
         {/* Settings icon */}
-        <button
-          onClick={() => handleIconClick('settings')}
-          className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 mb-1 ${
-            activePanel === 'settings'
-              ? 'text-purple-600 bg-purple-50'
-              : 'text-black hover:text-purple-500 hover:bg-gray-200'
-          }`}
-          title={t('sidebar.settings')}
-        >
-          {activePanel === 'settings' && (
-            <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-          )}
-          <i className="bi bi-gear text-lg font-bold"></i>
-          <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
-        </button>
+        {(() => {
+          const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+          const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+          return (
+          <button
+            onClick={() => handleIconClick('settings')}
+            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 mb-1 ${
+              activePanel === 'settings'
+                ? 'text-purple-600 bg-purple-50'
+                : ''
+            }`}
+            title={t('sidebar.settings')}
+            style={{
+              color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
+            }}
+            onMouseEnter={(e) => {
+              if (activePanel !== 'settings') {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activePanel !== 'settings') {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            {activePanel === 'settings' && (
+              <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
+            )}
+            <i className="bi bi-gear text-lg font-bold"></i>
+            <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
+          </button>
+        )})()}
 
         {/* User icon at bottom */}
-        <button
-          onClick={() => handleIconClick('user')}
-          className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 ${
-            activePanel === 'user'
-              ? 'text-purple-600 bg-purple-50'
-              : 'text-black hover:text-purple-500 hover:bg-gray-200'
-          }`}
-          title={t('sidebar.account')}
-        >
-          {activePanel === 'user' && (
-            <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-          )}
-          <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
-            {isAuthenticated && user?.avatar ? (
-              <img src={user.avatar} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <i className="bi bi-person text-black font-bold"></i>
+        {(() => {
+          const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+          const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+          return (
+          <button
+            onClick={() => handleIconClick('user')}
+            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 ${
+              activePanel === 'user'
+                ? 'text-purple-600 bg-purple-50'
+                : ''
+            }`}
+            title={t('sidebar.account')}
+            style={{
+              color: activePanel === 'user' ? '#a855f7' : inactiveColor,
+            }}
+            onMouseEnter={(e) => {
+              if (activePanel !== 'user') {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activePanel !== 'user') {
+                (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+              }
+            }}
+          >
+            {activePanel === 'user' && (
+              <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
             )}
-          </div>
-        </button>
+            <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
+              {isAuthenticated && user?.avatar ? (
+                <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <i className="bi bi-person text-black font-bold"></i>
+              )}
+            </div>
+          </button>
+        )})()}
 
         {/* Error indicator */}
         {error && (
