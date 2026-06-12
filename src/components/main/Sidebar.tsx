@@ -13,6 +13,36 @@ import { auth } from '../../lib/firebase';
 
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
+type ConnectorType = 'database' | 'google_drive' | 'sharepoint' | 'dropbox' | null;
+
+const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: string; placeholder?: string }[]> = {
+  database: [
+    { key: 'name',           label: 'Connection Name', placeholder: 'My Database' },
+    { key: 'connection_url', label: 'Connection URL',   placeholder: 'postgresql://user:pass@host:5432/db' },
+  ],
+  google_drive: [
+    { key: 'name',      label: 'Connection Name',          placeholder: 'My Google Drive' },
+    { key: 'folder_id', label: 'Root Folder ID (optional)', placeholder: '1BxiMVs0XRA5…' },
+  ],
+  sharepoint: [
+    { key: 'name',       label: 'Connection Name', placeholder: 'My SharePoint' },
+    { key: 'tenant_id',  label: 'Tenant ID',        placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' },
+    { key: 'site_url',   label: 'Site URL',         placeholder: 'https://company.sharepoint.com/sites/…' },
+  ],
+  dropbox: [
+    { key: 'name',         label: 'Connection Name', placeholder: 'My Dropbox' },
+    { key: 'access_token', label: 'Access Token',     type: 'password' },
+  ],
+};
+
+const OAUTH_CONNECTORS: ReadonlySet<string> = new Set(['google_drive', 'sharepoint']);
+
+const CONNECTOR_META: Record<string, { title: string; apiType: string }> = {
+  database:     { title: 'Database (SQL)', apiType: 'sql' },
+  google_drive: { title: 'Google Drive',   apiType: 'google_drive' },
+  sharepoint:   { title: 'SharePoint',     apiType: 'sharepoint' },
+  dropbox:      { title: 'Dropbox',        apiType: 'dropbox' },
+};
 
 const PERM_RESOURCES = ['organizations', 'users', 'memberships', 'departments', 'teams', 'roles', 'permissions', 'connectors', 'documents', 'cases', 'analyses', 'prompts', 'ai_agents', 'audit_logs', 'settings', 'billing'] as const;
 
@@ -435,6 +465,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Icon rail active panel state
   const [activePanel, setActivePanel] = useState<SidebarPanel>(null);
   const [organisationTab, setOrganisationTab] = useState<OrganisationTab>('organisation');
+
+  // Connector panel state
+  const [activeConnectorType, setActiveConnectorType] = useState<ConnectorType>(null);
+  const [connectorForm, setConnectorForm] = useState<Record<string, string>>({});
+  const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [connectorSaving, setConnectorSaving] = useState(false);
   
   // Organisation management state
   const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([]);
@@ -1203,7 +1239,83 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Handle icon click - toggle panel
   const handleIconClick = useCallback((panel: SidebarPanel) => {
     setActivePanel(prev => prev === panel ? null : panel);
+    if (panel !== 'connector') { setActiveConnectorType(null); setConnectorForm({}); setConnectorMsg(null); }
   }, []);
+
+  const handleSaveConnector = useCallback(async () => {
+    if (!activeConnectorType) return;
+    setConnectorSaving(true);
+    setConnectorMsg(null);
+
+    try {
+      if (!selectedOrgId) throw new Error('Select an organisation first (Organisation tab)');
+
+      const apiType = CONNECTOR_META[activeConnectorType].apiType;
+
+      // Construit le body selon le type de connector
+      const body: Record<string, string | undefined> = {
+        type: apiType,
+        organization_id: selectedOrgId,
+        name: connectorForm.name || `New ${activeConnectorType}`,
+      };
+
+      // Token selon le type
+      if (activeConnectorType === 'database') {
+        if (!connectorForm.connection_url) throw new Error('Connection URL is required');
+        body.token = connectorForm.connection_url;
+
+      } else if (activeConnectorType === 'dropbox') {
+        if (!connectorForm.access_token) throw new Error('Access Token is required');
+        body.token = connectorForm.access_token;
+
+      } else if (activeConnectorType === 'sharepoint') {
+        if (!connectorForm.tenant_id) throw new Error('Tenant ID is required');
+        if (!connectorForm.site_url) throw new Error('Site URL is required');
+        body.token = JSON.stringify({
+          tenant_id: connectorForm.tenant_id,
+          site_url: connectorForm.site_url,
+        });
+
+      } else if (activeConnectorType === 'google_drive') {
+        // Google Drive = OAuth, pas besoin de token manuel
+        body.token = connectorForm.folder_id || undefined;
+      }
+
+      // Sauvegarde le connector
+      const r = await fetch(`${API}/api/v2/connectors`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Organization-Id': selectedOrgId
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
+      const saved = await r.json();
+
+      // OAuth flow pour Google Drive et SharePoint
+      if (OAUTH_CONNECTORS.has(activeConnectorType)) {
+        const provider = activeConnectorType === 'google_drive' ? 'Google' : 'Microsoft';
+        setConnectorMsg({ text: `Connector saved — opening ${provider} authorization…`, ok: true });
+        setTimeout(() => {
+          window.open(`${API}/auth/${activeConnectorType}?connector_id=${saved.id}`, '_blank');
+        }, 400);
+      } else {
+        setConnectorMsg({ text: 'Connection saved successfully!', ok: true });
+        setTimeout(() => {
+          setActiveConnectorType(null);
+          setConnectorForm({});
+          setConnectorMsg(null);
+        }, 2000);
+      }
+
+    } catch (e: any) {
+      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+    } finally {
+      setConnectorSaving(false);
+    }
+  }, [activeConnectorType, connectorForm, API, selectedOrgId]);
 
   // Close flyout when clicking outside
   useEffect(() => {
@@ -1220,30 +1332,148 @@ const Sidebar: React.FC<SidebarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activePanel]);
 
+  const renderConnectorForm = () => {
+    if (!activeConnectorType) return null;
+    return (
+      <div className="p-4 flex flex-col gap-3 h-full">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">New connection</p>
+            <h4 className="text-sm font-semibold text-gray-800">{CONNECTOR_META[activeConnectorType].title}</h4>
+          </div>
+          <button
+            onClick={() => { setActiveConnectorType(null); setConnectorForm({}); setConnectorMsg(null); }}
+            className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
+          >
+            <i className="bi bi-x text-lg"></i>
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2.5 flex-1">
+          {/* OAuth info banner */}
+          {OAUTH_CONNECTORS.has(activeConnectorType) && (
+            <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-2">
+              <i className="bi bi-shield-lock text-blue-500 text-sm mt-0.5 flex-shrink-0"></i>
+              <p className="text-[10px] text-blue-700 leading-snug">
+                Authorization happens via{' '}
+                {activeConnectorType === 'google_drive' ? 'Google OAuth' : 'Microsoft OAuth'}.
+                Fill in the name{activeConnectorType === 'sharepoint' ? ' and tenant details' : ''}, then click <strong>Connect</strong>.
+              </p>
+            </div>
+          )}
+
+          {CONNECTOR_FIELDS[activeConnectorType].map(field => (
+            <div key={field.key}>
+              <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wide">{field.label}</label>
+              <input
+                type={field.type || 'text'}
+                placeholder={field.placeholder}
+                value={connectorForm[field.key] || ''}
+                onChange={e => setConnectorForm(f => ({ ...f, [field.key]: e.target.value }))}
+                className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 placeholder:text-gray-300"
+              />
+            </div>
+          ))}
+        </div>
+
+        {connectorMsg && (
+          <p className={`text-[10px] font-medium ${connectorMsg.ok ? 'text-green-600' : 'text-red-500'}`}>
+            {connectorMsg.ok ? '✓' : '✗'} {connectorMsg.text}
+          </p>
+        )}
+
+        <button
+          disabled={connectorSaving}
+          onClick={handleSaveConnector}
+          className="w-full text-xs px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
+        >
+          {connectorSaving ? (
+            'Saving…'
+          ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
+            <>
+              <i className="bi bi-box-arrow-up-right text-[11px]"></i>
+              Connect with {activeConnectorType === 'google_drive' ? 'Google' : 'Microsoft'}
+            </>
+          ) : (
+            'Save Connection'
+          )}
+        </button>
+      </div>
+    );
+  };
+
   // Render the flyout panel content based on active panel
   const renderFlyoutContent = () => {
     switch (activePanel) {
       case 'connector':
         return (
-          <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">Connector</h3>
-            <div className="space-y-2">
-              <button
-                onClick={() => { fileInputRef.current?.click(); setActivePanel(null); }}
-                className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
-              >
-                <i className="bi bi-file-earmark-plus mr-2"></i>
-                Import a file
-              </button>
-              <button
-                onClick={() => { folderInputRef.current?.click(); setActivePanel(null); }}
-                className="w-full text-left px-3 py-2 rounded-md text-sm text-gray-700 hover:bg-purple-50 hover:text-purple-700 transition-colors"
-              >
-                <i className="bi bi-folder-plus mr-2"></i>
-                Import a folder
-              </button>
-              <hr className="my-2 border-gray-200" />
-              <p className="text-xs text-gray-400 px-3">More connectors coming soon...</p>
+          <div className="p-4 flex flex-col gap-3">
+            <h3 className="text-sm font-semibold text-gray-800">Connectors</h3>
+            <div className="flex flex-wrap gap-1">
+              {([
+                {
+                  type: 'database' as ConnectorType,
+                  label: 'Database',
+                  icon: (
+                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-blue-100">
+                      <i className="bi bi-database text-blue-600 text-sm"></i>
+                    </div>
+                  ),
+                },
+                {
+                  type: 'google_drive' as ConnectorType,
+                  label: 'Google Drive',
+                  icon: (
+                    <svg viewBox="0 0 87.3 78" className="w-7 h-7 p-0.5">
+                      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0a15.6 15.6 0 003.3 8.05l3.3-5.7v11.5z" fill="#0066da"/>
+                      <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L.95 52.3A15.6 15.6 0 000 57H27.5L43.65 25z" fill="#00ac47"/>
+                      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25A15.6 15.6 0 0087.3 57H59.75l5.85 11.5L73.55 76.8z" fill="#ea4335"/>
+                      <path d="M43.65 25L57.4 1.2A15.4 15.4 0 0052.1 0H35.2a15.4 15.4 0 00-5.3.95L43.65 25z" fill="#00832d"/>
+                      <path d="M59.75 57H27.5L13.75 80.8c1.35.8 2.9 1.2 4.5 1.2h50.6a15.4 15.4 0 004.5-1.2L59.75 57z" fill="#2684fc"/>
+                      <path d="M73.4 28.5l-13.1-22.7c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.75 57h27.45a15.7 15.7 0 00-1.5-6.35L73.4 28.5z" fill="#ffba00"/>
+                    </svg>
+                  ),
+                },
+                {
+                  type: 'sharepoint' as ConnectorType,
+                  label: 'SharePoint',
+                  icon: (
+                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-[#038387]">
+                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                        <path d="M10 2a6 6 0 100 12 6 6 0 000-12zm0 10a4 4 0 110-8 4 4 0 010 8zm7 2a4 4 0 100 8 4 4 0 000-8zm-7 2H4a2 2 0 00-2 2v2h10v-2a2 2 0 00-2-2z"/>
+                      </svg>
+                    </div>
+                  ),
+                },
+                {
+                  type: 'dropbox' as ConnectorType,
+                  label: 'Dropbox',
+                  icon: (
+                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-[#0061FF]">
+                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                        <path d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4-6-4zM18 2l-6 4 6 4-6 4 6 4 6-4-6-4 6-4-6-4zM6 16.5L12 20l6-3.5-6-4-6 4z"/>
+                      </svg>
+                    </div>
+                  ),
+                },
+              ] as { type: ConnectorType; label: string; icon: React.ReactNode }[]).map(({ type, label, icon }) => (
+                <button
+                  key={type!}
+                  title={label}
+                  onClick={() => {
+                    setActiveConnectorType(prev => prev === type ? null : type);
+                    setConnectorForm({});
+                    setConnectorMsg(null);
+                  }}
+                  className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
+                    activeConnectorType === type
+                      ? 'bg-purple-100 ring-2 ring-purple-400 ring-offset-1'
+                      : 'hover:bg-gray-100'
+                  }`}
+                >
+                  {icon}
+                </button>
+              ))}
             </div>
           </div>
         );
@@ -1925,10 +2155,17 @@ const Sidebar: React.FC<SidebarProps> = ({
             )})()}
           </div>
 
-          {/* Mobile flyout panel */}
+          {/* Mobile flyout panel(s) */}
           {activePanel && (
-            <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto`}>
-              {renderFlyoutContent()}
+            <div className="flex h-full">
+              <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto`}>
+                {renderFlyoutContent()}
+              </div>
+              {activePanel === 'connector' && activeConnectorType && (
+                <div className="w-60 bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto">
+                  {renderConnectorForm()}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2078,13 +2315,17 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       </div>
 
-      {/* Flyout Panel */}
+      {/* Flyout Panel(s) */}
       {activePanel && (
-        <div
-          ref={flyoutRef}
-          className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200`}
-        >
-          {renderFlyoutContent()}
+        <div ref={flyoutRef} className="flex h-full">
+          <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200`}>
+            {renderFlyoutContent()}
+          </div>
+          {activePanel === 'connector' && activeConnectorType && (
+            <div className="w-64 bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200">
+              {renderConnectorForm()}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -30,6 +30,10 @@ dist-ssr
 .env.development
 .env.production
 
+# Google Service Account credentials
+google-service-account.json
+*-service-account.json
+
 # Clés et certificats
 *.pem
 *.key

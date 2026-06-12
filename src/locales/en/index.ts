@@ -55,7 +55,6 @@ export const enUS = {
   'sidebar.settings': 'Settings',
   'sidebar.account': 'Account',
   'sidebar.history': 'History',
-  'sidebar.settings': 'Settings',
   'sidebar.account': 'Account',
   'sidebar.recent.searches': 'Recent searches',
   'sidebar.noHistory': 'No history yet',

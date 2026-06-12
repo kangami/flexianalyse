@@ -28,8 +28,6 @@ def register_all():
     _register_depts(api_bp)
     _register_users(api_bp)
     _register_roles(api_bp)
-    _register_skeletons(api_bp)
+    #_register_skeletons(api_bp)
     _register_connectors(api_bp)
 
-
-register_all()

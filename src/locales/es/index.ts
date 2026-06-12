@@ -55,7 +55,6 @@ export const esES = {
   'sidebar.settings': 'Configuración',
   'sidebar.account': 'Cuenta',
   'sidebar.history': 'Historial',
-  'sidebar.settings': 'Configuración',
   'sidebar.account': 'Cuenta',
   'sidebar.recent.searches': 'Búsquedas recientes',
   'sidebar.noHistory': 'Sin historial aún',

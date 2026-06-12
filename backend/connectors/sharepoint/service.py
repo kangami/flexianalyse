@@ -2,18 +2,28 @@
 
 Loads connector credentials from the database, builds a SharePointMCPClient,
 and exposes methods consumed by the REST API and the sync job.
+
+Multi-org model
+---------------
+MS_CLIENT_ID / MS_CLIENT_SECRET are app-level credentials registered once in
+Azure AD.  Every organization gets its own access_token and refresh_token
+stored in ConnectorCredentials (one row per connector_id).
+_build_client() refreshes the access token automatically when it expires.
 """
 import logging
 import os
 from uuid import UUID
 
-from models.connector import Connector
+import msal
+
 from connectors.base.models import ConnectorConfig
 from connectors.sharepoint.mcp_client import SharePointMCPClient
+from models.connector import Connector
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SERVER_URL = "http://localhost:3002"
+_DEFAULT_SERVER_URL = "http://localhost:3003"
+_SCOPES = ["https://graph.microsoft.com/Files.ReadWrite.All"]
 
 
 class SharePointService:
@@ -29,7 +39,7 @@ class SharePointService:
     # ------------------------------------------------------------------
 
     def _build_client(self, connector_id: str) -> tuple[SharePointMCPClient, Connector]:
-        """Resolve credentials from DB and return a ready-to-use MCP client."""
+        """Resolve credentials from DB, auto-refresh if expired, return MCP client."""
         connector = self._loc.connectors.get_by_id(UUID(connector_id))
         if not connector:
             raise ValueError(f"Connector '{connector_id}' not found")
@@ -38,10 +48,39 @@ class SharePointService:
                 f"Expected connector type '{self.connector_type}', got '{connector.type}'"
             )
 
-        creds = self._loc.connector_credentials.get_by_connector(UUID(connector_id))
+        creds_db = self._loc.connector_credentials.get_by_connector(UUID(connector_id))
+        token = creds_db.encrypted_token if creds_db else None
+
+        if creds_db and creds_db.refresh_token:
+            client_id = os.environ.get("MS_CLIENT_ID")
+            client_secret = os.environ.get("MS_CLIENT_SECRET")
+            tenant_id = os.environ.get("MS_TENANT_ID", "common")
+            if client_id and client_secret:
+                msal_app = msal.ConfidentialClientApplication(
+                    client_id=client_id,
+                    client_credential=client_secret,
+                    authority=f"https://login.microsoftonline.com/{tenant_id}",
+                )
+                result = msal_app.acquire_token_by_refresh_token(
+                    creds_db.refresh_token, scopes=_SCOPES
+                )
+                if "access_token" in result:
+                    token = result["access_token"]
+                    creds_db.encrypted_token = token
+                    if result.get("refresh_token"):
+                        creds_db.refresh_token = result["refresh_token"]
+                    self._loc.connector_credentials.update(creds_db)
+                    logger.info("SharePoint token refreshed for connector %s", connector_id)
+                else:
+                    logger.warning(
+                        "SharePoint token refresh failed for connector %s: %s",
+                        connector_id,
+                        result.get("error_description", result.get("error")),
+                    )
+
         config = ConnectorConfig(
             server_url=os.environ.get("SHAREPOINT_MCP_URL", _DEFAULT_SERVER_URL),
-            auth_token=creds.encrypted_token if creds else None,
+            auth_token=token,
         )
         return SharePointMCPClient(config), connector
 

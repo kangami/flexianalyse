@@ -40,9 +40,10 @@ from flask import request, jsonify
 from services import locator
 from models.connector import Connector, ConnectorCredentials
 import connectors as connector_registry
+from services.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
-
+encryption_service = EncryptionService()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,7 +115,7 @@ def register(api_bp) -> None:  # noqa: C901
         if token:
             creds = ConnectorCredentials(
                 connector_id=connector.id,
-                encrypted_token=token,
+                encrypted_token=encryption_service.encrypt(token),
             )
             locator.connector_credentials.create(creds)
 

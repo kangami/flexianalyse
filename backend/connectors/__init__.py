@@ -4,6 +4,7 @@ Supported connector types:
   - google_drive  → GoogleDriveService / GoogleDriveSync
   - sharepoint    → SharePointService  / SharePointSync
   - sql           → SQLService         / SQLSync
+  - dropbox       → (service/sync not yet implemented)
 """
 from connectors.google_drive.service import GoogleDriveService
 from connectors.google_drive.sync import GoogleDriveSync
@@ -12,12 +13,13 @@ from connectors.sharepoint.sync import SharePointSync
 from connectors.sql.service import SQLService
 from connectors.sql.sync import SQLSync
 
-CONNECTOR_TYPES: list[str] = ["google_drive", "sharepoint", "sql"]
+CONNECTOR_TYPES: list[str] = ["google_drive", "sharepoint", "sql", "dropbox"]
 
 _SERVICE_MAP: dict = {
     "google_drive": (GoogleDriveService, GoogleDriveSync),
     "sharepoint":   (SharePointService,  SharePointSync),
     "sql":          (SQLService,          SQLSync),
+    "dropbox":      (None, None),
 }
 
 
@@ -27,6 +29,8 @@ def get_service(connector_type: str, locator):
     if not entry:
         raise ValueError(f"Unknown connector type '{connector_type}'. Valid: {CONNECTOR_TYPES}")
     svc_cls, _ = entry
+    if svc_cls is None:
+        raise NotImplementedError(f"Service not yet implemented for connector type '{connector_type}'")
     return svc_cls(locator)
 
 
@@ -36,6 +40,8 @@ def get_sync(connector_type: str, locator):
     if not entry:
         raise ValueError(f"Unknown connector type '{connector_type}'. Valid: {CONNECTOR_TYPES}")
     _, sync_cls = entry
+    if sync_cls is None:
+        raise NotImplementedError(f"Sync not yet implemented for connector type '{connector_type}'")
     return sync_cls(locator)
 
 

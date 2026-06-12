@@ -30,7 +30,7 @@ def create_app():
                 "https://flexianalyse.com"
             ],
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "Session-ID"]
+            "allow_headers": ["Content-Type", "Authorization", "Session-ID", "X-Organization-Id", "X-User-Id"]
         }
     })
 
@@ -40,7 +40,7 @@ def create_app():
             response = jsonify({"ok": True})
             response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Session-ID"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, Session-ID, X-Organization-Id, X-User-Id"
             return response, 200
     
     # Enregistrement des routes

@@ -2,18 +2,28 @@
 
 Loads connector credentials from the database, builds a GoogleDriveMCPClient,
 and exposes methods consumed by the REST API and the sync job.
+
+Multi-org model
+---------------
+GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are app-level credentials registered
+once in Google Cloud Console.  Every organization gets its own access_token
+and refresh_token stored in ConnectorCredentials (one row per connector_id).
+_build_client() refreshes the access token automatically when it expires.
 """
 import logging
 import os
 from uuid import UUID
 
-from models.connector import Connector
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+
 from connectors.base.models import ConnectorConfig
 from connectors.google_drive.mcp_client import GoogleDriveMCPClient
+from models.connector import Connector
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SERVER_URL = "http://localhost:3001"
+_DEFAULT_SERVER_URL = "http://localhost:3002"
 
 
 class GoogleDriveService:
@@ -29,7 +39,7 @@ class GoogleDriveService:
     # ------------------------------------------------------------------
 
     def _build_client(self, connector_id: str) -> tuple[GoogleDriveMCPClient, Connector]:
-        """Resolve credentials from DB and return a ready-to-use MCP client."""
+        """Resolve credentials from DB, auto-refresh if expired, return MCP client."""
         connector = self._loc.connectors.get_by_id(UUID(connector_id))
         if not connector:
             raise ValueError(f"Connector '{connector_id}' not found")
@@ -38,10 +48,34 @@ class GoogleDriveService:
                 f"Expected connector type '{self.connector_type}', got '{connector.type}'"
             )
 
-        creds = self._loc.connector_credentials.get_by_connector(UUID(connector_id))
+        creds_db = self._loc.connector_credentials.get_by_connector(UUID(connector_id))
+        token = creds_db.encrypted_token if creds_db else None
+
+        if creds_db and creds_db.refresh_token:
+            g_creds = Credentials(
+                token=creds_db.encrypted_token,
+                refresh_token=creds_db.refresh_token,
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+                expiry=creds_db.expires_at,
+            )
+            if not g_creds.valid:
+                try:
+                    g_creds.refresh(Request())
+                    creds_db.encrypted_token = g_creds.token
+                    creds_db.expires_at = g_creds.expiry
+                    self._loc.connector_credentials.update(creds_db)
+                    logger.info("Google Drive token refreshed for connector %s", connector_id)
+                except Exception as exc:
+                    logger.warning(
+                        "Token refresh failed for connector %s: %s", connector_id, exc
+                    )
+            token = g_creds.token
+
         config = ConnectorConfig(
             server_url=os.environ.get("GOOGLE_DRIVE_MCP_URL", _DEFAULT_SERVER_URL),
-            auth_token=creds.encrypted_token if creds else None,
+            auth_token=token,
         )
         return GoogleDriveMCPClient(config), connector
 

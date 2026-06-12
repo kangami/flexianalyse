@@ -1,0 +1,111 @@
+services:
+  sql-server:
+    build:
+      context: ./sql-server
+      dockerfile: Dockerfile
+    container_name: mcp-sql-server
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@flexi-postgres:5432/flexidb
+    ports:
+      - "3001:3001"
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - postgres
+    volumes:
+      - ./sql-server/logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  google-drive-server:
+    build:
+      context: ./google-drive-server
+      dockerfile: Dockerfile
+    container_name: mcp-google-drive-server
+    environment:
+      GOOGLE_SERVICE_ACCOUNT_JSON: /secrets/google-service-account.json
+    ports:
+      - "3002:3002"
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ${GOOGLE_SERVICE_ACCOUNT_PATH:-.}:/secrets:ro
+      - ./google-drive-server/logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  sharepoint-server:
+    build:
+      context: ./sharepoint-server
+      dockerfile: Dockerfile
+    container_name: mcp-sharepoint-server
+    environment:
+      SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:-https://tenant.sharepoint.com/sites/sitename}
+      SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:-}
+      SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET:-}
+    ports:
+      - "3003:3003"
+    networks:
+      - mcp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./sharepoint-server/logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: flexi-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flexidb
+    ports:
+      - "5432:5432"
+    networks:
+      - mcp-network
+    volumes:
+      - flexianalyse-ai_postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  flexianalyse-ai_postgres_data:
+    external: true

@@ -55,7 +55,6 @@ export const frFR = {
   'sidebar.settings': 'Paramètres',
   'sidebar.account': 'Compte',
   'sidebar.history': 'Historique',
-  'sidebar.settings': 'Paramètres',
   'sidebar.account': 'Compte',
   'sidebar.recent.searches': 'Recherches récentes',
   'sidebar.noHistory': 'Aucun historique pour le moment',

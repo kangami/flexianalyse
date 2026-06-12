@@ -39,80 +39,74 @@ class MCPTransport:
             h["Authorization"] = f"Bearer {self.config.auth_token}"
         return h
 
-    def _rpc(self, method: str, params: dict | None = None) -> dict:
-        self._request_id += 1
-        payload = {
-            "jsonrpc": "2.0",
-            "id": self._request_id,
-            "method": method,
-            "params": params or {},
-        }
+    def _get(self, path: str) -> dict:
+        """GET request to the MCP server REST API."""
         try:
-            resp = requests.post(
-                self.server_url,
-                json=payload,
+            resp = requests.get(
+                f"{self.server_url}{path}",
                 headers=self._headers(),
                 timeout=30,
             )
             resp.raise_for_status()
         except requests.RequestException as exc:
             raise MCPError(f"Transport error: {exc}") from exc
+        return resp.json()
 
-        data = resp.json()
-        if "error" in data:
-            raise MCPError(data["error"].get("message", "MCP error"), data["error"].get("code"))
-        return data.get("result", {})
+    def _post(self, path: str, body: dict | None = None, params: dict | None = None) -> dict:
+        """POST request to the MCP server REST API."""
+        try:
+            resp = requests.post(
+                f"{self.server_url}{path}",
+                json=body or {},
+                params=params,
+                headers=self._headers(),
+                timeout=30,
+            )
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise MCPError(f"Transport error: {exc}") from exc
+        return resp.json()
 
     # ------------------------------------------------------------------
-    # MCP protocol methods
+    # MCP protocol methods  (REST API: /health, /tools, /execute)
     # ------------------------------------------------------------------
 
     def initialize(self) -> dict:
-        return self._rpc("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "flexianalyse-connector", "version": "1.0.0"},
-        })
+        """Verify the server is reachable via GET /health."""
+        return self._get("/health")
 
     def list_tools(self) -> list[MCPTool]:
-        result = self._rpc("tools/list")
+        """Fetch available tools via GET /tools."""
+        result = self._get("/tools")
         return [
             MCPTool(
                 name=t["name"],
                 description=t.get("description", ""),
-                input_schema=t.get("inputSchema", {}),
+                input_schema=t.get("params", {}),
             )
             for t in result.get("tools", [])
         ]
 
     def call_tool(self, name: str, arguments: dict) -> MCPToolResult:
-        result = self._rpc("tools/call", {"name": name, "arguments": arguments})
+        """Execute a tool via POST /execute?tool_name=<name>."""
+        result = self._post("/execute", body=arguments, params={"tool_name": name})
+        if result.get("status") == "error":
+            return MCPToolResult(
+                content=[{"type": "text", "text": result.get("message", str(result))}],
+                is_error=True,
+            )
         return MCPToolResult(
-            content=result.get("content", []),
-            is_error=result.get("isError", False),
+            content=[{"type": "text", "text": str(result)}],
+            is_error=False,
         )
 
     def list_resources(self) -> list[MCPResource]:
-        result = self._rpc("resources/list")
-        return [
-            MCPResource(
-                uri=r["uri"],
-                name=r.get("name", ""),
-                description=r.get("description", ""),
-                mime_type=r.get("mimeType"),
-            )
-            for r in result.get("resources", [])
-        ]
+        """Resources are not exposed via the REST servers; returns empty list."""
+        return []
 
     def read_resource(self, uri: str) -> str:
-        result = self._rpc("resources/read", {"uri": uri})
-        parts = []
-        for item in result.get("contents", []):
-            if "text" in item:
-                parts.append(item["text"])
-            elif "blob" in item:
-                parts.append(f"[binary: {item.get('uri', uri)}]")
-        return "\n".join(parts)
+        """Resources are not exposed via the REST servers; returns empty string."""
+        return ""
 
 
 class BaseConnector(ABC):

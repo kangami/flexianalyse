@@ -1,0 +1,6 @@
+fastmcp>=0.0.1
+fastapi>=0.100.0
+uvicorn>=0.24.0
+httpx>=0.25.0
+office365-rest-python-client>=2.5.0
+python-dotenv>=1.0.0

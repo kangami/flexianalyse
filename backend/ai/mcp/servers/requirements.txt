@@ -1,0 +1,29 @@
+# Master requirements file for all MCP servers
+# Install: pip install -r requirements.txt
+
+# === Core ===
+fastmcp>=0.0.1
+python-dotenv>=1.0.0
+
+# === SQL Server Dependencies ===
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.9
+mysql-connector-python>=8.2.0
+cx_Oracle>=8.3.0
+
+# === Google Drive Server Dependencies ===
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.100.0
+
+# === SharePoint Server Dependencies ===
+office365-rest-python-client>=2.5.0
+
+# === Logging & Monitoring ===
+python-json-logger>=2.0.7
+
+# === Development (Optional) ===
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
