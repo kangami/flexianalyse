@@ -123,9 +123,10 @@ echo ========================================
 docker-compose ps
 echo.
 echo Service URLs:
-echo   SQL Server:      stdio://sql-server:3001
-echo   Google Drive:    stdio://google-drive-server:3002
-echo   SharePoint:      stdio://sharepoint-server:3003
+echo   SQL Server:      http://localhost:3001
+echo   Google Drive:    http://localhost:3002
+echo   SharePoint:      http://localhost:3003
+echo   Dropbox:         http://localhost:3004
 echo.
 goto :eof
 
@@ -164,6 +165,14 @@ if errorlevel 1 (
     echo SharePoint Server unreachable
 ) else (
     echo SharePoint Server OK
+)
+
+echo Checking Dropbox Server...
+docker-compose exec dropbox-server python -c "print('OK')" >nul 2>&1
+if errorlevel 1 (
+    echo Dropbox Server unreachable
+) else (
+    echo Dropbox Server OK
 )
 goto :eof
 
@@ -210,6 +219,7 @@ echo   start.bat setup
 echo   start.bat build
 echo   start.bat start
 echo   start.bat logs sql-server
+echo   start.bat logs dropbox-server
 echo   start.bat shell google-drive-server
 echo.
 goto :eof

@@ -4,8 +4,10 @@ Supported connector types:
   - google_drive  → GoogleDriveService / GoogleDriveSync
   - sharepoint    → SharePointService  / SharePointSync
   - sql           → SQLService         / SQLSync
-  - dropbox       → (service/sync not yet implemented)
+  - dropbox       → DropboxService     / DropboxSync
 """
+from connectors.dropbox.service import DropboxService
+from connectors.dropbox.sync import DropboxSync
 from connectors.google_drive.service import GoogleDriveService
 from connectors.google_drive.sync import GoogleDriveSync
 from connectors.sharepoint.service import SharePointService
@@ -19,7 +21,7 @@ _SERVICE_MAP: dict = {
     "google_drive": (GoogleDriveService, GoogleDriveSync),
     "sharepoint":   (SharePointService,  SharePointSync),
     "sql":          (SQLService,          SQLSync),
-    "dropbox":      (None, None),
+    "dropbox":      (DropboxService,      DropboxSync),
 }
 
 
@@ -55,4 +57,6 @@ __all__ = [
     "SharePointSync",
     "SQLService",
     "SQLSync",
+    "DropboxService",
+    "DropboxSync",
 ]

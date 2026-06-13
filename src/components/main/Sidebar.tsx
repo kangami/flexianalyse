@@ -30,12 +30,11 @@ const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: stri
     { key: 'site_url',   label: 'Site URL',         placeholder: 'https://company.sharepoint.com/sites/…' },
   ],
   dropbox: [
-    { key: 'name',         label: 'Connection Name', placeholder: 'My Dropbox' },
-    { key: 'access_token', label: 'Access Token',     type: 'password' },
+    { key: 'name', label: 'Connection Name', placeholder: 'My Dropbox' },
   ],
 };
 
-const OAUTH_CONNECTORS: ReadonlySet<string> = new Set(['google_drive', 'sharepoint']);
+const OAUTH_CONNECTORS: ReadonlySet<string> = new Set(['google_drive', 'sharepoint', 'dropbox']);
 
 const CONNECTOR_META: Record<string, { title: string; apiType: string }> = {
   database:     { title: 'Database (SQL)', apiType: 'sql' },
@@ -1264,10 +1263,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (!connectorForm.connection_url) throw new Error('Connection URL is required');
         body.token = connectorForm.connection_url;
 
-      } else if (activeConnectorType === 'dropbox') {
-        if (!connectorForm.access_token) throw new Error('Access Token is required');
-        body.token = connectorForm.access_token;
-
       } else if (activeConnectorType === 'sharepoint') {
         if (!connectorForm.tenant_id) throw new Error('Tenant ID is required');
         if (!connectorForm.site_url) throw new Error('Site URL is required');
@@ -1294,9 +1289,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
       const saved = await r.json();
 
-      // OAuth flow pour Google Drive et SharePoint
+      // OAuth flow pour Google Drive, SharePoint et Dropbox
       if (OAUTH_CONNECTORS.has(activeConnectorType)) {
-        const provider = activeConnectorType === 'google_drive' ? 'Google' : 'Microsoft';
+        const provider = activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft';
         setConnectorMsg({ text: `Connector saved — opening ${provider} authorization…`, ok: true });
         setTimeout(() => {
           window.open(`${API}/auth/${activeConnectorType}?connector_id=${saved.id}`, '_blank');
@@ -1356,7 +1351,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <i className="bi bi-shield-lock text-blue-500 text-sm mt-0.5 flex-shrink-0"></i>
               <p className="text-[10px] text-blue-700 leading-snug">
                 Authorization happens via{' '}
-                {activeConnectorType === 'google_drive' ? 'Google OAuth' : 'Microsoft OAuth'}.
+                {activeConnectorType === 'google_drive' ? 'Google OAuth' : activeConnectorType === 'dropbox' ? 'Dropbox OAuth' : 'Microsoft OAuth'}.
                 Fill in the name{activeConnectorType === 'sharepoint' ? ' and tenant details' : ''}, then click <strong>Connect</strong>.
               </p>
             </div>
@@ -1392,7 +1387,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
             <>
               <i className="bi bi-box-arrow-up-right text-[11px]"></i>
-              Connect with {activeConnectorType === 'google_drive' ? 'Google' : 'Microsoft'}
+              Connect with {activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft'}
             </>
           ) : (
             'Save Connection'

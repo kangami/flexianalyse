@@ -121,15 +121,17 @@ status() {
     
     echo ""
     echo "Service URLs:"
-    echo -e "  SQL Server:      ${BLUE}stdio://sql-server:3001${NC}"
-    echo -e "  Google Drive:    ${BLUE}stdio://google-drive-server:3002${NC}"
-    echo -e "  SharePoint:      ${BLUE}stdio://sharepoint-server:3003${NC}"
+    echo -e "  SQL Server:      ${BLUE}http://localhost:3001${NC}"
+    echo -e "  Google Drive:    ${BLUE}http://localhost:3002${NC}"
+    echo -e "  SharePoint:      ${BLUE}http://localhost:3003${NC}"
+    echo -e "  Dropbox:         ${BLUE}http://localhost:3004${NC}"
     echo ""
     echo "Logs:"
     echo "  View all logs:     docker-compose logs -f"
     echo "  SQL server logs:   docker-compose logs -f sql-server"
     echo "  Google Drive:      docker-compose logs -f google-drive-server"
     echo "  SharePoint:        docker-compose logs -f sharepoint-server"
+    echo "  Dropbox:           docker-compose logs -f dropbox-server"
 }
 
 health_check() {
@@ -143,6 +145,9 @@ health_check() {
     
     echo "Checking SharePoint Server..."
     docker-compose exec sharepoint-server python -c "print('✓ SharePoint Server OK')" || print_error "SharePoint Server unreachable"
+    
+    echo "Checking Dropbox Server..."
+    docker-compose exec dropbox-server python -c "print('✓ Dropbox Server OK')" || print_error "Dropbox Server unreachable"
 }
 
 shell() {
@@ -191,6 +196,7 @@ usage() {
     echo "  ./start.sh setup"
     echo "  ./start.sh build && ./start.sh start"
     echo "  ./start.sh logs sql-server"
+    echo "  ./start.sh logs dropbox-server"
     echo "  ./start.sh shell google-drive-server"
 }
 

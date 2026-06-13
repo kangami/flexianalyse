@@ -67,6 +67,24 @@ def _get_drive_connector_for_org(org_id: str) -> ConnectorCredentials | None:
     ).first()
 
 
+def _get_dropbox_connector_for_org(org_id: str) -> ConnectorCredentials | None:
+    """RÃ©cupÃ¨re les credentials Dropbox de l'org."""
+    connector = Connector.query.filter_by(
+        organization_id=org_id,
+        type='dropbox',
+        status='active',
+        deleted_at=None
+    ).first()
+
+    if not connector:
+        return None
+
+    return ConnectorCredentials.query.filter_by(
+        connector_id=connector.id,
+        deleted_at=None
+    ).first()
+
+
 # ============================================================================
 # SERVERS STATUS
 # ============================================================================
@@ -160,10 +178,15 @@ async def list_drive_files():
     if not org_id:
         return jsonify({'error': 'X-Organization-Id header required'}), 400
     try:
+        creds = _get_drive_connector_for_org(org_id)
+        if not creds:
+            return jsonify({'error': 'No Google Drive connector configured for this organization'}), 404
+
         client = get_mcp_client('google_drive')
         result = await client.list_documents(
             folder_id=request.args.get('parent_id'),
-            max_results=request.args.get('max_results', 50, type=int)
+            max_results=request.args.get('max_results', 50, type=int),
+            access_token=creds.encrypted_token
         )
         return jsonify({'status': 'success', 'data': result})
     except Exception as e:
@@ -180,9 +203,104 @@ async def search_drive():
     if not query:
         return jsonify({'error': 'q param required'}), 400
     try:
+        creds = _get_drive_connector_for_org(org_id)
+        if not creds:
+            return jsonify({'error': 'No Google Drive connector configured for this organization'}), 404
+
         client = get_mcp_client('google_drive')
-        result = await client.search_files(query)
+        result = await client.search_files(query, access_token=creds.encrypted_token)
         return jsonify({'status': 'success', 'data': result})
     except Exception as e:
         logger.error(f"search_drive error: {e}")
+        return jsonify({'error': str(e)}), 502
+
+
+# ============================================================================
+# DROPBOX
+# ============================================================================
+def _get_connector_credentials(org_id: str, connector_type: str) -> ConnectorCredentials | None:
+    connector = Connector.query.filter_by(
+        organization_id=org_id,
+        type=connector_type,
+        status='active',
+        deleted_at=None
+    ).first()
+    if not connector:
+        return None
+    
+    return ConnectorCredentials.query.filter_by(
+        connector_id=connector.id,
+        deleted_at=None
+    ).first()
+
+@mcp_bp.route('/dropbox/files', methods=['GET'])
+async def list_dropbox_files():
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    try:
+        creds = _get_connector_credentials(org_id, 'dropbox')
+        if not creds:
+            return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
+
+        access_token = encryption_service.decrypt(creds.encrypted_token)
+        client = get_mcp_client('dropbox')
+        result = await client.list_dropbox_files(
+            path=request.args.get('path', ''),
+            recursive=request.args.get('recursive', 'false').lower() == 'true',
+            limit=request.args.get('limit', 50, type=int),
+            bearer_token=access_token
+        )
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"list_dropbox_files error: {e}")
+        return jsonify({'error': str(e)}), 502
+
+
+@mcp_bp.route('/dropbox/search', methods=['GET'])
+async def search_dropbox():
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    query = request.args.get('q')
+    if not query:
+        return jsonify({'error': 'q param required'}), 400
+    try:
+        creds = _get_connector_credentials(org_id, 'dropbox')
+        if not creds:
+            return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
+        access_token = encryption_service.decrypt(creds.encrypted_token)
+        client = get_mcp_client('dropbox')
+        result = await client.search_dropbox_files(
+            query,
+            path=request.args.get('path', ''),
+            limit=request.args.get('limit', 20, type=int),
+            bearer_token=access_token
+        )
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"search_dropbox error: {e}")
+        return jsonify({'error': str(e)}), 502
+
+
+@mcp_bp.route('/dropbox/download', methods=['POST'])
+async def download_dropbox_file_text():
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    path = data.get('path')
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    try:
+        creds = _get_connector_credentials(org_id, 'dropbox')
+        if not creds:
+            return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
+
+        access_token = encryption_service.decrypt(creds.encrypted_token)
+        client = get_mcp_client('dropbox')
+        result = await client.download_dropbox_file_text(path, bearer_token=access_token)
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        logger.error(f"download_dropbox_file_text error: {e}")
         return jsonify({'error': str(e)}), 502

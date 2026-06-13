@@ -16,6 +16,7 @@ help:
 	@echo "  make logs-sql       - View SQL server logs"
 	@echo "  make logs-gd        - View Google Drive server logs"
 	@echo "  make logs-sp        - View SharePoint server logs"
+	@echo "  make logs-db        - View Dropbox server logs"
 	@echo ""
 	@echo "Development:"
 	@echo "  make test           - Run tests"
@@ -68,17 +69,20 @@ logs-gd:
 logs-sp:
 	docker-compose logs -f sharepoint-server
 
+logs-db:
+	docker-compose logs -f dropbox-server
+
 test:
 	@echo "Running tests..."
 	@python -m pytest tests/ -v
 
 lint:
 	@echo "Linting code..."
-	@python -m flake8 sql-server google-drive-server sharepoint-server
+	@python -m flake8 sql-server google-drive-server sharepoint-server dropbox-server
 
 format:
 	@echo "Formatting code with black..."
-	@python -m black sql-server google-drive-server sharepoint-server
+	@python -m black sql-server google-drive-server sharepoint-server dropbox-server
 
 clean:
 	@echo "Cleaning up..."

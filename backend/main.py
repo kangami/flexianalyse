@@ -7,6 +7,36 @@ from routes import register_routes
 
 load_dotenv()
 
+
+def mount_legacy_ai_routes(app):
+    """Mount the old AI/RAG routes on the app created by this entry point."""
+    from legacy_ai_routes import app as legacy_app
+
+    existing_rules = {
+        (rule.rule, tuple(sorted(rule.methods - {"HEAD", "OPTIONS"})))
+        for rule in app.url_map.iter_rules()
+    }
+
+    for rule in legacy_app.url_map.iter_rules():
+        if rule.endpoint == "static":
+            continue
+
+        methods = tuple(sorted(rule.methods - {"HEAD", "OPTIONS"}))
+        rule_key = (rule.rule, methods)
+        if rule_key in existing_rules:
+            continue
+
+        app.add_url_rule(
+            rule.rule,
+            endpoint=f"legacy_ai.{rule.endpoint}",
+            view_func=legacy_app.view_functions[rule.endpoint],
+            methods=list(methods),
+            defaults=rule.defaults,
+            strict_slashes=rule.strict_slashes,
+        )
+        existing_rules.add(rule_key)
+
+
 def create_app():
     app = Flask(__name__)
     
@@ -45,6 +75,7 @@ def create_app():
     
     # Enregistrement des routes
     register_routes(app)
+    #mount_legacy_ai_routes(app)
     
     return app
 

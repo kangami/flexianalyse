@@ -21,6 +21,11 @@ Endpoints
   GET    /connectors/<id>/gdrive/search      search files (query param: q)
   POST   /connectors/<id>/gdrive/export      export a file to plain text
 
+  # Dropbox extras
+  GET    /connectors/<id>/dropbox/files      list files (query param: path)
+  GET    /connectors/<id>/dropbox/search     search files (query param: q)
+  POST   /connectors/<id>/dropbox/download   download a file as text
+
   # SharePoint extras
   GET    /connectors/<id>/sharepoint/sites           list sites
   GET    /connectors/<id>/sharepoint/libraries       list libraries (query param: site_id)
@@ -287,6 +292,73 @@ def register(api_bp) -> None:  # noqa: C901
             from connectors.google_drive.service import GoogleDriveService
             svc = GoogleDriveService(locator)
             return jsonify(svc.export_file(connector_id, file_id, mime_type))
+        except Exception as exc:
+            return _err(str(exc), 502)
+
+    # ------------------------------------------------------------------
+    # Dropbox extras
+    # ------------------------------------------------------------------
+
+    @api_bp.route("/connectors/<connector_id>/dropbox/files", methods=["GET"])
+    def dropbox_list_files(connector_id: str):
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        if connector.type != "dropbox":
+            return _err("Connector is not of type dropbox", 409)
+        try:
+            from connectors.dropbox.service import DropboxService
+            svc = DropboxService(locator)
+            return jsonify(
+                svc.list_files(
+                    connector_id,
+                    path=request.args.get("path", ""),
+                    recursive=request.args.get("recursive", "false").lower() == "true",
+                    limit=request.args.get("limit", 50, type=int),
+                )
+            )
+        except Exception as exc:
+            return _err(str(exc), 502)
+
+    @api_bp.route("/connectors/<connector_id>/dropbox/search", methods=["GET"])
+    def dropbox_search(connector_id: str):
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        if connector.type != "dropbox":
+            return _err("Connector is not of type dropbox", 409)
+        query = request.args.get("q")
+        if not query:
+            return _err("query param 'q' required")
+        try:
+            from connectors.dropbox.service import DropboxService
+            svc = DropboxService(locator)
+            return jsonify(
+                svc.search_files(
+                    connector_id,
+                    query,
+                    path=request.args.get("path", ""),
+                    limit=request.args.get("limit", 20, type=int),
+                )
+            )
+        except Exception as exc:
+            return _err(str(exc), 502)
+
+    @api_bp.route("/connectors/<connector_id>/dropbox/download", methods=["POST"])
+    def dropbox_download(connector_id: str):
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        if connector.type != "dropbox":
+            return _err("Connector is not of type dropbox", 409)
+        data = request.get_json() or {}
+        path = data.get("path")
+        if not path:
+            return _err("path required")
+        try:
+            from connectors.dropbox.service import DropboxService
+            svc = DropboxService(locator)
+            return jsonify(svc.download_file_text(connector_id, path))
         except Exception as exc:
             return _err(str(exc), 502)
 
