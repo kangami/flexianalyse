@@ -102,7 +102,7 @@ const GetStarted: React.FC = () => {
       <Navbar />
 
       {/* Main content */}
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
+      <div className="flex-1 flex items-center justify-center px-4 pt-24 pb-12">
         <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">
 
           {/* ─── Left Side: Value Proposition ─── */}
