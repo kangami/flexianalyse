@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 
 interface NavDropdownItem {
@@ -40,6 +41,7 @@ const navItems: NavItem[] = [
 ];
 
 const Navbar: React.FC = () => {
+  const navigate = useNavigate();
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
 
@@ -62,7 +64,7 @@ const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 cursor-pointer" onClick={() => navigate('/')}>
             <img src="/flexiAnalyseLogo_website.png" alt="FlexiAnalyse Logo" className="w-9 h-9 object-contain" />
             <span className="text-xl font-bold text-gray-900 tracking-tight">FlexiAnalyse</span>
           </div>
@@ -112,7 +114,7 @@ const Navbar: React.FC = () => {
 
           {/* Book a Demo Button */}
           <div className="flex items-center">
-            <button className="relative px-5 py-2 text-sm font-semibold rounded-full border-2 border-transparent bg-clip-padding transition-all duration-200 hover:scale-105 hover:shadow-lg"
+            <button onClick={() => navigate('/get-started')} className="relative px-5 py-2 text-sm font-semibold rounded-full border-2 border-transparent bg-clip-padding transition-all duration-200 hover:scale-105 hover:shadow-lg"
               style={{
                 backgroundImage: 'linear-gradient(white, white), linear-gradient(-45deg, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #10b981)',
                 backgroundOrigin: 'border-box',

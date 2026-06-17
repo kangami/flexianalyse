@@ -9,6 +9,7 @@ from .resource_repo import ResourceRepository, ResourceBindingRepository
 from .rate_limit_repo import RateLimitRepository
 from .conversation_repo import ConversationRepository, MessageRepository, ToolCallRepository, ToolApprovalRepository
 from .audit_log_repo import AuditLogRepository
+from .lead_repo import LeadRepository
 
 __all__ = [
     "BaseRepository",
@@ -32,4 +33,5 @@ __all__ = [
     "ToolCallRepository",
     "ToolApprovalRepository",
     "AuditLogRepository",
+    "LeadRepository",
 ]

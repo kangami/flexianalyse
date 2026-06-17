@@ -8,6 +8,7 @@ from .resource import Resource, ResourceBinding
 from .rate_limit import RateLimit
 from .conversation import Conversation, Message, ToolCall, ToolApproval
 from .audit_log import AuditLog
+from .lead import Lead
 
 __all__ = [
     "Organization",
@@ -30,4 +31,5 @@ __all__ = [
     "ToolCall",
     "ToolApproval",
     "AuditLog",
+    "Lead",
 ]

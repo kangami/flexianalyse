@@ -6,6 +6,7 @@ from controllers.department_controller import register as _register_depts
 from controllers.user_controller import register as _register_users
 from controllers.role_controller import register as _register_roles
 from controllers.skeleton_controller import register as _register_skeletons
+from controllers.lead_controller import register as _register_leads
 from connectors.api import register as _register_connectors
 
 api_bp = Blueprint("api_v2", __name__, url_prefix="/api/v2")
@@ -30,4 +31,5 @@ def register_all():
     _register_roles(api_bp)
     #_register_skeletons(api_bp)
     _register_connectors(api_bp)
+    _register_leads(api_bp)
 

@@ -20,6 +20,7 @@ from repositories import (
     ToolCallRepository,
     ToolApprovalRepository,
     AuditLogRepository,
+    LeadRepository,
 )
 
 
@@ -148,3 +149,9 @@ class ServiceLocator:
         if "audit_logs" not in self._repos:
             self._repos["audit_logs"] = AuditLogRepository()
         return self._repos["audit_logs"]
+
+    @property
+    def leads(self) -> LeadRepository:
+        if "leads" not in self._repos:
+            self._repos["leads"] = LeadRepository()
+        return self._repos["leads"]

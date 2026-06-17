@@ -9,6 +9,7 @@ import FlexiAnalyseApp from './FlexiAnalyseApp';
 import ErrorBoundary from './components/ErrorBoundary';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
+import GetStarted from './pages/GetStarted';
 
 // Composant qui gère l'affichage conditionnel
 const AppContent: React.FC = () => {
@@ -43,6 +44,9 @@ const AppContent: React.FC = () => {
       {/* Pages légales */}
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/terms-of-use" element={<TermsOfUse />} />
+      
+      {/* Get Started / Lead form */}
+      <Route path="/get-started" element={<GetStarted />} />
     </Routes>
   );
 };
