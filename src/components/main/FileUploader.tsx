@@ -54,7 +54,7 @@ function FileUploader(){
         files.forEach((file) => formData.append('files', file));
 
         try {
-            const response = await fetch('http://localhost:5000/upload', {
+            const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://flexianalyse.com'}/upload`, {
                 method: 'POST',
                 body: formData,
             });
