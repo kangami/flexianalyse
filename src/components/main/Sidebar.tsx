@@ -540,7 +540,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     },
   ], [orgs]);
 
-  const API = import.meta.env.VITE_API_URL || 'https://flexianalyse.com';
+  const API = 'http://localhost:5000'; // import.meta.env.VITE_API_URL || 'https://flexianalyse.com';
   const flyoutRef = useRef<HTMLDivElement>(null);
   const iconRailRef = useRef<HTMLDivElement>(null);
   
