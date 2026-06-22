@@ -1,14 +1,10 @@
 // App.tsx - Modifications nécessaires
 
-
-
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
 import Sidebar from "./components/main/Sidebar";
 
-import FileViewer from "./components/main/FileViewer";
-
-import ChatPanel from "./components/main/ChatPanel";
+import AppHomeComponent from "./components/main/AppHomeComponent";
 
 import StructuredDataDisplay from "./components/main/StructuredDataDisplay";
 
@@ -22,8 +18,6 @@ import { useTheme } from './contexts/ThemeContext';
 
 import { useLanguage } from './contexts/LanguageContext';
 
-
-
 interface FileDetails {
 
   content: string | ArrayBuffer;
@@ -31,8 +25,6 @@ interface FileDetails {
   description: string;
 
 }
-
-
 
 interface ChatMessage {
 
@@ -52,8 +44,6 @@ interface ChatMessage {
 
 }
 
-
-
 interface SuggestedAction {
 
   id: string;
@@ -66,13 +56,9 @@ interface SuggestedAction {
 
 }
 
-
-
 // Auto model selection helper
 
 const AUTO_MODEL_ID = 'auto';
-
-
 
 const chooseModelForQuery = (query: string): string => {
 
@@ -80,15 +66,11 @@ const chooseModelForQuery = (query: string): string => {
 
   const length = query.length;
 
-
-
   const isCodeOrDebugQuery = /bug|error|exception|stack trace|stacktrace|traceback|optimiz|refactor|performance|memory leak|crash/.test(normalized);
 
   const isHighReasoningQuery = /architecture|design pattern|scalability|security|threat model|strategy|roadmap|system design/.test(normalized);
 
   const isMultilingualHint = /translate|traduire|traduction|multi[- ]language|multilingual/.test(normalized);
-
-
 
   if (length > 1500 || isHighReasoningQuery || isMultilingualHint) {
 
@@ -96,21 +78,15 @@ const chooseModelForQuery = (query: string): string => {
 
   }
 
-
-
   if (isCodeOrDebugQuery || length > 600) {
 
     return 'gpt-4o';
 
   }
 
-
-
   return 'gpt-3.5-turbo';
 
 };
-
-
 
 const FlexiAnalyseApp: React.FC = () => {
 
@@ -119,8 +95,6 @@ const FlexiAnalyseApp: React.FC = () => {
   const { theme } = useTheme();
 
   const { language, t } = useLanguage();
-
-
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
@@ -150,8 +124,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   const [isMobile, setIsMobile] = useState(false);
 
-  
-
   // NOUVEAU: États pour gérer l'indexation backend
 
   const [isDirectoryIndexed, setIsDirectoryIndexed] = useState<boolean>(false);
@@ -164,8 +136,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   const [detectedDocType, setDetectedDocType] = useState<{type: string; label: string; confidence: number} | null>(null);
 
-  
-
   // États pour l'extraction structurée
 
   const [structuredData, setStructuredData] = useState<any>(null);
@@ -174,27 +144,19 @@ const FlexiAnalyseApp: React.FC = () => {
 
   const [extracting, setExtracting] = useState<boolean>(false);
 
-  
-
   // États pour l'insertion de texte
 
   const [showInsertModal, setShowInsertModal] = useState<boolean>(false);
 
   const [selectedTextToInsert, setSelectedTextToInsert] = useState<string>('');
 
-  
-
   // État pour l'animation de chargement lors du drop
 
   const [isProcessingDrop, setIsProcessingDrop] = useState<boolean>(false);
 
-  
-
   // État pour savoir si un répertoire est sélectionné
 
   const [selectedDirectory, setSelectedDirectory] = useState<File[] | null>(null);
-
-  
 
   // État pour l'infobulle de limitation
 
@@ -202,13 +164,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
   const [limitMessage, setLimitMessage] = useState<string>('');
 
-
-
   // Ref pour tracker les derniers fichiers indexés
 
   const lastIndexedFilesRef = useRef<File[]>([]);
-
-  
 
   // Fonctions utilitaires pour gérer les limitations des utilisateurs non connectés
 
@@ -219,8 +177,6 @@ const FlexiAnalyseApp: React.FC = () => {
     const stored = localStorage.getItem('daily_queries');
 
     if (!stored) return 0;
-
-    
 
     try {
 
@@ -242,8 +198,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-  
-
   const incrementDailyQueries = useCallback(() => {
 
     const today = new Date().toDateString();
@@ -260,15 +214,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [getDailyQueries]);
 
-  
-
   const getUploadedFilesCount = useCallback((): number => {
 
     const stored = localStorage.getItem('uploaded_files');
 
     if (!stored) return 0;
-
-    
 
     try {
 
@@ -286,8 +236,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-  
-
   const incrementUploadedFiles = useCallback(() => {
 
     const currentCount = getUploadedFilesCount();
@@ -300,8 +248,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [getUploadedFilesCount]);
 
-  
-
   const checkQueryLimit = useCallback((): boolean => {
 
     if (isAuthenticated) return true;
@@ -312,8 +258,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [isAuthenticated, getDailyQueries]);
 
-  
-
   const checkFileUploadLimit = useCallback((): boolean => {
 
     if (isAuthenticated) return true;
@@ -323,8 +267,6 @@ const FlexiAnalyseApp: React.FC = () => {
     return fileCount < 1;
 
   }, [isAuthenticated, getUploadedFilesCount]);
-
-  
 
   // Fonction pour afficher l'infobulle de limitation
 
@@ -338,8 +280,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-
-
   // Détection mobile (reste identique)
 
   useEffect(() => {
@@ -350,8 +290,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
     };
 
-
-
     checkIfMobile();
 
     window.addEventListener('resize', checkIfMobile);
@@ -359,8 +297,6 @@ const FlexiAnalyseApp: React.FC = () => {
     return () => window.removeEventListener('resize', checkIfMobile);
 
   }, []);
-
-
 
   // Fermer la sidebar automatiquement sur mobile après sélection (reste identique)
 
@@ -374,11 +310,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [selectedFile, isMobile]);
 
-
-
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
-
-
 
   // Fonction pour ajouter un fichier à la sidebar
 
@@ -393,8 +325,6 @@ const FlexiAnalyseApp: React.FC = () => {
     }
 
   }, []);
-
-
 
   const handleLogout = useCallback(() => {
     logout();
@@ -426,8 +356,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
     setResearchMode('local');
 
-    
-
     // Ajouter le fichier à directoryFiles s'il n'y est pas déjà pour déclencher l'indexation
 
     setDirectoryFiles(prevFiles => {
@@ -444,19 +372,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
     });
 
-
-
     // Ajouter le fichier à la sidebar
 
     addFileToSidebar(file);
 
-    
-
     // Afficher le statut initial avant de commencer l'analyse
 
     setLoading(true);
-
-    
 
     // Si le fichier fait partie d'un répertoire, régénérer les suggested actions en arrière-plan (non-bloquant)
 
@@ -470,17 +392,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     // Générer automatiquement un résumé avec animation de typing (se lance immédiatement, ne bloque pas les actions suggérées)
 
     await generateFileSummaryWithStreaming(file, clonedContent);
 
   };
-
-  
-
-
 
   // Gestion du drag & drop pour FileViewer
 
@@ -492,21 +408,15 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-  
-
   const apiUrl = 'http://127.0.0.1:5000'; // 'https://flexianalyse.com' 'http://127.0.0.1:5000';
 
-
-
-      // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
+  // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
 
   const generateFileSummaryWithStreaming = useCallback(async (file: File, _content: string | ArrayBuffer) => {
 
     try {
 
-      console.log(`� Génération du résumé pour ${file.name} via Docling backend`);
-
-      
+      console.log(`📄 Génération du résumé pour ${file.name} via Docling backend`);
 
       // Créer un message dans le chat history pour le résumé
 
@@ -522,15 +432,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       };
 
-      
-
       setChatHistory((prev) => [...prev, summaryMessage]);
 
       setLoading(true);
 
       setCurrentStatus(t('status.sending.server'));
-
-      
 
       // Envoyer le fichier brut au backend via FormData (Docling parse côté serveur)
 
@@ -540,8 +446,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       formData.append('language', language);
 
-      
-
       const response = await fetch(`${apiUrl}/summarize_file_stream`, {
 
         method: 'POST',
@@ -549,8 +453,6 @@ const FlexiAnalyseApp: React.FC = () => {
         body: formData
 
       });
-
-      
 
       if (!response.ok) {
 
@@ -570,8 +472,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         });
 
-        
-
         // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
 
         if (response.status === 405) {
@@ -580,19 +480,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-        
-
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
 
       }
 
-      
-
       // Mettre à jour le statut pendant l'attente de la réponse
 
       setCurrentStatus(t('status.ai.analyzing'));
-
-      
 
       // Lire le stream
 
@@ -602,8 +496,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       let accumulatedResponse = '';
 
-      
-
       if (reader) {
 
         while (true) {
@@ -612,15 +504,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           if (done) break;
 
-          
-
           // Décoder le chunk
 
           const chunk = decoder.decode(value, { stream: true });
 
           const lines = chunk.split('\n');
-
-          
 
           for (const line of lines) {
 
@@ -632,8 +520,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 const jsonData = JSON.parse(line.slice(6));
 
-                
-
                 // Mettre à jour le statut si fourni par le backend
 
                 if (jsonData.status) {
@@ -642,15 +528,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.content) {
 
                   // Ajouter le contenu à la réponse accumulée
 
                   accumulatedResponse += jsonData.content;
-
-                  
 
                   // Mettre à jour le statut si on commence à recevoir du contenu
 
@@ -660,23 +542,19 @@ const FlexiAnalyseApp: React.FC = () => {
 
                   }
 
-                  
-
                   // Limiter à 4 lignes maximum
 
                   const lines = accumulatedResponse.split('\n').filter(l => l.trim());
 
                   const limitedResponse = lines.slice(0, 4).join('\n');
 
-                  
-
                   // Mettre à jour l'interface en temps réel
 
-                  setChatHistory((prev) => 
+                  setChatHistory((prev) =>
 
-                    prev.map(msg => 
+                    prev.map(msg =>
 
-                      msg.id === messageId 
+                      msg.id === messageId
 
                         ? { ...msg, aiResponse: limitedResponse }
 
@@ -688,8 +566,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.done) {
 
                   console.log('✅ Résumé terminé');
@@ -700,8 +576,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.error) {
 
                   console.error('❌ Erreur streaming:', jsonData.error);
@@ -711,8 +585,6 @@ const FlexiAnalyseApp: React.FC = () => {
                   throw new Error(jsonData.error);
 
                 }
-
-                
 
               } catch (e) {
 
@@ -734,8 +606,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       setLoading(false);
 
       setCurrentStatus('');
@@ -754,9 +624,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (lastMessage && lastMessage.userQuery === `📄 ${file.name}`) {
 
-          return prev.map(msg => 
+          return prev.map(msg =>
 
-            msg.id === lastMessage.id 
+            msg.id === lastMessage.id
 
               ? { ...msg, aiResponse: `⚠️ Impossible de générer le résumé automatique. Erreur: ${error instanceof Error ? error.message : 'Erreur inconnue'}` }
 
@@ -776,8 +646,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [apiUrl, language, t]);
 
-
-
   // Fonction pour générer un résumé de répertoire avec streaming
 
   const generateRepositorySummaryWithStreaming = useCallback(async (files: File[]) => {
@@ -789,8 +657,6 @@ const FlexiAnalyseApp: React.FC = () => {
       const filePlural = files.length > 1 ? 's' : '';
 
       setCurrentStatus(t('status.extracting.content', { count: files.length, plural: filePlural }));
-
-      
 
       // Créer un message dans le chat history pour le résumé
 
@@ -806,23 +672,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
       };
 
-      
-
       // Ajouter le message à l'historique
 
       setChatHistory((prev) => [...prev, repoMessage]);
 
       setLoading(true);
 
-      
-
       // Mettre à jour le statut pour l'analyse
 
       const repoFilePlural = files.length > 1 ? 's' : '';
 
       setCurrentStatus(t('status.analyzing.repository', { count: files.length, plural: repoFilePlural }));
-
-      
 
       // Utiliser le streaming pour le résumé du répertoire
 
@@ -850,8 +710,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-      
-
       if (!response.ok) {
 
         const errorText = await response.text().catch(() => 'Unable to read error message');
@@ -870,8 +728,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         });
 
-        
-
         // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
 
         if (response.status === 405) {
@@ -880,13 +736,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-        
-
         throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
 
       }
-
-      
 
       // Lire le stream
 
@@ -896,8 +748,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       let accumulatedResponse = '';
 
-      
-
       if (reader) {
 
         while (true) {
@@ -906,15 +756,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           if (done) break;
 
-          
-
           // Décoder le chunk
 
           const chunk = decoder.decode(value, { stream: true });
 
           const lines = chunk.split('\n');
-
-          
 
           for (const line of lines) {
 
@@ -926,8 +772,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 const jsonData = JSON.parse(line.slice(6));
 
-                
-
                 // Mettre à jour le statut si fourni par le backend
 
                 if (jsonData.status) {
@@ -936,15 +780,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.content) {
 
                   // Ajouter le contenu à la réponse accumulée
 
                   accumulatedResponse += jsonData.content;
-
-                  
 
                   // Mettre à jour le statut si on commence à recevoir du contenu
 
@@ -954,15 +794,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
                   }
 
-                  
-
                   // Mettre à jour l'interface en temps réel
 
-                  setChatHistory((prev) => 
+                  setChatHistory((prev) =>
 
-                    prev.map(msg => 
+                    prev.map(msg =>
 
-                      msg.id === messageId 
+                      msg.id === messageId
 
                         ? { ...msg, aiResponse: accumulatedResponse }
 
@@ -974,8 +812,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.done) {
 
                   console.log('✅ Résumé du répertoire terminé');
@@ -986,8 +822,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.error) {
 
                   console.error('❌ Erreur streaming:', jsonData.error);
@@ -997,8 +831,6 @@ const FlexiAnalyseApp: React.FC = () => {
                   throw new Error(jsonData.error);
 
                 }
-
-                
 
               } catch (e) {
 
@@ -1020,8 +852,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       setLoading(false);
 
       setCurrentStatus('');
@@ -1040,9 +870,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (lastMessage && lastMessage.userQuery.includes('Répertoire')) {
 
-          return prev.map(msg => 
+          return prev.map(msg =>
 
-            msg.id === lastMessage.id 
+            msg.id === lastMessage.id
 
               ? { ...msg, aiResponse: `⚠️ Impossible de générer le résumé automatique du répertoire. Erreur: ${error instanceof Error ? error.message : 'Erreur inconnue'}` }
 
@@ -1062,8 +892,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [apiUrl, language, t]);
 
-  
-
   // Fonction pour régénérer les suggested actions pour un fichier spécifique
 
   const regenerateSuggestedActionsForFile = useCallback(async (file: File) => {
@@ -1073,8 +901,6 @@ const FlexiAnalyseApp: React.FC = () => {
       const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
       let fileContent: string;
-
-      
 
       if (['.pdf', '.docx'].includes(extension)) {
 
@@ -1086,11 +912,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       const limitedContent = fileContent.substring(0, 2000);
-
-      
 
       const response = await fetch(`${apiUrl}/infer-corpus-actions`, {
 
@@ -1113,8 +935,6 @@ const FlexiAnalyseApp: React.FC = () => {
         })
 
       });
-
-      
 
       if (response.ok) {
 
@@ -1152,8 +972,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [apiUrl, language, t]);
 
-  
-
   // Fonction pour gérer l'import d'un répertoire
 
   const handleDirectorySelect = useCallback(async (files: File[]) => {
@@ -1167,8 +985,6 @@ const FlexiAnalyseApp: React.FC = () => {
       return;
 
     }
-
-    
 
     // Ajouter tous les fichiers à directoryFiles
 
@@ -1200,19 +1016,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
     });
 
-    
-
     // Marquer qu'un répertoire est sélectionné
 
     setSelectedDirectory(files);
 
-    
-
     // Désactiver la recherche web et forcer le mode "local" dès qu'un répertoire est importé
 
     setResearchMode('local');
-
-    
 
     // Réinitialiser le fichier sélectionné pour afficher le message de sélection
 
@@ -1220,15 +1030,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
     setFileDetails(null);
 
-    
-
     // Générer automatiquement un résumé du répertoire avec streaming
 
     await generateRepositorySummaryWithStreaming(files);
 
   }, [generateRepositorySummaryWithStreaming, isAuthenticated, showLimitInfoBubble]);
-
-  
 
   // Fonction helper pour extraire tous les fichiers d'un répertoire
 
@@ -1236,11 +1042,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     const files: File[] = [];
 
-    
-
     if (!entry) return files;
-
-    
 
     if (entry.isFile) {
 
@@ -1254,19 +1056,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
           const relativePath = path ? `${path}/${file.name}` : file.name;
 
-          
-
           // Créer un nouveau File avec le chemin complet dans le nom
 
           const fileWithPath = new File([file], file.name, { type: file.type });
 
-          
-
           // Ajouter webkitRelativePath pour que buildFileTree puisse l'utiliser
 
           (fileWithPath as any).webkitRelativePath = relativePath;
-
-          
 
           resolve([fileWithPath]);
 
@@ -1286,8 +1082,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-      
-
       for (const subEntry of entries) {
 
         const subPath = path ? `${path}/${subEntry.name}` : subEntry.name;
@@ -1300,13 +1094,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     return files;
 
   };
-
-
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
 
@@ -1314,21 +1104,15 @@ const FlexiAnalyseApp: React.FC = () => {
 
     e.stopPropagation();
 
-    
-
     setIsProcessingDrop(true);
 
     setCurrentStatus(t('status.extracting.files'));
-
-    
 
     try {
 
       const items = Array.from(e.dataTransfer.items);
 
       const allFiles: File[] = [];
-
-      
 
       // Traiter chaque item (peut être un fichier ou un répertoire)
 
@@ -1346,8 +1130,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       // Si aucun fichier n'a été trouvé via webkitGetAsEntry, essayer avec files
 
       if (allFiles.length === 0) {
@@ -1357,8 +1139,6 @@ const FlexiAnalyseApp: React.FC = () => {
         allFiles.push(...files);
 
       }
-
-      
 
       if (allFiles.length === 0) {
 
@@ -1370,8 +1150,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       const allowedExtensions = [
 
         '.java', '.py', '.cs', '.js', '.ts', '.cpp', '.c', '.h',
@@ -1382,8 +1160,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       ];
 
-      
-
       // Filtrer les fichiers supportés
 
       const supportedFiles = allFiles.filter(file => {
@@ -1393,8 +1169,6 @@ const FlexiAnalyseApp: React.FC = () => {
         return allowedExtensions.includes(extension);
 
       });
-
-      
 
       if (supportedFiles.length === 0) {
 
@@ -1407,8 +1181,6 @@ const FlexiAnalyseApp: React.FC = () => {
         return;
 
       }
-
-      
 
       // Vérifier les limitations pour les utilisateurs non connectés
 
@@ -1428,8 +1200,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-        
-
         // Vérifier la limite d'upload de fichiers
 
         if (!checkFileUploadLimit()) {
@@ -1446,8 +1216,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       // Si c'est un seul fichier, traiter comme avant
 
       if (supportedFiles.length === 1) {
@@ -1456,11 +1224,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
-        
-
         setCurrentStatus(t('status.processing.file', { fileName: file.name }));
-
-        
 
         let content: string | ArrayBuffer;
 
@@ -1474,15 +1238,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-        
-
         // Réinitialiser isProcessingDrop avant d'appeler handleFileSelect
 
         // car handleFileSelect peut prendre du temps avec le streaming
 
         setIsProcessingDrop(false);
-
-        
 
         // Incrémenter le compteur de fichiers uploadés pour les non connectés
 
@@ -1491,8 +1251,6 @@ const FlexiAnalyseApp: React.FC = () => {
           incrementUploadedFiles();
 
         }
-
-        
 
         // handleFileSelect appellera automatiquement generateFileSummaryWithStreaming
 
@@ -1515,8 +1273,6 @@ const FlexiAnalyseApp: React.FC = () => {
         setIsProcessingDrop(false);
 
         setCurrentStatus(t('status.processing.files', { count: supportedFiles.length }));
-
-        
 
         // Gérer l'import du répertoire
 
@@ -1546,9 +1302,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [handleFileSelect, handleDirectorySelect, isAuthenticated, checkFileUploadLimit, incrementUploadedFiles, showLimitInfoBubble]);
 
-
-
-    // Indexation côté backend — envoie les fichiers bruts via FormData, Docling parse côté serveur
+  // Indexation côté backend — envoie les fichiers bruts via FormData, Docling parse côté serveur
 
   const indexDirectoryContentOnBackend = async (files: File[]) => {
 
@@ -1558,11 +1312,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       console.log('Fichiers à indexer:', files.length);
 
-      
-
       setIndexingStatus(t('status.indexing.on.server', { count: files.length }));
-
-      
 
       // Construire le FormData avec les fichiers bruts
 
@@ -1576,8 +1326,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       formData.append('language', language);
 
-      
-
       const response = await fetch(`${apiUrl}/index-directory`, {
 
         method: 'POST',
@@ -1588,8 +1336,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-      
-
       if (!response.ok) {
 
         const errorData = await response.json().catch(() => ({}));
@@ -1598,19 +1344,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       const data = await response.json();
 
       console.log('✅ Indexation Docling terminée sur le backend:', data);
 
-      
-
       setIsDirectoryIndexed(true);
 
       setIndexingStatus('');
-
-      
 
       if (Array.isArray(data.suggested_actions)) {
 
@@ -1621,8 +1361,6 @@ const FlexiAnalyseApp: React.FC = () => {
         setSuggestedActions([]);
 
       }
-
-      
 
       if (data.detected_type && data.detected_type_label) {
 
@@ -1640,11 +1378,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       console.log(`📚 ${data.indexed_files_count} fichiers indexés avec ${data.chunks_count} chunks`);
-
-      
 
     } catch (error) {
 
@@ -1657,8 +1391,6 @@ const FlexiAnalyseApp: React.FC = () => {
     }
 
   };
-
-
 
   // NOUVEAU useEffect: Indexation automatique des fichiers du répertoire
 
@@ -1680,8 +1412,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         currentFileKeys.some((key, index) => key !== lastFileKeys[index]);
 
-
-
       console.log('=== VÉRIFICATION DES FICHIERS DU RÉPERTOIRE ===');
 
       console.log('Fichiers actuels:', directoryFiles.length);
@@ -1689,8 +1419,6 @@ const FlexiAnalyseApp: React.FC = () => {
       console.log('Derniers fichiers indexés:', lastIndexedFilesRef.current.length);
 
       console.log('Changements détectés:', hasFilesChanged);
-
-
 
       if (directoryFiles.length > 0 && hasFilesChanged) {
 
@@ -1728,15 +1456,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
     };
 
-
-
     loadDirectoryFiles();
 
   }, [directoryFiles, sessionId]);
 
-
-
-    // Fonction principale de gestion des requêtes utilisateur
+  // Fonction principale de gestion des requêtes utilisateur
 
   const handleQuerySubmit = async (query: string, mode: 'online' | 'local') => {
 
@@ -1750,9 +1474,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
-        // Incrémenter le compteur de requêtes pour les non connectés
+    // Incrémenter le compteur de requêtes pour les non connectés
 
     if (!isAuthenticated) {
 
@@ -1760,11 +1482,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     //setResearchMode(mode);
-
-    
 
     // Ajouter la requête à l'historique de recherche
 
@@ -1774,23 +1492,19 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     // Utiliser la langue de l'interface pour les suggested actions, mais le modèle répondra dans la langue du prompt
 
     console.log(`Mode de recherche: ${mode}, Langue interface: ${language}`);
 
-    
-
     const messageId = Math.random().toString(36).substr(2, 9);
 
-    const newMessage: ChatMessage = { 
+    const newMessage: ChatMessage = {
 
       id: messageId,
 
-      userQuery: query, 
+      userQuery: query,
 
-      aiResponse: '' 
+      aiResponse: ''
 
     };
 
@@ -1799,8 +1513,6 @@ const FlexiAnalyseApp: React.FC = () => {
     setLoading(true);
 
     setCurrentStatus(mode === 'local' ? t('status.analyzing.question') : t('status.processing.request'));
-
-
 
     try {
 
@@ -1818,15 +1530,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
       // Préparation des données selon le mode
 
       const effectiveModel =
 
         selectedModel === AUTO_MODEL_ID ? chooseModelForQuery(query) : selectedModel;
-
-
 
       // Construire un petit historique de conversation (les 6 derniers échanges)
 
@@ -1837,8 +1545,6 @@ const FlexiAnalyseApp: React.FC = () => {
         { role: 'assistant', content: msg.aiResponse },
 
       ]);
-
-
 
       // Le modèle répondra dans la langue du prompt, pas besoin de passer la langue de l'interface
 
@@ -1853,8 +1559,6 @@ const FlexiAnalyseApp: React.FC = () => {
         conversation_history: conversationHistory,
 
       };
-
-
 
       if (effectiveMode === 'local') {
 
@@ -1892,8 +1596,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-
-
         // MODE LOCAL: Utilisation de l'indexation backend
 
         // Permettre le mode local même sans fichier sélectionné si un répertoire est indexé (recherche sur le corpus)
@@ -1904,8 +1606,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-
-
         // Si un fichier est sélectionné, extraire son contenu
 
         let currentFileContent: string | null = null;
@@ -1913,8 +1613,6 @@ const FlexiAnalyseApp: React.FC = () => {
         let isBinary = false;
 
         let fileName: string | null = null;
-
-
 
         if (selectedFile && fileDetails) {
 
@@ -1924,15 +1622,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           fileName = selectedFile.name;
 
-
-
           // Traitement du fichier actuel
 
           const extension = selectedFile.name.substring(selectedFile.name.lastIndexOf('.')).toLowerCase();
 
           isBinary = ['.docx', '.pdf'].includes(extension);
-
-
 
           // Pour les fichiers binaires (PDF/DOCX), le contenu est dans le vector store Docling
 
@@ -1958,8 +1652,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-
-
         // Payload pour mode local avec indexation backend
 
         requestPayload = {
@@ -1982,8 +1674,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         };
 
-
-
         console.log(`🚀 Envoi de la requête en mode local:`, {
 
           mode: effectiveMode,
@@ -1999,8 +1689,6 @@ const FlexiAnalyseApp: React.FC = () => {
           directoryIndexed: isDirectoryIndexed,
 
         });
-
-
 
       } else {
 
@@ -2026,15 +1714,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
       // Détecter si une recherche en ligne sera nécessaire
 
-      const needsOnlineSearch = effectiveMode === 'online' || 
+      const needsOnlineSearch = effectiveMode === 'online' ||
 
         (effectiveMode === 'local' && requestPayload.enable_auto_online_search !== false);
-
-      
 
       // Démarrer l'indicateur de recherche après un court délai
 
@@ -2050,8 +1734,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
       console.log(`📡 Envoi de la requête au backend...`, {
 
         effectiveModel,
@@ -2059,8 +1741,6 @@ const FlexiAnalyseApp: React.FC = () => {
         researchMode: effectiveMode,
 
       });
-
-
 
       // Mettre à jour le statut selon le mode
 
@@ -2074,13 +1754,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
       const response = await fetch(`${apiUrl}/query`, {
 
         method: 'POST',
 
-        headers: { 
+        headers: {
 
           'Content-Type': 'application/json',
 
@@ -2091,8 +1769,6 @@ const FlexiAnalyseApp: React.FC = () => {
         body: JSON.stringify(requestPayload),
 
       });
-
-
 
       if (!response.ok) {
 
@@ -2106,11 +1782,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
       const data = await response.json();
-
-      
 
       // Arrêter l'indicateur de recherche
 
@@ -2122,8 +1794,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       const aiResponse = data.response;
 
-
-
       console.log('📨 Réponse reçue du backend:', {
 
         mode: data.mode,
@@ -2132,21 +1802,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-
-
       // Extraire les pages référencées depuis context_info
 
       const pagesReferenced = data.context_info?.pages_referenced || null;
-
-
 
       // Mise à jour de l'historique
 
       setChatHistory((prev) => {
 
-        return prev.map(msg => 
+        return prev.map(msg =>
 
-          msg.id === messageId 
+          msg.id === messageId
 
             ? { ...msg, aiResponse, pagesReferenced: pagesReferenced || undefined }
 
@@ -2156,8 +1822,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-
-
       // Traitement des modifications de fichier (reste identique)
 
       if (effectiveMode === 'local' && selectedFile && !requestPayload.is_binary) {
@@ -2165,8 +1829,6 @@ const FlexiAnalyseApp: React.FC = () => {
         const modifiedContentMatch = aiResponse.match(/```modified-file-content\n([\s\S]*?)\n```/);
 
         let updatedContent: string | null = null;
-
-
 
         if (modifiedContentMatch && modifiedContentMatch[1]) {
 
@@ -2186,19 +1848,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
           let isCollecting = false;
 
-
-
           for (const line of lines) {
 
             const trimmedLine = line.trim();
 
             if (!isCollecting && (
 
-              trimmedLine === currentFileContent.split('\n')[0]?.trim() || 
+              trimmedLine === currentFileContent.split('\n')[0]?.trim() ||
 
-              trimmedLine.includes('def ') || 
+              trimmedLine.includes('def ') ||
 
-              trimmedLine.includes('function ') || 
+              trimmedLine.includes('function ') ||
 
               trimmedLine.includes('class ')
 
@@ -2222,8 +1882,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
           }
 
-
-
           if (potentialContent.length > 0 && potentialContent.length >= originalLines.length * 0.5) {
 
             updatedContent = potentialContent.join('\n').trim();
@@ -2231,8 +1889,6 @@ const FlexiAnalyseApp: React.FC = () => {
           }
 
         }
-
-
 
         if (updatedContent) {
 
@@ -2244,21 +1900,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
     } catch (error) {
 
       console.error('Erreur lors de la soumission de la requête:', error);
 
       const errorMessage = error instanceof Error ? error.message : 'Erreur lors du traitement de votre requête.';
 
-      
-
       setChatHistory((prev) => {
 
-        return prev.map(msg => 
+        return prev.map(msg =>
 
-          msg.id === messageId 
+          msg.id === messageId
 
             ? { ...msg, aiResponse: `Erreur: ${errorMessage}` }
 
@@ -2278,8 +1930,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   };
 
-
-
   // Nouvelle fonction pour gérer les requêtes avec streaming
 
   const handleQuerySubmitWithStream = async (query: string, mode: 'online' | 'local') => {
@@ -2294,8 +1944,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     // Incrémenter le compteur de requêtes pour les non connectés
 
     if (!isAuthenticated) {
@@ -2303,8 +1951,6 @@ const FlexiAnalyseApp: React.FC = () => {
       incrementDailyQueries();
 
     }
-
-    
 
     // Si mode local, utiliser l'ancienne méthode pour l'instant
 
@@ -2314,29 +1960,23 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-
-
     const effectiveModel =
 
       selectedModel === AUTO_MODEL_ID ? chooseModelForQuery(query) : selectedModel;
 
     console.log(`🚀 Mode streaming activé - Mode: ${mode}, Langue: ${language}`);
 
-    
-
     const messageId = Math.random().toString(36).substr(2, 9);
 
-    const newMessage: ChatMessage = { 
+    const newMessage: ChatMessage = {
 
       id: messageId,
 
-      userQuery: query, 
+      userQuery: query,
 
-      aiResponse: '' 
+      aiResponse: ''
 
     };
-
-    
 
     // Ajouter le message à l'historique
 
@@ -2348,21 +1988,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
     setCurrentStatus(t('status.processing.request'));
 
-
-
     try {
 
       // Mettre à jour le statut (toujours 'online' dans cette fonction car 'local' redirige vers handleQuerySubmit)
 
       setCurrentStatus(t('status.searching.online'));
 
-
-
       const response = await fetch(`${apiUrl}/query-stream`, {
 
         method: 'POST',
 
-        headers: { 
+        headers: {
 
           'Content-Type': 'application/json',
 
@@ -2396,15 +2032,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-
-
       if (!response.ok) {
 
         throw new Error(`HTTP error! status: ${response.status}`);
 
       }
-
-
 
       // Lire le stream
 
@@ -2414,8 +2046,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       let accumulatedResponse = '';
 
-
-
       if (reader) {
 
         while (true) {
@@ -2424,15 +2054,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           if (done) break;
 
-
-
           // Décoder le chunk
 
           const chunk = decoder.decode(value, { stream: true });
 
           const lines = chunk.split('\n');
-
-          
 
           for (const line of lines) {
 
@@ -2444,8 +2070,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 const jsonData = JSON.parse(line.slice(6));
 
-                
-
                 // Mettre à jour le statut si fourni par le backend
 
                 if (jsonData.status) {
@@ -2454,15 +2078,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.content) {
 
                   // Ajouter le contenu à la réponse accumulée
 
                   accumulatedResponse += jsonData.content;
-
-                  
 
                   // Mettre à jour le statut si on commence à recevoir du contenu
 
@@ -2472,15 +2092,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
                   }
 
-                  
-
                   // Mettre à jour l'interface en temps réel
 
-                  setChatHistory((prev) => 
+                  setChatHistory((prev) =>
 
-                    prev.map(msg => 
+                    prev.map(msg =>
 
-                      msg.id === messageId 
+                      msg.id === messageId
 
                         ? { ...msg, aiResponse: accumulatedResponse }
 
@@ -2492,15 +2110,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
                 }
 
-                
-
                 if (jsonData.done) {
 
                   console.log('✅ Streaming terminé');
 
                 }
-
-                
 
                 if (jsonData.error) {
 
@@ -2509,8 +2123,6 @@ const FlexiAnalyseApp: React.FC = () => {
                   throw new Error(jsonData.error);
 
                 }
-
-                
 
               } catch (e) {
 
@@ -2532,21 +2144,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-
-
     } catch (error) {
 
       console.error('Erreur lors du streaming:', error);
 
       const errorMessage = error instanceof Error ? error.message : 'Erreur lors du traitement de votre requête.';
 
-      
-
       setChatHistory((prev) => {
 
-        return prev.map(msg => 
+        return prev.map(msg =>
 
-          msg.id === messageId 
+          msg.id === messageId
 
             ? { ...msg, aiResponse: `Erreur: ${errorMessage}` }
 
@@ -2566,10 +2174,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   };
 
-
-
-
-
   const getRepoStructure = useCallback((structureFn: () => string, files: File[]) => {
 
     const structure = structureFn();
@@ -2582,8 +2186,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-
-
   // Fonction pour extraire les données structurées
 
   const handleExtractStructured = useCallback(async () => {
@@ -2595,8 +2197,6 @@ const FlexiAnalyseApp: React.FC = () => {
       return;
 
     }
-
-
 
     // Vérifier d'abord si l'endpoint est accessible
 
@@ -2626,31 +2226,25 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-
-
     setExtracting(true);
 
     try {
 
       // Extraire le texte du fichier
 
-      const fileContent = typeof fileDetails.content === 'string' 
+      const fileContent = typeof fileDetails.content === 'string'
 
-        ? fileDetails.content 
+        ? fileDetails.content
 
         : '';
 
-
-
       // Déterminer le modèle à utiliser
 
-      const effectiveModel = selectedModel === AUTO_MODEL_ID 
+      const effectiveModel = selectedModel === AUTO_MODEL_ID
 
-        ? chooseModelForQuery('extract structured data') 
+        ? chooseModelForQuery('extract structured data')
 
         : selectedModel;
-
-
 
       // Appeler l'endpoint d'extraction
 
@@ -2678,8 +2272,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       });
 
-
-
       if (!response.ok) {
 
         const errorText = await response.text().catch(() => 'Unable to read error message');
@@ -2698,8 +2290,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         });
 
-        
-
         // Si c'est une erreur 405, c'est probablement un problème de configuration serveur
 
         if (response.status === 405) {
@@ -2708,17 +2298,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
         }
 
-        
-
         throw new Error(`Erreur HTTP: ${response.status} - ${errorText}`);
 
       }
 
-
-
       const result = await response.json();
-
-      
 
       if (result.success && result.data) {
 
@@ -2748,23 +2332,19 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [selectedFile, fileDetails, selectedModel, apiUrl]);
 
-
-
   const handleSuggestedActionClick = useCallback(
 
     (action: SuggestedAction) => {
 
       // Détecter si c'est une action d'extraction structurée
 
-      const isExtractionAction = action.id.includes('extract') || 
+      const isExtractionAction = action.id.includes('extract') ||
 
                                  action.id.includes('structured') ||
 
                                  action.title.toLowerCase().includes('extraire') ||
 
                                  action.title.toLowerCase().includes('extract');
-
-      
 
       if (isExtractionAction && selectedFile) {
 
@@ -2788,8 +2368,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
   );
 
-
-
   // Fonction pour obtenir les fichiers éditables
 
   const getEditableFiles = useCallback(async () => {
@@ -2804,11 +2382,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     ];
 
-    
-
     const editableFiles: Array<{ file: File; content: string | ArrayBuffer; type: 'code' | 'docx' }> = [];
-
-    
 
     // Ajouter le fichier sélectionné s'il est éditable
 
@@ -2844,15 +2418,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     // Charger le contenu des fichiers du répertoire qui sont éditables
 
     for (const file of directoryFiles) {
 
       const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-
-      
 
       // Vérifier si le fichier n'est pas déjà dans la liste
 
@@ -2914,13 +2484,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
     }
 
-    
-
     return editableFiles;
 
   }, [selectedFile, fileDetails, directoryFiles]);
-
-
 
   // Fonction pour gérer la sélection de texte
 
@@ -2946,23 +2512,17 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, [getEditableFiles]);
 
-
-
   // Fonction pour insérer du texte dans un fichier
 
   const handleInsertText = useCallback(async (file: File, text: string, lineNumber?: number) => {
 
     console.log('handleInsertText called:', { fileName: file.name, textLength: text.length, lineNumber });
 
-    
-
     // Trouver le fichier dans les fichiers éditables
 
     const editableFiles = await getEditableFiles();
 
     const fileData = editableFiles.find(ef => ef.file.name === file.name);
-
-    
 
     if (!fileData) {
 
@@ -2971,8 +2531,6 @@ const FlexiAnalyseApp: React.FC = () => {
       return;
 
     }
-
-
 
     const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
 
@@ -2986,13 +2544,9 @@ const FlexiAnalyseApp: React.FC = () => {
 
     ];
 
-
-
     if (codeExtensions.includes(extension) && typeof fileData.content === 'string') {
 
       const lines = fileData.content.split('\n');
-
-      
 
       if (lineNumber !== undefined && lineNumber > 0) {
 
@@ -3024,11 +2578,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       const newContent = lines.join('\n');
-
-      
 
       // Si c'est le fichier sélectionné, mettre à jour fileDetails
 
@@ -3060,8 +2610,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       }
 
-      
-
       console.log('Texte inséré avec succès');
 
     } else if (extension === '.docx' && fileData.content instanceof ArrayBuffer) {
@@ -3073,8 +2621,6 @@ const FlexiAnalyseApp: React.FC = () => {
         .then(async (result) => {
 
           let htmlContent = result.value;
-
-          
 
           // Ajouter le texte au HTML
 
@@ -3106,15 +2652,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           }
 
-          
-
           // Convertir le HTML en paragraphes DOCX
 
           const { Document, Paragraph, TextRun, Packer } = await import('docx');
 
           const { saveAs } = await import('file-saver');
-
-          
 
           // Parser le HTML en paragraphes
 
@@ -3123,8 +2665,6 @@ const FlexiAnalyseApp: React.FC = () => {
           tempDiv.innerHTML = htmlContent;
 
           const paragraphs: any[] = [];
-
-          
 
           tempDiv.querySelectorAll('p').forEach((p) => {
 
@@ -3138,8 +2678,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
           });
 
-          
-
           // Si aucun paragraphe, créer un paragraphe vide
 
           if (paragraphs.length === 0) {
@@ -3147,8 +2685,6 @@ const FlexiAnalyseApp: React.FC = () => {
             paragraphs.push(new Paragraph({ children: [new TextRun('')] }));
 
           }
-
-          
 
           // Créer le document DOCX
 
@@ -3164,15 +2700,11 @@ const FlexiAnalyseApp: React.FC = () => {
 
           });
 
-          
-
           // Convertir en blob et mettre à jour fileDetails
 
           const blob = await Packer.toBlob(doc);
 
           const arrayBuffer = await blob.arrayBuffer();
-
-          
 
           // Mettre à jour fileDetails avec le nouveau contenu
 
@@ -3202,8 +2734,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
           }
 
-          
-
           console.log('Texte inséré dans DOCX avec succès');
 
         })
@@ -3223,8 +2753,6 @@ const FlexiAnalyseApp: React.FC = () => {
     }
 
   }, [selectedFile, fileDetails, getEditableFiles, setIsFileContentVisible]);
-
-
 
   return (
 
@@ -3278,8 +2806,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
       )}
 
-      
-
       {/* Sidebar Container */}
 
       <div className="flex">
@@ -3310,8 +2836,6 @@ const FlexiAnalyseApp: React.FC = () => {
 
         </div>
 
-
-
         <div className="lg:hidden">
 
           <Sidebar
@@ -3340,67 +2864,19 @@ const FlexiAnalyseApp: React.FC = () => {
 
       </div>
 
+      {/* Main Content - Simplified Layout with AppHomeComponent */}
 
+      <div className={`flex-1 flex transition-all duration-300 lg:ml-16 relative z-30 h-screen overflow-hidden`}>
 
-      {/* Indicateur de statut d'indexation 
+        {/* AppHomeComponent - Full width main content */}
 
-        {indexingStatus && (
+        <div className="flex-1 overflow-hidden">
 
-          <div className="fixed top-4 right-4 z-50 bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg">
-
-            {indexingStatus}
-
-          </div>
-
-        )}
-
-      */}
-
-      
-
-      {/* Main Content - Layout 3 colonnes */}
-
-      <div
-
-        className={`flex-1 flex transition-all duration-300 lg:ml-16 relative z-30 h-screen overflow-hidden`}
-
-      >
-
-        {/* Colonne centrale - FileViewer (caché sur mobile) */}
-
-        <div className="hidden md:flex w-2/5 flex-shrink-0 border-r border-gray-200 overflow-hidden mr-2 h-full flex-col">
-
-          <FileViewer
-
-            file={selectedFile}
-
-            fileDetails={fileDetails}
-
-            onFileSelect={handleFileSelect}
-
-            onDragOver={handleDragOver}
-
-            onDrop={handleDrop}
-
-            isProcessingDrop={isProcessingDrop}
-
-          />
-
-        </div>
-
-
-
-        {/* Colonne droite - ChatPanel (pleine largeur sur mobile) */}
-
-        <div className="flex-1 md:w-3/5 flex-shrink-0 overflow-hidden md:ml-2">
-
-          <ChatPanel
-
-            chatHistory={chatHistory}
-
-            loading={loading || isProcessingDrop}
+          <AppHomeComponent
 
             onQuerySubmit={handleQuerySubmitWithStream}
+
+            loading={loading || isProcessingDrop}
 
             selectedModel={selectedModel}
 
@@ -3410,37 +2886,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
             setResearchMode={setResearchMode}
 
-            suggestedActions={suggestedActions}
-
-            onSuggestedActionClick={handleSuggestedActionClick}
-
-            getEditableFiles={getEditableFiles}
-
-            isProcessingDrop={isProcessingDrop}
-
-            onTextSelect={handleTextSelect}
-
-            isSearchingOnline={isSearchingOnline}
-
-            currentStatus={currentStatus}
-
-            isFileContentVisible={isFileContentVisible}
-
-            setIsFileContentVisible={setIsFileContentVisible}
-
-            isMobile={isMobile}
-
-            onFileSelect={handleFileSelect}
-
-            detectedDocType={detectedDocType}
+            language={language}
 
           />
 
         </div>
 
       </div>
-
-
 
       {/* Modal d'affichage des données structurées */}
 
@@ -3461,8 +2913,6 @@ const FlexiAnalyseApp: React.FC = () => {
         />
 
       )}
-
-
 
       {/* Modal d'insertion de texte */}
 
@@ -3489,8 +2939,6 @@ const FlexiAnalyseApp: React.FC = () => {
         />
 
       )}
-
-
 
       {/* Indicateur de chargement pour l'extraction */}
 
@@ -3519,7 +2967,5 @@ const FlexiAnalyseApp: React.FC = () => {
   );
 
 };
-
-
 
 export default FlexiAnalyseApp;
