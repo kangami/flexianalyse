@@ -60,23 +60,23 @@ const LandingPage: React.FC = () => {
       >
         {/* ── Background videos (crossfade) ── */}
         {HERO_VIDEOS.map((src, idx) => (
-          <video
-            key={src}
-            ref={el => { videoRefs.current[idx] = el; }}
-            src={src}
-            muted
-            playsInline
-            preload="auto"
-            onEnded={() => handleVideoEnd(idx)}
-            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-            style={{
-              filter: 'blur(3px) brightness(0.55)',
-              transform: 'scale(1.07)',
-              opacity: activeVideo === idx ? 1 : 0,
-              transition: 'opacity 1.4s ease-in-out',
-              zIndex: 0,
-            }}
-          />
+           <video
+             key={src}
+             ref={el => { videoRefs.current[idx] = el; }}
+             src={src}
+             muted
+             playsInline
+             preload="auto"
+             onEnded={() => handleVideoEnd(idx)}
+             className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+             style={{
+               filter: 'blur(2px) brightness(0.55)',
+               transform: 'scale(1.07)',
+               opacity: activeVideo === idx ? 1 : 0,
+               transition: 'opacity 1.4s ease-in-out',
+               zIndex: 0,
+             }}
+           />
         ))}
         {/* Dark overlay — keeps text legible over any video */}
         <div
@@ -95,7 +95,7 @@ const LandingPage: React.FC = () => {
         <div className="absolute inset-0 pointer-events-none"
              style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px)', backgroundSize: '64px 64px' }} />
 
-        <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-24 text-center">
+        <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-16 text-center">
           {/* Status badge */}
           <div className="inline-flex items-center gap-2.5 mb-8 px-5 py-2 rounded-full border border-blue-400/20 bg-blue-500/10 backdrop-blur-sm">
             <span className="w-2 h-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 8px #34d399' }} />
@@ -117,7 +117,7 @@ const LandingPage: React.FC = () => {
           <p className="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto mb-10 leading-relaxed">
             A{' '}
             <span className="text-white font-semibold">dedicated AI agent for every role</span>
-            {' '}— connecting all your data, surfacing hidden insights, and making every employee{' '}
+            {' '}- connecting all your data, surfacing hidden insights, and making every employee{' '}
             <span className="text-white font-semibold">10X more effective</span>.
           </p>
 
@@ -171,7 +171,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Main page sections (white bg) ── */}
-      <div className="bg-white">
+      <div className="bg-white pt-8">
         <OperationsDiagram />
         <FeaturesSection />
         <UseCasesSection />
@@ -180,7 +180,7 @@ const LandingPage: React.FC = () => {
 
         {/* ── Final CTA Banner ─────────────────────────────── */}
         <section
-          className="py-24 px-4"
+          className="py-16 px-4"
           style={{ background: 'linear-gradient(135deg,#04091e 0%,#0a1640 50%,#120d35 100%)' }}
         >
           {/* Orbs */}

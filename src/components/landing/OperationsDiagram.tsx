@@ -215,7 +215,7 @@ const OperationsDiagram: React.FC = () => {
           Connect <span className="text-blue-600">→</span> Understand <span className="text-purple-600">→</span> Orchestrate
         </h2>
         <p className="text-lg text-gray-500 max-w-2xl mx-auto">
-          Three steps to full enterprise intelligence — from raw data to autonomous AI agents acting on your behalf.
+          Three steps to full enterprise intelligence, from raw data to autonomous AI agents acting on your behalf.
         </p>
       </div>
 
@@ -437,12 +437,12 @@ const OperationsDiagram: React.FC = () => {
         }`}
       >
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-4 h-4 text-white" />
-            </div>
-            <h3 className="text-base font-bold text-gray-900">Business Outcomes</h3>
-          </div>
+           <div className="flex items-center justify-center gap-3 mb-4">
+             <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+               <TrendingUp className="w-4 h-4 text-white" />
+             </div>
+             <h3 className="text-base font-bold text-gray-900 text-center">Business Outcomes</h3>
+           </div>
           <div className="flex flex-wrap gap-4 justify-center">
             {businessOutcomes.map((outcome) => (
               <div key={outcome} className="flex items-center gap-2 text-sm text-gray-700">
@@ -462,12 +462,15 @@ const OperationsDiagram: React.FC = () => {
         }`}
       >
         <div className="bg-gradient-to-r from-blue-900 to-purple-900 rounded-2xl p-5 text-white">
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex flex-col items-center gap-4 text-center">
+            {/* Title - now fully centered on its own row */}
+            <div className="flex items-center justify-center gap-2">
               <ShieldAlert className="w-6 h-6 text-blue-300" />
               <h3 className="text-sm font-bold uppercase tracking-wider">Governance & Control Layer</h3>
             </div>
-            <div className="flex flex-wrap gap-4 justify-center sm:justify-end flex-1">
+
+            {/* Items - centered below the title */}
+            <div className="flex flex-wrap gap-4 justify-center">
               {governanceItems.map((item) => (
                 <span key={item} className="flex items-center gap-1.5 text-xs text-blue-200">
                   <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
@@ -476,6 +479,7 @@ const OperationsDiagram: React.FC = () => {
               ))}
             </div>
           </div>
+
           <div className="mt-4 pt-3 border-t border-white/20 text-center">
             <p className="text-sm font-medium text-blue-100">
               <strong className="text-white">One platform. Every operation.</strong> FlexiAnalyse is your enterprise operations intelligence layer.

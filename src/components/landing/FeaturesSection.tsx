@@ -84,7 +84,7 @@ const FeaturesSection: React.FC = () => {
             </span>
           </h2>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto">
-            Not a generic chatbot. FlexiAnalyse deploys specialised AI agents trained for each function — so every employee works like an expert.
+            Not a generic chatbot. FlexiAnalyse deploys specialised AI agents trained for each function, so every employee works like an expert.
           </p>
         </div>
 
