@@ -129,7 +129,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                 return (data.count || 0) < 5;
             }
         } catch (e) {
-            console.error('Error reading daily queries:', e);
+            console.error(t('app.errors.dailyQueries'), e);
         }
         return true;
     };
@@ -157,10 +157,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     // Animated features rotation
     useEffect(() => {
         const features = [
-            "can search across your entire Organisation",
-            "can help every employee work like an expert",
-            "can analyze your databases using plain English",
-            "can detect anomalies before they become problems"
+            t('app.feature1'),
+            t('app.feature2'),
+            t('app.feature3'),
+            t('app.feature4')
         ];
 
         let currentIndex = 0;
@@ -178,8 +178,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         {
             id: 'google_drive', label: 'Google Drive', oauth: true,
             fields: [
-                { key: 'name', label: 'Connection Name', placeholder: 'My Google Drive' },
-                { key: 'folder_id', label: 'Root Folder ID (optional)', placeholder: '1BxiMVs0XRA5…' },
+                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myGoogleDrive') },
+                { key: 'folder_id', label: t('connector.fields.folderId'), placeholder: t('connector.placeholders.folderId') },
             ],
             icon: (
                 <svg viewBox="0 0 87.3 78" className="w-5 h-5">
@@ -195,7 +195,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         {
             id: 'dropbox', label: 'Dropbox', oauth: true,
             fields: [
-                { key: 'name', label: 'Connection Name', placeholder: 'My Dropbox' },
+                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myDropbox') },
             ],
             icon: (
                 <svg viewBox="0 0 43 40" className="w-5 h-5">
@@ -206,9 +206,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         {
             id: 'sharepoint', label: 'SharePoint', oauth: true,
             fields: [
-                { key: 'name', label: 'Connection Name', placeholder: 'My SharePoint' },
-                { key: 'tenant_id', label: 'Tenant ID', placeholder: 'xxxxxxxx-xxxx-…' },
-                { key: 'site_url', label: 'Site URL', placeholder: 'https://company.sharepoint.com/sites/…' },
+                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.mySharePoint') },
+                { key: 'tenant_id', label: t('connector.fields.tenantId'), placeholder: t('connector.placeholders.tenantId') },
+                { key: 'site_url', label: t('connector.fields.siteUrl'), placeholder: t('connector.placeholders.siteUrl') },
             ],
             icon: (
                 <svg viewBox="0 0 32 32" className="w-5 h-5">
@@ -221,8 +221,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         {
             id: 'database', label: 'SQL Database', oauth: false,
             fields: [
-                { key: 'name', label: 'Connection Name', placeholder: 'My Database' },
-                { key: 'connection_url', label: 'Connection URL', placeholder: 'postgresql://user:pass@host:5432/db' },
+                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myDatabase') },
+                { key: 'connection_url', label: t('connector.fields.connectionUrl'), placeholder: t('connector.placeholders.connectionUrl') },
             ],
             icon: (
                 <svg viewBox="0 0 32 32" className="w-5 h-5">
@@ -241,14 +241,14 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         try {
             const body: Record<string, string | undefined> = {
                 type: def.id === 'database' ? 'sql' : def.id,
-                name: connectorForm.name || `New ${def.label}`,
+                name: connectorForm.name || t('connector.newConnectionName', { service: def.label }),
             };
             if (def.id === 'database') {
-                if (!connectorForm.connection_url) throw new Error('Connection URL is required');
+                if (!connectorForm.connection_url) throw new Error(t('connector.errors.connectionUrlRequired'));
                 body.token = connectorForm.connection_url;
             } else if (def.id === 'sharepoint') {
-                if (!connectorForm.tenant_id) throw new Error('Tenant ID is required');
-                if (!connectorForm.site_url) throw new Error('Site URL is required');
+                if (!connectorForm.tenant_id) throw new Error(t('connector.errors.tenantIdRequired'));
+                if (!connectorForm.site_url) throw new Error(t('connector.errors.siteUrlRequired'));
                 body.token = JSON.stringify({ tenant_id: connectorForm.tenant_id, site_url: connectorForm.site_url });
             } else if (def.id === 'google_drive') {
                 body.token = connectorForm.folder_id || undefined;
@@ -261,14 +261,15 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
             const saved = await r.json();
             if (def.oauth) {
-                setConnectorMsg({ text: `Saved — opening ${def.label} authorization…`, ok: true });
+                setConnectorMsg({ text: t('connector.savedOpening', { service: def.label }), ok: true });
                 setTimeout(() => window.open(`${API_BASE}/auth/${def.id}?connector_id=${saved.id}`, '_blank'), 400);
             } else {
-                setConnectorMsg({ text: 'Connector added successfully!', ok: true });
+                setConnectorMsg({ text: t('connector.addedSuccessfully'), ok: true });
                 setTimeout(() => { setActiveConnector(null); setConnectorForm({}); setConnectorMsg(null); }, 2000);
             }
         } catch (e: unknown) {
-            setConnectorMsg({ text: `Error: ${(e as Error).message || e}`, ok: false });
+            const errorMessage = (e as Error).message || String(e);
+            setConnectorMsg({ text: t('connector.error', { message: errorMessage }), ok: false });
         } finally {
             setConnectorSaving(false);
         }
@@ -279,7 +280,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         if (query.trim() && !loading) {
             // Check query limit for unauthenticated users
             if (!isAuthenticated && !checkQueryLimit()) {
-                setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+                setAlertMessage(t('query.limitReached'));
                 return;
             }
             onQuerySubmit(query, researchMode);
@@ -293,7 +294,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             // Check limit before submitting
             if (query.trim() && !loading) {
                 if (!isAuthenticated && !checkQueryLimit()) {
-                    setAlertMessage('You have reached the limit of 5 queries per day. Please sign in to continue using FlexiAnalyse.');
+                    setAlertMessage(t('query.limitReached'));
                     return;
                 }
             }
@@ -319,16 +320,16 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                     >
                         {/* Header */}
                         <div className="flex items-center justify-between mb-5">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: tc.inputBg, border: `1px solid ${tc.modalBorder}` }}>
+                            <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: tc.inputBg, border: `1px solid ${tc.modalBorder}` }}>
                                     {activeDef.icon}
                                 </div>
-                                <div>
-                                    <p className="text-[10px] uppercase tracking-wider font-medium" style={{ color: tc.textMuted }}>New connection</p>
-                                    <p className="text-base font-bold" style={{ color: tc.textPrimary }}>{activeDef.label}</p>
+                                <div className="min-w-0">
+                                    <p className="text-[10px] uppercase tracking-wider font-medium break-words" style={{ color: tc.textMuted }}>{t('connector.newConnection')}</p>
+                                    <p className="text-base font-bold break-words" style={{ color: tc.textPrimary }}>{activeDef.label}</p>
                                 </div>
                             </div>
-                            <button onClick={closeModal} className="w-8 h-8 flex items-center justify-center rounded-full transition-colors text-lg" style={{ color: tc.textMuted }}>✕</button>
+                            <button onClick={closeModal} className="w-8 h-8 flex items-center justify-center rounded-full transition-colors text-lg" style={{ color: tc.textMuted }} aria-label={t('app.close')}>✕</button>
                         </div>
 
                         {/* OAuth banner */}
@@ -338,7 +339,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                                 </svg>
                                 <p className="text-xs text-blue-700 leading-snug">
-                                    Secured via <strong>{activeDef.label}</strong> OAuth. Fill in the name{activeDef.id === 'sharepoint' ? ' and tenant details' : ''}, then click <strong>Connect</strong>.
+                                    {t('connector.oauthSecured', { service: activeDef.label })} {activeDef.id === 'sharepoint' ? t('connector.sharepointDetails') : ''} {t('connector.thenClick')} <strong>{t('connector.connect')}</strong>.
                                 </p>
                             </div>
                         )}
@@ -370,7 +371,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         {/* Actions */}
                         <div className="flex gap-2">
                             <button onClick={closeModal} className="flex-1 text-sm px-4 py-2.5 rounded-xl transition-colors font-medium" style={tc.cancelBtn}>
-                                Cancel
+                                {t('connector.cancel')}
                             </button>
                             <button
                                 onClick={handleSaveConnector}
@@ -387,7 +388,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                                     </svg>
                                 )}
-                                {connectorSaving ? 'Connecting…' : activeDef.oauth ? `Connect ${activeDef.label}` : 'Save Connection'}
+                                {connectorSaving ? t('connector.connecting') : activeDef.oauth ? t('connector.connectService', { service: activeDef.label }) : t('connector.saveConnection')}
                             </button>
                         </div>
                     </div>
@@ -403,44 +404,44 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         <div className="flex items-center justify-center gap-2 mb-1">
                             <img
                                 src="/flexiAnalyseLogo_website.png"
-                                alt="Flexi Logo"
+                                alt={t('app.logoAlt')}
                                 className="h-9 w-auto flex-shrink-0"
                             />
                             <h1 className="text-3xl font-extrabold text-purple-600 shadow-text-preset flex-shrink-0 m-0 tracking-tight">Flexi</h1>
                         </div>
 
                         {/* Row 2: Rotating "can ..." — same size, centered, gradient */}
-                        <div className="h-10 flex items-center justify-center overflow-hidden">
+                        <div className="min-h-[2.5rem] flex items-center justify-center py-1">
                             {currentFeature === 0 && (
                                 <span
-                                    className="animate-fade-in-out text-3xl font-extrabold tracking-tight"
+                                    className="animate-fade-in-out text-xl sm:text-3xl font-extrabold tracking-tight text-center leading-tight"
                                     style={{ background: 'linear-gradient(90deg,#f59e0b,#f97316)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                                 >
-                                    can search your entire Organisation
+                                    {t('app.feature1')}
                                 </span>
                             )}
                             {currentFeature === 1 && (
                                 <span
-                                    className="animate-fade-in-out text-3xl font-extrabold tracking-tight"
+                                    className="animate-fade-in-out text-xl sm:text-3xl font-extrabold tracking-tight text-center leading-tight"
                                     style={{ background: 'linear-gradient(90deg,#8b5cf6,#ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                                 >
-                                    can make every employee an expert
+                                    {t('app.feature2')}
                                 </span>
                             )}
                             {currentFeature === 2 && (
                                 <span
-                                    className="animate-fade-in-out text-3xl font-extrabold tracking-tight"
+                                    className="animate-fade-in-out text-xl sm:text-3xl font-extrabold tracking-tight text-center leading-tight"
                                     style={{ background: 'linear-gradient(90deg,#3b82f6,#06b6d4)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                                 >
-                                    can query your databases in plain English
+                                    {t('app.feature3')}
                                 </span>
                             )}
                             {currentFeature === 3 && (
                                 <span
-                                    className="animate-fade-in-out text-3xl font-extrabold tracking-tight"
+                                    className="animate-fade-in-out text-xl sm:text-3xl font-extrabold tracking-tight text-center leading-tight"
                                     style={{ background: 'linear-gradient(90deg,#10b981,#3b82f6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}
                                 >
-                                    can detect anomalies before they escalate
+                                    {t('app.feature4')}
                                 </span>
                             )}
                         </div>
@@ -454,11 +455,12 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                                     </svg>
-                                    <p className="text-sm font-medium">{alertMessage}</p>
+                            <p className="text-sm font-medium">{alertMessage}</p>
                                 </div>
                                 <button
                                     onClick={() => setAlertMessage('')}
                                     className="text-white hover:text-gray-200 transition-colors flex-shrink-0"
+                                    aria-label={t('app.closeAlert')}
                                 >
                                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -492,6 +494,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             disabled={loading}
                             rows={isMobile ? 2 : 3}
                             style={{ fontSize: isMobile ? '14px' : '15px', color: tc.textPrimary }}
+                            aria-label={t('query.inputLabel')}
                         />
 
                         {/* Controls bar inside the textarea container */}
@@ -504,6 +507,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                         onClick={() => setIsModelPopupOpen(prev => !prev)}
                                         className={`rounded-md px-2 py-1 text-xs flex items-center gap-1.5 transition-colors cursor-pointer border ${isMobile ? 'font-medium' : 'font-normal'}`}
                                         style={tc.modelBtn}
+                                        aria-label={t('query.selectModel')}
                                     >
                                         <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -518,19 +522,19 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     {isModelPopupOpen && (
                     <div
                         ref={modelPopupRef}
-                        className="absolute bottom-full left-0 mb-2 w-56 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
+                        className="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
                     >
                                             <div className="px-3 py-2 border-b border-gray-100">
-                                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Select Model</p>
+                                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('model.selectModel')}</p>
                                             </div>
                                             <div className="max-h-64 overflow-y-auto">
                                                 {[
-                                                    { id: 'auto', name: 'Auto (recommended)', provider: 'Smart selector' },
-                                                    { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', provider: 'OpenAI' },
-                                                    { id: 'gpt-4o', name: 'GPT-4o', provider: 'OpenAI' },
-                                                    { id: 'gpt-5', name: 'GPT-5', provider: 'OpenAI' },
-                                                    { id: 'mistral', name: 'Mistral Medium', provider: 'Mistral AI' },
-                                                    { id: 'llama3', name: 'Llama 3.2', provider: 'Local' }
+                                                    { id: 'auto', name: t('model.auto'), provider: t('model.provider.smartSelector') },
+                                                    { id: 'gpt-3.5-turbo', name: t('model.gpt-3.5-turbo'), provider: t('model.provider.OpenAI') },
+                                                    { id: 'gpt-4o', name: t('model.gpt-4o'), provider: t('model.provider.OpenAI') },
+                                                    { id: 'gpt-5', name: t('model.gpt-5'), provider: t('model.provider.OpenAI') },
+                                                    { id: 'mistral', name: t('model.mistral'), provider: t('model.provider.MistralAI') },
+                                                    { id: 'llama3', name: t('model.llama3'), provider: t('model.provider.Local') }
                                                 ].map((model) => (
                                                     <button
                                                         key={model.id}
@@ -543,15 +547,15 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                                         }`}
                                                     >
                                                         <div className="flex-1 min-w-0">
-                                                            <div className={`text-xs font-medium truncate ${
+                                                            <div className={`text-xs font-medium break-words whitespace-normal ${
                                                                 selectedModel === model.id ? 'text-blue-700' : 'text-gray-800'
                                                             }`}>
                                                                 {model.name}
                                                                 {model.id === 'gpt-5' && (
-                                                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-700">Latest</span>
+                                                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-700">{t('model.latest')}</span>
                                                                 )}
                                                             </div>
-                                                            <div className="text-[10px] text-gray-400 truncate">{model.provider}</div>
+                                                            <div className="text-[10px] text-gray-400 break-words whitespace-normal">{model.provider}</div>
                                                         </div>
                                                         {selectedModel === model.id && (
                                                             <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -570,6 +574,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         onClick={() => setResearchMode(researchMode === 'online' ? 'local' : 'online')}
                         className="rounded-md px-2 py-1 text-xs flex items-center gap-1 transition-colors border"
                         style={researchMode === 'online' ? tc.modeOnline : tc.modeLocal}
+                        aria-label={t('query.toggleMode')}
                     >
                                     {researchMode === 'online' ? (
                                         <>
@@ -611,6 +616,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             }
                             transition-all duration-200 border border-transparent
                         `}
+                        aria-label={t('query.submit')}
                     >
                                 {loading ? (
                                     <svg
@@ -642,10 +648,11 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         {CONNECTOR_DEFS.map(({ id, label, icon }) => (
                             <button
                                 key={id}
-                                title={`Connect ${label}`}
+                                title={t('connector.connectService', { service: label })}
                                 onClick={() => { setActiveConnector(id); setConnectorForm({}); setConnectorMsg(null); }}
                                 className="w-8 h-8 flex items-center justify-center rounded-full border hover:border-purple-400 hover:scale-110 hover:shadow-sm transition-all duration-200"
                                 style={tc.connBtn}
+                                aria-label={t('connector.connect', { service: label })}
                             >
                                 <span className="w-4 h-4 flex items-center justify-center">{icon}</span>
                             </button>

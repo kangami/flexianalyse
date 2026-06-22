@@ -202,7 +202,7 @@ const OperationsDiagram: React.FC = () => {
   const governanceRow = useInView(0.2);
 
   return (
-    <section className="pt-16 pb-8">
+    <section className="pt-10 pb-4">
       {/* Section headline */}
       <div
         ref={hero.ref}

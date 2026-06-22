@@ -54,7 +54,7 @@ const industries = [
 
 const UseCasesSection: React.FC = () => {
   return (
-    <section className="py-24 bg-white relative overflow-hidden">
+    <section className="py-16 bg-white relative overflow-hidden">
       {/* Faint grid */}
       <div
         className="absolute inset-0 pointer-events-none"

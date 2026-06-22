@@ -171,7 +171,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* ── Main page sections (white bg) ── */}
-      <div className="bg-white pt-8">
+      <div className="bg-white pt-4">
         <OperationsDiagram />
         <FeaturesSection />
         <UseCasesSection />

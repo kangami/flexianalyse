@@ -68,7 +68,7 @@ const FeaturesSection: React.FC = () => {
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
 
   return (
-    <section className="py-24 relative overflow-hidden" style={{ background: '#f8fafc' }}>
+    <section className="py-16 relative overflow-hidden" style={{ background: '#f8fafc' }}>
       <div className="absolute top-0 inset-x-0 h-px" style={{ background: 'linear-gradient(90deg,transparent,#bfdbfe,transparent)' }} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

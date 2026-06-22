@@ -27,7 +27,7 @@ const testimonials = [
 
 const TestimonialsSection: React.FC = () => {
   return (
-    <section className="py-20 sm:py-28 bg-gradient-to-br from-gray-50 to-white overflow-hidden">
+    <section className="py-14 sm:py-18 bg-gradient-to-br from-gray-50 to-white overflow-hidden">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-16 sm:mb-20">
           <h2 className="text-4xl sm:text-5xl font-extrabold text-gray-900 leading-tight mb-4">
