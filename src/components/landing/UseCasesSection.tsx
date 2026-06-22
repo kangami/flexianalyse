@@ -1,128 +1,129 @@
-import React, { useState, useEffect } from 'react';
-import { Briefcase, Hospital, ShoppingCart, Users, Banknote } from 'lucide-react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import React from 'react';
+import { Building2, Heart, ShoppingCart, Factory, Scale, Zap } from 'lucide-react';
 
-const useCases = [
+const stats = [
+  { value: '50+', label: 'Native Connectors', desc: 'Google Drive, SharePoint, Slack, SQL and more' },
+  { value: '10x',  label: 'Productivity Boost', desc: 'Per role, across every department' },
+  { value: '90%', label: 'Manual Work Eliminated', desc: 'Through AI automation and orchestration' },
+];
+
+const industries = [
   {
-    icon: <Hospital className="w-10 h-10 text-white" />,
-    title: "Healthcare",
-    description: "Predict patient outcomes, optimize treatment plans, and streamline hospital operations with AI-driven analytics.",
-    background: "bg-gradient-to-br from-blue-400 to-cyan-300",
-    textColor: "text-white"
+    icon: <Building2 className="w-6 h-6" />,
+    industry: 'Financial Services',
+    headline: 'Reconcile faster. Detect fraud earlier.',
+    items: ['AP/AR automation', 'Real-time anomaly detection', 'Audit-ready reporting'],
+    iconColor: '#059669', bg: '#f0fdf4', border: '#bbf7d0', dot: '#10b981',
   },
   {
-    icon: <Briefcase className="w-10 h-10 text-white" />,
-    title: "Finance",
-    description: "Detect fraud, analyze market trends, and automate risk assessment with real-time data processing.",
-    background: "bg-gradient-to-br from-green-500 to-emerald-400",
-    textColor: "text-white"
+    icon: <Heart className="w-6 h-6" />,
+    industry: 'Healthcare',
+    headline: 'Compliance without complexity.',
+    items: ['Patient data intelligence', 'HIPAA-compliant workflows', 'Automated compliance tracking'],
+    iconColor: '#dc2626', bg: '#fff1f2', border: '#fecdd3', dot: '#f43f5e',
   },
   {
-    icon: <ShoppingCart className="w-10 h-10 text-white" />,
-    title: "Retail",
-    description: "Personalize customer experiences, forecast demand, and optimize supply chains using AI insights.",
-    background: "bg-gradient-to-br from-purple-500 to-pink-400",
-    textColor: "text-white"
+    icon: <ShoppingCart className="w-6 h-6" />,
+    industry: 'Retail & E-Commerce',
+    headline: 'Unify supply chain intelligence.',
+    items: ['Demand forecasting', 'Supplier performance tracking', 'Inventory optimisation'],
+    iconColor: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff', dot: '#8b5cf6',
   },
   {
-    icon: <Users className="w-10 h-10 text-white" />,
-    title: "Education",
-    description: "Enhance learning outcomes with adaptive AI tools for personalized student engagement and assessment.",
-    background: "bg-gradient-to-br from-orange-400 to-yellow-300",
-    textColor: "text-gray-800"
+    icon: <Factory className="w-6 h-6" />,
+    industry: 'Manufacturing',
+    headline: 'Predict downtime before it happens.',
+    items: ['Asset health monitoring', 'Production line optimisation', 'Vendor SLA tracking'],
+    iconColor: '#c2410c', bg: '#fff7ed', border: '#fed7aa', dot: '#f97316',
   },
   {
-    icon: <Banknote className="w-10 h-10 text-white" />,
-    title: "Manufacturing",
-    description: "Improve operational efficiency, predict equipment failures, and optimize production lines with AI analytics.",
-    background: "bg-gradient-to-br from-gray-600 to-blue-500",
-    textColor: "text-white"
-  }
+    icon: <Scale className="w-6 h-6" />,
+    industry: 'Legal & Professional Services',
+    headline: 'Every contract. Every obligation. Zero misses.',
+    items: ['Contract lifecycle management', 'Risk & obligation tracking', 'Matter intelligence'],
+    iconColor: '#4338ca', bg: '#eef2ff', border: '#c7d2fe', dot: '#6366f1',
+  },
+  {
+    icon: <Zap className="w-6 h-6" />,
+    industry: 'Energy & Utilities',
+    headline: 'Monitor assets in real time.',
+    items: ['Asset & maintenance intelligence', 'Regulatory compliance', 'Field operations automation'],
+    iconColor: '#b45309', bg: '#fffbeb', border: '#fef3c7', dot: '#f59e0b',
+  },
 ];
 
 const UseCasesSection: React.FC = () => {
-  const [currentSlide, setCurrentSlide] = useState(0);
-  const [isAutoPlaying, setIsAutoPlaying] = useState(true);
-
-  // Auto-play functionality
-  useEffect(() => {
-    if (!isAutoPlaying) return;
-
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % useCases.length);
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isAutoPlaying]);
-
-  const nextSlide = () => {
-    setCurrentSlide((currentSlide + 1) % useCases.length);
-  };
-
-  const prevSlide = () => {
-    setCurrentSlide((currentSlide - 1 + useCases.length) % useCases.length);
-  };
-
-  const goToSlide = (index: number) => {
-    setCurrentSlide(index);
-  };
-
   return (
-    <section className="py-20 bg-gray-50">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 className="text-3xl font-bold text-center text-gray-900 mb-16">
-          Trusted by Industries Worldwide
-        </h2>
+    <section className="py-24 bg-white relative overflow-hidden">
+      {/* Faint grid */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{ backgroundImage: 'linear-gradient(rgba(30,64,175,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(30,64,175,0.03) 1px,transparent 1px)', backgroundSize: '40px 40px' }}
+      />
 
-        {/* Carousel Container */}
-        <div className="relative overflow-hidden">
-          {/* Carousel Slides */}
-          <div
-            className="flex transition-transform duration-500 ease-in-out"
-            style={{ transform: `translateX(-${currentSlide * 100}%)` }}
-          >
-            {useCases.map((useCase, index) => (
-              <div key={index} className="w-full flex-shrink-0 px-4">
-                <div className={`${useCase.background} p-8 rounded-xl text-center shadow-sm hover:shadow-lg transition-shadow mx-auto max-w-md`}>
-                  <div className="mb-6 flex justify-center">{useCase.icon}</div>
-                  <h3 className={`text-xl font-semibold ${useCase.textColor} mb-3`}>{useCase.title}</h3>
-                  <p className={`text-lg ${useCase.textColor} opacity-90`}>{useCase.description}</p>
-                </div>
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="text-center mb-16">
+          <span className="inline-block px-4 py-1.5 rounded-full text-sm font-semibold mb-5 text-blue-700" style={{ background: '#dbeafe' }}>
+            The Single Point of Truth
+          </span>
+          <h2 className="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
+            One Platform.<br />
+            <span style={{ background: 'linear-gradient(90deg,#3b82f6,#8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+              Every Operation.
+            </span>
+          </h2>
+          <p className="text-xl text-gray-500 max-w-2xl mx-auto">
+            FlexiAnalyse connects all your enterprise data sources into a single intelligent layer — so every question gets an instant, accurate answer.
+          </p>
+        </div>
+
+        {/* Stats row */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-20">
+          {stats.map(s => (
+            <div key={s.label} className="text-center rounded-2xl p-8 hover:shadow-lg transition-shadow" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+              <div
+                className="text-6xl font-black mb-2"
+                style={{ background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}
+              >
+                {s.value}
               </div>
-            ))}
-          </div>
+              <div className="text-lg font-bold text-gray-900 mb-1">{s.label}</div>
+              <div className="text-sm text-gray-500">{s.desc}</div>
+            </div>
+          ))}
+        </div>
 
-          {/* Navigation Arrows */}
-          <button
-            onClick={prevSlide}
-            className="absolute left-4 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-lg hover:bg-gray-50 transition-colors z-10"
-            aria-label="Previous slide"
-          >
-            <ChevronLeft className="w-6 h-6 text-blue-500" />
-          </button>
-          <button
-            onClick={nextSlide}
-            className="absolute right-4 top-1/2 transform -translate-y-1/2 bg-white p-2 rounded-full shadow-lg hover:bg-gray-50 transition-colors z-10"
-            aria-label="Next slide"
-          >
-            <ChevronRight className="w-6 h-6 text-blue-500" />
-          </button>
-
-          {/* Pagination Dots */}
-          <div className="flex justify-center mt-8 space-x-2">
-            {useCases.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => goToSlide(index)}
-                className={`w-3 h-3 rounded-full transition-colors ${
-                  currentSlide === index ? 'bg-blue-500' : 'bg-gray-300'
-                }`}
-                aria-label={`Go to slide ${index + 1}`}
-              />
-            ))}
-          </div>
-
-          {/* Auto-play is always enabled, pause button removed */}
+        {/* Industry grid */}
+        <div className="text-center mb-10">
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">Built for Every Industry</h3>
+          <p className="text-gray-500">FlexiAnalyse adapts to your sector's needs — out of the box.</p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {industries.map(ind => (
+            <div
+              key={ind.industry}
+              className="group rounded-2xl p-6 cursor-default transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5"
+              style={{ background: ind.bg, border: `1px solid ${ind.border}` }}
+            >
+              <div
+                className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
+                style={{ background: ind.bg, border: `1px solid ${ind.border}`, color: ind.iconColor }}
+              >
+                {ind.icon}
+              </div>
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">{ind.industry}</p>
+              <h4 className="text-base font-bold text-gray-900 mb-3">{ind.headline}</h4>
+              <ul className="space-y-1.5">
+                {ind.items.map(item => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-gray-600">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: ind.dot }} />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       </div>
     </section>

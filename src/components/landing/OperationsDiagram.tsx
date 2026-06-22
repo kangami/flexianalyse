@@ -202,17 +202,20 @@ const OperationsDiagram: React.FC = () => {
   const governanceRow = useInView(0.2);
 
   return (
-    <section className="pt-24 pb-8">
-      {/* Hero headline */}
+    <section className="pt-16 pb-8">
+      {/* Section headline */}
       <div
         ref={hero.ref}
         className={`text-center mb-12 px-4 transition-all duration-700 ${hero.inView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
       >
-        <h1 className="text-3xl sm:text-5xl font-extrabold text-gray-900 mb-3">
-         <span className="gradient-text-flow">Enterprise Operations Intelligence</span>
-        </h1>
-        <p className="text-lg text-gray-600 max-w-3xl mx-auto">
-          Connect your systems. Understand your operations. Orchestrate work with AI agents.
+        <span className="inline-block px-4 py-1.5 rounded-full text-sm font-semibold mb-5 text-blue-700" style={{ background: '#dbeafe' }}>
+          How It Works
+        </span>
+        <h2 className="text-3xl sm:text-5xl font-black text-gray-900 mb-3">
+          Connect <span className="text-blue-600">→</span> Understand <span className="text-purple-600">→</span> Orchestrate
+        </h2>
+        <p className="text-lg text-gray-500 max-w-2xl mx-auto">
+          Three steps to full enterprise intelligence — from raw data to autonomous AI agents acting on your behalf.
         </p>
       </div>
 
