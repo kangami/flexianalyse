@@ -1,5 +1,5 @@
 // src/components/landing/LandingPage.tsx
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Play } from 'lucide-react';
 import LoginModal from '../auth/LoginModal';
@@ -17,6 +17,8 @@ const heroStats = [
   { v: '24/7', l: 'AI intelligence' },
 ];
 
+const HERO_VIDEOS = ['/flexi-back1.mp4', '/flexi-back2.mp4', '/flexi-back3.mp4'];
+
 const footerLinks = [
   { label: 'Privacy Policy', to: '/privacy-policy' },
   { label: 'Terms of Use',   to: '/terms-of-use' },
@@ -30,6 +32,23 @@ const footerLinks = [
 const LandingPage: React.FC = () => {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
+  // ── Background video crossfade ────────────────────────
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([null, null, null]);
+  const activeRef  = useRef(0);
+  const [activeVideo, setActiveVideo] = useState(0);
+
+  useEffect(() => {
+    videoRefs.current[0]?.play().catch(() => {});
+  }, []);
+
+  const handleVideoEnd = (idx: number) => {
+    if (idx !== activeRef.current) return;
+    const next = (idx + 1) % HERO_VIDEOS.length;
+    activeRef.current = next;
+    setActiveVideo(next);
+    videoRefs.current[next]?.play().catch(() => {});
+  };
+
   return (
     <div className="w-full flex flex-col" style={{ minHeight: '100vh' }}>
       <Navbar />
@@ -39,6 +58,32 @@ const LandingPage: React.FC = () => {
         className="relative min-h-[100svh] flex items-center justify-center overflow-hidden pt-16"
         style={{ background: 'linear-gradient(135deg,#04091e 0%,#0a1640 45%,#0d1a50 70%,#120d35 100%)' }}
       >
+        {/* ── Background videos (crossfade) ── */}
+        {HERO_VIDEOS.map((src, idx) => (
+          <video
+            key={src}
+            ref={el => { videoRefs.current[idx] = el; }}
+            src={src}
+            muted
+            playsInline
+            preload="auto"
+            onEnded={() => handleVideoEnd(idx)}
+            className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+            style={{
+              filter: 'blur(3px) brightness(0.55)',
+              transform: 'scale(1.07)',
+              opacity: activeVideo === idx ? 1 : 0,
+              transition: 'opacity 1.4s ease-in-out',
+              zIndex: 0,
+            }}
+          />
+        ))}
+        {/* Dark overlay — keeps text legible over any video */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ background: 'rgba(4,9,30,0.52)', zIndex: 1 }}
+        />
+
         {/* Ambient orbs */}
         <div className="absolute -top-20 -left-32 w-[700px] h-[700px] rounded-full pointer-events-none"
              style={{ background: 'radial-gradient(circle,rgba(59,130,246,0.22),transparent 65%)', filter: 'blur(60px)' }} />
@@ -118,7 +163,7 @@ const LandingPage: React.FC = () => {
         </div>
 
         {/* Wave transition to white */}
-        <div className="absolute bottom-0 inset-x-0 pointer-events-none">
+        <div className="absolute bottom-0 inset-x-0 pointer-events-none" style={{ zIndex: 20 }}>
           <svg viewBox="0 0 1440 96" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" className="w-full block" style={{ height: '80px' }}>
             <path d="M0,48 C360,96 1080,0 1440,48 L1440,96 L0,96 Z" fill="white" />
           </svg>
