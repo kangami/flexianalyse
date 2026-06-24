@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from config.settings import configure_app
 from config.extensions import db, migrate
 from routes import register_routes
+from celery_app import make_celery
 
 load_dotenv()
 
@@ -77,6 +78,10 @@ def create_app():
     register_routes(app)
     #mount_legacy_ai_routes(app)
     
+    # Celery avec contexte Flask
+    celery = make_celery(app)
+    app.celery = celery
+
     return app
 
 def main():

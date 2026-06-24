@@ -59,6 +59,11 @@ class MCPHttpClient:
                 json=body,
                 headers=headers
             )
+            if r.is_error:
+                logger.error(
+                    "MCP server %s returned %s for tool=%r: %s",
+                    self.base_url, r.status_code, tool_name, r.text[:500]
+                )
             r.raise_for_status()
             return r.json()
 
@@ -110,6 +115,12 @@ class MCPHttpClient:
     async def search_files(self, query: str, access_token: str = None) -> dict:
         return await self.call_tool("search_files", {"query": query}, access_token=access_token)
 
+    async def download_drive_file_base64(self, file_id: str, mime_type: str, access_token: str = None) -> dict:
+        return await self.call_tool("download_file_base64", {
+            "file_id": file_id,
+            "mime_type": mime_type,
+        }, access_token=access_token)
+
     # --- Dropbox shortcuts ---
     async def list_dropbox_files(
         self,
@@ -139,6 +150,9 @@ class MCPHttpClient:
 
     async def download_dropbox_file_text(self, path: str, bearer_token: str = None) -> dict:
         return await self.call_tool("download_file_text", {"path": path}, bearer_token=bearer_token)
+
+    async def download_dropbox_file_base64(self, path: str, bearer_token: str = None) -> dict:
+        return await self.call_tool("download_file_base64", {"path": path}, bearer_token=bearer_token)
 
 
 def get_mcp_client(connector_type: str) -> MCPHttpClient:

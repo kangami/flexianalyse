@@ -304,3 +304,43 @@ async def download_dropbox_file_text():
     except Exception as e:
         logger.error(f"download_dropbox_file_text error: {e}")
         return jsonify({'error': str(e)}), 502
+
+# ============================================================================
+# INGESTION
+# ============================================================================
+
+@mcp_bp.route('/ingest/<connector_id>', methods=['POST'])
+async def trigger_ingestion(connector_id: str):
+    """Trigger ingestion for a specific connector."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    try:
+        from ai.agents.office_manager.ingestion.tasks import trigger_ingestion_for_connector
+        task = trigger_ingestion_for_connector.delay(
+            connector_id=connector_id,
+            org_id=org_id
+        )
+        return jsonify({
+            'status': 'queued',
+            'task_id': task.id,
+            'message': f'Ingestion started for connector {connector_id}'
+        })
+    except Exception as e:
+        logger.error(f"trigger_ingestion error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@mcp_bp.route('/ingest/status/<task_id>', methods=['GET'])
+async def ingestion_status(task_id: str):
+    """Check ingestion task status."""
+    try:
+        from celery_app import celery_app
+        task = celery_app.AsyncResult(task_id)
+        return jsonify({
+            'task_id': task_id,
+            'status': task.status,
+            'result': task.result if task.ready() else None,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

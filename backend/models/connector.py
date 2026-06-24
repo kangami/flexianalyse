@@ -30,6 +30,25 @@ class ConnectorCredentials(db.Model):
     deleted_at = db.Column(db.DateTime, nullable=True)
 
 
+class ConnectorSync(db.Model):
+    """Historique des synchronisations d'un connecteur."""
+    __tablename__ = 'connector_syncs'
+
+    id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
+    connector_id = db.Column(db.Uuid, db.ForeignKey('connectors.id', ondelete='CASCADE'), nullable=False)
+    started_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    completed_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String, nullable=False, default='running')  # running | completed | failed
+    resources_processed = db.Column(db.Integer, default=0)
+    resources_created = db.Column(db.Integer, default=0)
+    resources_updated = db.Column(db.Integer, default=0)
+    resources_deleted = db.Column(db.Integer, default=0)
+    error_message = db.Column(db.Text, nullable=True)
+    # Internal tracking — not exposed to callers
+    total_batches = db.Column(db.Integer, default=0)
+    batches_completed = db.Column(db.Integer, default=0)
+
+
 class ToolScope(db.Model):
     """Périmètre de données autorisé pour un connecteur."""
     __tablename__ = 'tool_scopes'

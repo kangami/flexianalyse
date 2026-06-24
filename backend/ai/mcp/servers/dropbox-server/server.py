@@ -62,6 +62,11 @@ async def download_file_text(access_token: str, path: str) -> dict:
     """Download a Dropbox file and return its text content"""
     return DropboxTools(access_token).download_file_text(path)
 
+@mcp.tool()
+async def download_file_base64(access_token: str, path: str) -> dict:
+    """Download a Dropbox file and return its raw bytes as base64 (binary-safe)"""
+    return DropboxTools(access_token).download_file_base64(path)
+
 
 # ---------------------------------------------------------------------------
 # Health / info
@@ -81,7 +86,7 @@ async def server_info():
         "transport": "HTTP",
         "platform": "Dropbox",
         "auth": "Bearer token (per-request)",
-        "tools": ["list_folder", "search_files", "get_metadata", "download_file_text"],
+        "tools": ["list_folder", "search_files", "get_metadata", "download_file_text", "download_file_base64"],
         "version": "1.0.0",
     }
 
@@ -121,6 +126,11 @@ async def list_tools():
             {
                 "name": "download_file_text",
                 "description": "Download a file and return its text content",
+                "params": {"path": "string (must start with '/')"},
+            },
+            {
+                "name": "download_file_base64",
+                "description": "Download a file and return its raw bytes as base64 (binary-safe, use for PDF/DOCX/XLSX)",
                 "params": {"path": "string (must start with '/')"},
             },
         ]
@@ -170,6 +180,8 @@ async def execute_tool(request: Request):
             return tools.get_metadata(path=params.get("path", ""))
         elif tool_name == "download_file_text":
             return tools.download_file_text(path=params.get("path", ""))
+        elif tool_name == "download_file_base64":
+            return tools.download_file_base64(path=params.get("path", ""))
         else:
             raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
     except HTTPException:

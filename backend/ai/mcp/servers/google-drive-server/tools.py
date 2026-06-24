@@ -199,6 +199,61 @@ class GoogleDriveTools:
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
+    def download_file_base64(self, file_id: str, mime_type: str) -> dict[str, Any]:
+        """Download a file and return its raw bytes as base64.
+
+        Handles Google native types (export to DOCX/PPTX/CSV) and all other
+        files (binary get_media). The base64 encoding is lossless for binary.
+
+        Args:
+            file_id:   Google Drive file ID.
+            mime_type: The file's MIME type (used to choose export vs download).
+
+        Returns:
+            Dictionary with content_base64 and the effective mime_type used.
+        """
+        import base64
+        import io
+        from googleapiclient.http import MediaIoBaseDownload
+
+        DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        EXPORT_MAP = {
+            'application/vnd.google-apps.document':     DOCX_MIME,
+            'application/vnd.google-apps.presentation': PPTX_MIME,
+            'application/vnd.google-apps.spreadsheet':  'text/csv',
+        }
+
+        try:
+            if mime_type in EXPORT_MAP:
+                export_mime = EXPORT_MAP[mime_type]
+                content = self.service.files().export(
+                    fileId=file_id, mimeType=export_mime
+                ).execute()
+                if not isinstance(content, bytes):
+                    content = content.encode('utf-8')
+                effective_mime = export_mime
+            else:
+                request = self.service.files().get_media(fileId=file_id)
+                buffer = io.BytesIO()
+                downloader = MediaIoBaseDownload(buffer, request)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                content = buffer.getvalue()
+                effective_mime = mime_type
+
+            return {
+                "status": "success",
+                "file_id": file_id,
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "mime_type": effective_mime,
+                "size": len(content),
+            }
+        except Exception as e:
+            logger.error(f"download_file_base64 failed for {file_id}: {e}")
+            return {"status": "error", "message": str(e)}
+
     def get_folder_tree(self, folder_id: Optional[str] = None, max_depth: int = 3, current_depth: int = 0) -> dict[str, Any]:
         """
         Get a tree structure of folders and documents

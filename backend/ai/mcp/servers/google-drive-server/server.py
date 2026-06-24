@@ -7,7 +7,7 @@ import os
 import sys
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 import uvicorn
 from fastmcp import FastMCP
 from tools import GoogleDriveTools
@@ -86,6 +86,11 @@ async def get_folder_tree(folder_id: str = None, max_depth: int = 3) -> dict:
     """Get folder hierarchy"""
     return gd_tools.get_folder_tree(folder_id, max_depth)
 
+@mcp.tool()
+async def download_file_base64(file_id: str, mime_type: str) -> dict:
+    """Download a Drive file and return its raw bytes as base64 (binary-safe)"""
+    return gd_tools.download_file_base64(file_id, mime_type)
+
 # ============================================================================
 # HTTP ENDPOINTS
 # ============================================================================
@@ -111,18 +116,23 @@ async def server_info():
             "list_folders",
             "get_file_info",
             "search_files",
-            "get_folder_tree"
+            "get_folder_tree",
+            "download_file_base64"
         ],
         "version": "1.0.0"
     }
 
 @app.post("/execute")
-async def execute_tool(tool_name: str, params: dict = None):
-    """Execute a tool via HTTP"""
+async def execute_tool(request: Request):
+    """Execute a tool via HTTP.\n\n    Body: {"tool_name": "...", "params": {...}}
+    """
+    body = await request.json()
+    tool_name = body.get("tool_name")
+    params = body.get("params") or {}
+
+    logger.info("Executing tool '%s' with params: %s", tool_name, params)
+
     try:
-        if params is None:
-            params = {}
-        
         if tool_name == "list_documents":
             return gd_tools.list_documents(
                 params.get("parent_id"),
@@ -145,10 +155,17 @@ async def execute_tool(tool_name: str, params: dict = None):
                 params.get("folder_id"),
                 params.get("max_depth", 3)
             )
+        elif tool_name == "download_file_base64":
+            return gd_tools.download_file_base64(
+                file_id=params.get("file_id", ""),
+                mime_type=params.get("mime_type", ""),
+            )
         else:
             raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Tool execution error: {str(e)}")
+        logger.error("Tool '%s' execution error: %s", tool_name, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tools")

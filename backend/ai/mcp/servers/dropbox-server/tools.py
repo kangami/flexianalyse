@@ -176,3 +176,34 @@ class DropboxTools:
             return {"status": "error", "message": str(exc.error), "detail": str(exc)}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
+
+    def download_file_base64(self, path: str) -> dict[str, Any]:
+        """Download a Dropbox file and return its raw bytes as base64.
+
+        Use this for binary files (PDF, DOCX, XLSX, images...) where a text
+        decode would corrupt the content. The base64 round-trip is lossless.
+
+        Args:
+            path: Dropbox path of the file to download.
+
+        Returns:
+            Dictionary with base64-encoded content.
+        """
+        import base64
+
+        try:
+            metadata, response = self.dbx.files_download(path)
+            content = response.content
+            return {
+                "status": "success",
+                "path": path,
+                "name": metadata.name,
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "size": metadata.size,
+            }
+        except AuthError as exc:
+            return {"status": "error", "message": "Authentication failed", "detail": str(exc)}
+        except ApiError as exc:
+            return {"status": "error", "message": str(exc.error), "detail": str(exc)}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
