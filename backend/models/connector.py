@@ -47,6 +47,7 @@ class ConnectorSync(db.Model):
     # Internal tracking — not exposed to callers
     total_batches = db.Column(db.Integer, default=0)
     batches_completed = db.Column(db.Integer, default=0)
+    kg_built = db.Column(db.Boolean, default=False)
 
 
 class ToolScope(db.Model):

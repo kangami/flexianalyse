@@ -275,7 +275,21 @@ def ingest_batch(
             created=results.get('done', 0),
             failed=results.get('failed', 0),
             total_batches=total_batches,
+            org_id=org_id,  
         )
+    
+    # Trigger knowledge graph build if this was the last batch
+    if sync_id:
+        _update_connector_sync(
+            sync_id=sync_id,
+            processed=len(batch),
+            created=results.get('done', 0),
+            failed=results.get('failed', 0),
+            total_batches=total_batches,
+            org_id=org_id,
+        )
+        logger.info(f"KG build triggered for org {org_id}")
+
 
     return results
 
@@ -391,6 +405,7 @@ def _update_connector_sync(
     created: int,
     failed: int,
     total_batches: int,
+    org_id: str = None
 ):
     """
     Atomically increment ConnectorSync counters.
@@ -424,6 +439,11 @@ def _update_connector_sync(
             f"Sync {sync_id} finished — status={sync.status} "
             f"processed={sync.resources_processed} created={sync.resources_created}"
         )
+        if org_id and sync.status == 'completed' and not sync.kg_built:
+            sync.kg_built = True
+            db.session.commit()
+            build_knowledge_graph.delay(org_id=org_id)
+            logger.info(f"KG build triggered for org {org_id} after sync {sync_id}")
 
 
 # ============================================================================
@@ -603,3 +623,19 @@ def _mime_from_filename(filename: str) -> str:
         'js': 'text/javascript',
         'json': 'application/json',
     }.get(ext, 'text/plain')
+
+# ============================================================================
+# TASK 4 — KNOWLEDGE GRAPH BUILDER
+# ============================================================================
+@celery_app.task(bind=True, max_retries=3)
+def build_knowledge_graph(self, org_id: str, sync_id: str = None):
+    """Build the knowledge graph for an org after ingestion completes."""
+    logger.info(f"Building KG for org {org_id}")
+    try:
+        from ai.knowledge.knowledge_graph_builder import build_kg_for_org
+        result = build_kg_for_org(org_id)
+        logger.info(f"KG build complete for org {org_id}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"KG build failed for org {org_id}: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=60)

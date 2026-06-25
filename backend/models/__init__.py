@@ -9,6 +9,7 @@ from .rate_limit import RateLimit
 from .conversation import Conversation, Message, ToolCall, ToolApproval
 from .audit_log import AuditLog
 from .lead import Lead
+from .knowledge_graph import KGNode, KGEdge
 
 __all__ = [
     "Organization",
@@ -32,4 +33,6 @@ __all__ = [
     "ToolApproval",
     "AuditLog",
     "Lead",
+    "KGNode",
+    "KGEdge",
 ]

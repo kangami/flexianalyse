@@ -344,3 +344,54 @@ async def ingestion_status(task_id: str):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ============================================================================
+# KNOWLEDGE GRAPH
+# ============================================================================
+@mcp_bp.route('/knowledge-graph/build', methods=['POST'])
+async def build_knowledge_graph_endpoint():
+    """Trigger KG build for an org."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    try:
+        from ai.agents.office_manager.ingestion.tasks import build_knowledge_graph
+        task = build_knowledge_graph.delay(org_id=org_id)
+        return jsonify({
+            'status': 'queued',
+            'task_id': task.id,
+            'message': f'KG build started for org {org_id}'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@mcp_bp.route('/knowledge-graph/search', methods=['GET'])
+async def search_knowledge_graph():
+    """Semantic search across the org KG."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    query = request.args.get('q')
+    if not query:
+        return jsonify({'error': 'q param required'}), 400
+    node_types = request.args.getlist('type')
+    try:
+        from ai.knowledge.knowledge_graph_builder import KnowledgeGraphBuilder
+        builder = KnowledgeGraphBuilder(org_id)
+        nodes = builder.semantic_search(query, node_types or None, limit=10)
+        return jsonify({
+            'status': 'success',
+            'results': [
+                {
+                    'id': str(n.id),
+                    'type': n.node_type,
+                    'name': n.name,
+                    'connector': n.connector_type,
+                    'metadata': n.kgnode_metadata,
+                }
+                for n in nodes
+            ]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
