@@ -5,6 +5,7 @@ from config.settings import configure_app
 from config.extensions import db, migrate
 from routes import register_routes
 from celery_app import make_celery
+from admin import init_admin
 
 load_dotenv()
 
@@ -81,6 +82,9 @@ def create_app():
     # Celery avec contexte Flask
     celery = make_celery(app)
     app.celery = celery
+
+    # Initialiser Flask-Admin
+    init_admin(app)
 
     return app
 
