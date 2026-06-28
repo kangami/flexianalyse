@@ -26,6 +26,7 @@ from google_auth_oauthlib.flow import Flow
 
 from models.connector import ConnectorCredentials
 from services import locator
+from auth.oauth_result import oauth_popup_response
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ def google_drive_callback():
 
     if error:
         logger.warning("Google Drive OAuth error [%s]: %s", connector_id, error)
-        return redirect(f"{_FRONTEND_URL}?connector_error=google_drive&reason={error}")
+        return oauth_popup_response(_FRONTEND_URL, "error", "google_drive", connector_id, error)
 
     if not connector_id or not code:
         return jsonify({"error": "Missing state or code"}), 400
@@ -116,11 +117,16 @@ def google_drive_callback():
             locator.connector_credentials.create(new_creds)
 
         logger.info("Google Drive credentials stored for connector %s", connector_id)
-        return redirect(
-            f"{_FRONTEND_URL}?connector_connected=google_drive&id={connector_id}"
-        )
+
+        # Credentials are now available → start ingestion.
+        connector = locator.connectors.get_by_id(UUID(connector_id))
+        if connector:
+            from ai.agents.office_manager.ingestion.tasks import start_ingestion
+            start_ingestion(connector_id, str(connector.organization_id))
+
+        return oauth_popup_response(_FRONTEND_URL, "success", "google_drive", connector_id)
     except Exception as exc:
         logger.error("Google Drive callback error [%s]: %s", connector_id, exc, exc_info=True)
-        return redirect(
-            f"{_FRONTEND_URL}?connector_error=google_drive&reason=token_exchange_failed"
+        return oauth_popup_response(
+            _FRONTEND_URL, "error", "google_drive", connector_id, "token_exchange_failed"
         )

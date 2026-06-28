@@ -86,6 +86,32 @@ class DropboxTools:
         except Exception as exc:
             return {"status": "error", "message": str(exc)}
 
+    def list_folder_continue(self, cursor: str) -> dict[str, Any]:
+        """Fetch the next page of a previous list_folder call.
+
+        Args:
+            cursor: The cursor returned by list_folder / list_folder_continue.
+
+        Returns:
+            Dictionary with the next batch of entries and pagination state.
+        """
+        try:
+            result: ListFolderResult = self.dbx.files_list_folder_continue(cursor)
+            entries = [self._serialize_entry(e) for e in result.entries]
+            return {
+                "status": "success",
+                "entries": entries,
+                "has_more": result.has_more,
+                "cursor": result.cursor,
+                "count": len(entries),
+            }
+        except AuthError as exc:
+            return {"status": "error", "message": "Authentication failed", "detail": str(exc)}
+        except ApiError as exc:
+            return {"status": "error", "message": str(exc.error), "detail": str(exc)}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
     def search_files(
         self, query: str, path: str = "", limit: int = 20
     ) -> dict[str, Any]:

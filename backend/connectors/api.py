@@ -41,6 +41,7 @@ import logging
 from uuid import UUID
 
 from flask import request, jsonify
+from sqlalchemy import func
 
 from services import locator
 from models.connector import Connector, ConnectorCredentials
@@ -49,6 +50,10 @@ from services.encryption_service import EncryptionService
 
 logger = logging.getLogger(__name__)
 encryption_service = EncryptionService()
+
+# OAuth connectors only have usable credentials AFTER their OAuth callback,
+# so their ingestion is started there — not at connector-creation time.
+OAUTH_CONNECTOR_TYPES = {"google_drive", "sharepoint", "dropbox"}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,6 +72,68 @@ def _connector_to_dict(c: Connector) -> dict:
 
 def _err(msg: str, code: int = 400):
     return jsonify({"error": msg}), code
+
+
+def _connector_progress(connector_id) -> dict:
+    """Ingestion completion for a connector.
+
+    Combines resource-level status counts with the latest sync's batch progress
+    so the UI can render a "% terminé" ring that animates during a run.
+    """
+    from config.extensions import db
+    from models.resource import Resource
+    from models.connector import ConnectorSync
+
+    cid = connector_id if isinstance(connector_id, UUID) else UUID(str(connector_id))
+
+    rows = (
+        db.session.query(Resource.ingestion_status, func.count(Resource.id))
+        .filter(Resource.connector_id == cid, Resource.deleted_at.is_(None))
+        .group_by(Resource.ingestion_status)
+        .all()
+    )
+    counts = {status: n for status, n in rows}
+    total      = sum(counts.values())
+    done       = counts.get('done', 0)
+    skipped    = counts.get('skipped', 0)
+    failed     = counts.get('failed', 0)
+    processing = counts.get('processing', 0)
+    pending    = counts.get('pending', 0)
+    finished   = done + skipped + failed
+
+    sync = (
+        db.session.query(ConnectorSync)
+        .filter(ConnectorSync.connector_id == cid)
+        .order_by(ConnectorSync.started_at.desc())
+        .first()
+    )
+    run_status = sync.status if sync else 'idle'
+
+    if run_status == 'running':
+        # Batch progress is the most reliable signal while resources are still
+        # being created; fall back to resource ratio. Cap below 100 until done.
+        if sync and sync.total_batches:
+            percent = round(100 * (sync.batches_completed or 0) / sync.total_batches)
+        elif total:
+            percent = round(100 * finished / total)
+        else:
+            percent = 0
+        percent = min(percent, 99)
+    elif run_status == 'completed' or (total and finished >= total):
+        percent = 100 if total else 0
+    else:  # 'failed' or 'idle'
+        percent = round(100 * finished / total) if total else 0
+
+    return {
+        "percent": percent,
+        "status": run_status,
+        "total": total,
+        "done": done,
+        "skipped": skipped,
+        "failed": failed,
+        "processing": processing,
+        "pending": pending,
+    }
 
 
 def _get_connector_or_404(connector_id: str):
@@ -92,7 +159,16 @@ def register(api_bp) -> None:  # noqa: C901
         if not org_id:
             return _err("X-Organization-Id header required")
         items = locator.connectors.list_by_organization(UUID(org_id))
-        return jsonify({"data": [_connector_to_dict(c) for c in items]})
+        data = []
+        for c in items:
+            d = _connector_to_dict(c)
+            try:
+                d["progress"] = _connector_progress(c.id)
+            except Exception as exc:
+                logger.warning("progress failed for connector %s: %s", c.id, exc)
+                d["progress"] = None
+            data.append(d)
+        return jsonify({"data": data})
 
     @api_bp.route("/connectors", methods=["POST"])
     def create_connector():
@@ -117,6 +193,7 @@ def register(api_bp) -> None:  # noqa: C901
         )
         connector = locator.connectors.create(connector)
 
+        ingestion_task_id = None
         if token:
             creds = ConnectorCredentials(
                 connector_id=connector.id,
@@ -124,7 +201,15 @@ def register(api_bp) -> None:  # noqa: C901
             )
             locator.connector_credentials.create(creds)
 
-        return jsonify(_connector_to_dict(connector)), 201
+            # Non-OAuth connectors (e.g. SQL) have usable credentials right now,
+            # so kick off ingestion immediately. OAuth ones start in their callback.
+            if connector_type not in OAUTH_CONNECTOR_TYPES:
+                from ai.agents.office_manager.ingestion.tasks import start_ingestion
+                ingestion_task_id = start_ingestion(connector.id, org_id)
+
+        payload = _connector_to_dict(connector)
+        payload["ingestion_task_id"] = ingestion_task_id
+        return jsonify(payload), 201
 
     @api_bp.route("/connectors/<connector_id>", methods=["GET"])
     def get_connector(connector_id: str):
@@ -144,6 +229,22 @@ def register(api_bp) -> None:  # noqa: C901
         if "status" in data:
             connector.status = data["status"]
         locator.connectors.update(connector)
+
+        # Optionally rotate the stored credential (e.g. new SQL connection URL).
+        token = data.get("token")
+        if token:
+            creds = locator.connector_credentials.get_by_connector(UUID(connector_id))
+            if creds:
+                creds.encrypted_token = encryption_service.encrypt(token)
+                locator.connector_credentials.update(creds)
+            else:
+                locator.connector_credentials.create(
+                    ConnectorCredentials(
+                        connector_id=UUID(connector_id),
+                        encrypted_token=encryption_service.encrypt(token),
+                    )
+                )
+
         return jsonify(_connector_to_dict(connector))
 
     @api_bp.route("/connectors/<connector_id>", methods=["DELETE"])
@@ -184,6 +285,19 @@ def register(api_bp) -> None:  # noqa: C901
             return jsonify(result.to_dict())
         except ValueError as exc:
             return _err(str(exc))
+
+    @api_bp.route("/connectors/<connector_id>/ingest", methods=["POST"])
+    def ingest_connector(connector_id: str):
+        """Launch the full ingestion pipeline (download → extract → embed → KG)
+        for an existing connector. This is what the sidebar 'sync' button calls."""
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        from ai.agents.office_manager.ingestion.tasks import start_ingestion
+        task_id = start_ingestion(connector.id, str(connector.organization_id))
+        if not task_id:
+            return _err("Failed to start ingestion (is the Celery worker running?)", 503)
+        return jsonify({"status": "started", "ingestion_task_id": task_id})
 
     # ------------------------------------------------------------------
     # MCP tools
@@ -254,6 +368,13 @@ def register(api_bp) -> None:  # noqa: C901
             }
             for r in items
         ]})
+
+    @api_bp.route("/connectors/<connector_id>/progress", methods=["GET"])
+    def connector_progress(connector_id: str):
+        _, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        return jsonify({"data": _connector_progress(UUID(connector_id))})
 
     # ------------------------------------------------------------------
     # Google Drive extras

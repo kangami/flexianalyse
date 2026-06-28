@@ -123,17 +123,35 @@ class DocumentExtractor:
     """
 
     def __init__(self):
-        # Docling converter — OCR enabled for scanned PDFs
-        pdf_options = PdfPipelineOptions()
-        pdf_options.do_ocr = True                    # OCR scanned pages
-        pdf_options.do_table_structure = True        # extract tables as structured data
-        #pdf_options.ocr_options.use_gpu = False      # CPU fallback (safe default)
+        # OCR (RapidOCR / ONNX Runtime) is very memory-heavy and OOMs
+        # (std::bad_alloc) on large/scanned PDFs. Most business PDFs are "native"
+        # (carry a text layer) and need no OCR. DOCLING_OCR controls this:
+        #   "auto"  (default) — OCR only PDFs with no detectable text layer
+        #   "true"            — always OCR
+        #   "false"           — never OCR
+        mode = os.getenv("DOCLING_OCR", "auto").strip().lower()
+        if mode in ("1", "true", "yes"):
+            mode = "true"
+        elif mode in ("0", "false", "no"):
+            mode = "false"
+        elif mode != "auto":
+            mode = "auto"
+        self._ocr_mode = mode
 
-        self._converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)
-            }
+        try:
+            self._image_scale = float(os.getenv("DOCLING_IMAGE_SCALE", "1.0"))
+        except (TypeError, ValueError):
+            self._image_scale = 1.0
+
+        # Default converter: NO OCR (fast, low memory) — used for native-text
+        # PDFs and every other semantic format.
+        self._converter = self._build_converter(do_ocr=False)
+        # OCR converter: built eagerly only when OCR is forced on, otherwise
+        # lazily the first time a scanned PDF is detected (saves memory).
+        self._ocr_converter = (
+            self._build_converter(do_ocr=True) if self._ocr_mode == "true" else None
         )
+        logger.info("Docling extractor ready (OCR mode=%s)", self._ocr_mode)
 
         self._hybrid_chunker = HybridChunker(
             tokenizer="BAAI/bge-small-en-v1.5",  # tokenizer for chunk sizing
@@ -148,8 +166,89 @@ class DocumentExtractor:
         )
 
     # =========================================================================
+    # OCR helpers
+    # =========================================================================
+
+    # Sample a few pages spread across the doc; below this many chars/page on
+    # average we treat the PDF as scanned (image-only) and enable OCR.
+    _OCR_SAMPLE_PAGES = 5
+    _OCR_MIN_CHARS_PER_PAGE = 30
+
+    def _build_converter(self, do_ocr: bool) -> DocumentConverter:
+        """Create a Docling converter with OCR on or off."""
+        pdf_options = PdfPipelineOptions()
+        pdf_options.do_ocr = do_ocr
+        pdf_options.do_table_structure = True
+        if do_ocr:
+            pdf_options.images_scale = self._image_scale
+        return DocumentConverter(
+            format_options={
+                InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)
+            }
+        )
+
+    def _get_ocr_converter(self) -> DocumentConverter:
+        """Lazily build (and cache) the OCR-enabled converter."""
+        if self._ocr_converter is None:
+            logger.info("Building OCR converter (scanned PDF detected)")
+            self._ocr_converter = self._build_converter(do_ocr=True)
+        return self._ocr_converter
+
+    def _pdf_has_text_layer(self, path: str) -> bool:
+        """Heuristic: does this PDF carry an extractable text layer (native PDF)
+        vs. being a scan (image-only)? Samples pages and measures text density.
+        On any failure, assume native — that skips OCR and avoids the OOM."""
+        try:
+            import pypdfium2 as pdfium
+        except Exception:
+            logger.warning("pypdfium2 unavailable — skipping OCR detection")
+            return True
+
+        pdf = None
+        try:
+            pdf = pdfium.PdfDocument(path)
+            n = len(pdf)
+            if n == 0:
+                return True
+
+            idxs = sorted({
+                int(i * (n - 1) / max(1, self._OCR_SAMPLE_PAGES - 1))
+                for i in range(min(self._OCR_SAMPLE_PAGES, n))
+            })
+            total_chars = 0
+            for i in idxs:
+                page = pdf[i]
+                textpage = page.get_textpage()
+                total_chars += len((textpage.get_text_range() or "").strip())
+                textpage.close()
+                page.close()
+
+            avg = total_chars / len(idxs)
+            has_text = avg >= self._OCR_MIN_CHARS_PER_PAGE
+            logger.info(
+                "PDF text-layer check: %.0f chars/page over %d sampled pages → %s",
+                avg, len(idxs), "native (no OCR)" if has_text else "scanned (OCR)",
+            )
+            return has_text
+        except Exception as e:
+            logger.warning("PDF text-layer detection failed (%s) — assuming native", e)
+            return True
+        finally:
+            if pdf is not None:
+                try:
+                    pdf.close()
+                except Exception:
+                    pass
+
+    # =========================================================================
     # PUBLIC
     # =========================================================================
+
+    def is_supported(self, mime_type: str, filename: str) -> bool:
+        """Cheap pre-download check: will this file type be processed at all?
+        Lets the ingestion pipeline skip huge unsupported binaries (ISO, APK,
+        MP4, images, archives...) BEFORE downloading them."""
+        return self._detect_format(mime_type or "", filename or "") is not None
 
     def extract(
         self,
@@ -239,7 +338,16 @@ class DocumentExtractor:
             tmp_path = tmp.name
 
         try:
-            result = self._converter.convert(tmp_path)
+            # Pick OCR vs no-OCR per PDF: always for "true", never for "false",
+            # and only for image-only (scanned) PDFs in "auto" mode.
+            converter = self._converter
+            if file_format == 'pdf':
+                if self._ocr_mode == 'true':
+                    converter = self._get_ocr_converter()
+                elif self._ocr_mode == 'auto' and not self._pdf_has_text_layer(tmp_path):
+                    converter = self._get_ocr_converter()
+
+            result = converter.convert(tmp_path)
             doc = result.document
 
             # --- Pass 1: HybridChunker (semantic, structure-aware) ---

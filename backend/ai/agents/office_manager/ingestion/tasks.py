@@ -8,13 +8,19 @@ Task hierarchy:
 """
 
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+import requests
+
+from sqlalchemy import or_
 
 from celery_app import celery_app
 from config.extensions import db
 from models.connector import Connector, ConnectorCredentials, ConnectorSync
 from models.resource import Resource, ResourceChunk
+from models.knowledge_graph import KGNode, KGEdge
 from services.encryption_service import EncryptionService
 from services.mcp_http_client import get_mcp_client
 from ai.ingestion.extractor import DocumentExtractor
@@ -23,6 +29,19 @@ from ai.ingestion.embedder import Embedder
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
+SQL_SAMPLE_ROWS = 20  # rows captured per table for semantic search (live data via Text-to-SQL)
+
+# Skip downloading files larger than this — avoids long downloads / ReadTimeouts
+# on huge binaries that we can't process anyway (ISO, video, archives...).
+MAX_DOWNLOAD_BYTES = int(os.getenv('MAX_INGEST_FILE_MB', '50')) * 1024 * 1024
+
+
+def _coerce_int(value) -> int:
+    """Best-effort int parse (file sizes arrive as str from some connectors)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 # Lazy singletons — initialized on first use inside a worker process,
 # NOT at import time (avoids model loading during Celery autodiscovery).
@@ -54,6 +73,62 @@ def _get_embedder() -> Embedder:
 # ============================================================================
 # HELPERS
 # ============================================================================
+
+def _resource_external_id(file_metadata: dict) -> str:
+    """Canonical external id for a remote item — same key used everywhere
+    (ingestion upsert AND deletion reconciliation must agree)."""
+    return file_metadata.get('id') or file_metadata.get('path_lower', '')
+
+
+def _reconcile_deletions(connector_id: str, org_id: str, remote_files: list[dict]) -> int:
+    """Soft-delete local resources that no longer exist at the source.
+
+    Compares the freshly listed remote ids against stored resources and removes
+    the stragglers (resource + its chunks + its KG node/edges).
+
+    Safety: if the remote listing is empty we skip entirely — an empty list is
+    indistinguishable from a listing failure, and mass-deleting on a transient
+    error would be catastrophic.
+    """
+    remote_ids = {
+        _resource_external_id(f) for f in remote_files
+        if _resource_external_id(f)
+    }
+    if not remote_ids:
+        logger.info("Reconciliation skipped (empty remote listing) for connector %s", connector_id)
+        return 0
+
+    stale = Resource.query.filter(
+        Resource.connector_id == UUID(connector_id),
+        Resource.organization_id == UUID(org_id),
+        Resource.deleted_at.is_(None),
+        Resource.external_id.isnot(None),
+        Resource.external_id.notin_(remote_ids),
+    ).all()
+
+    deleted = 0
+    now = datetime.now(timezone.utc)
+    for resource in stale:
+        ResourceChunk.query.filter_by(resource_id=resource.id).delete()
+
+        node = KGNode.query.filter_by(
+            org_id=org_id, external_id=f"resource:{resource.id}"
+        ).first()
+        if node:
+            KGEdge.query.filter(
+                or_(KGEdge.source_id == node.id, KGEdge.target_id == node.id)
+            ).delete(synchronize_session=False)
+            db.session.delete(node)
+
+        resource.deleted_at = now
+        resource.ingestion_status = 'deleted'
+        deleted += 1
+
+    db.session.commit()
+    if deleted:
+        logger.info("Reconciliation: soft-deleted %d stale resources for connector %s", deleted, connector_id)
+    return deleted
+
 
 def _should_skip(resource: Resource, file_metadata: dict) -> bool:
     """Returns True if file hasn't changed since last sync."""
@@ -152,12 +227,9 @@ def trigger_ingestion_for_connector(self, connector_id: str, org_id: str):
     """
     logger.info(f"Starting ingestion for connector {connector_id}")
 
-    sync = ConnectorSync(
-        connector_id=UUID(connector_id),
-        status='running',
-    )
-    db.session.add(sync)
-    db.session.commit()
+    # One sync row per connector, reused on every sync (set to 'running' now,
+    # flipped to 'completed'/'failed' when it ends).
+    sync = _reset_sync_for_connector(connector_id)
     sync_id = str(sync.id)
 
     try:
@@ -178,6 +250,14 @@ def trigger_ingestion_for_connector(self, connector_id: str, org_id: str):
             db.session.commit()
             return {'status': 'skipped', 'reason': 'unsupported connector type'}
 
+        # Reconcile deletions — drop local resources gone from the source.
+        # Limited to file connectors: SQL tables are rarely dropped and the SQL
+        # path uses a different external_id scheme (table name vs URI), so
+        # reconciling them could wrongly delete SQLSync-created resources.
+        deleted_count = 0
+        if connector.type in ('google_drive', 'dropbox'):
+            deleted_count = _reconcile_deletions(connector_id, org_id, files)
+
         # Create batches of BATCH_SIZE
         batches = [
             files[i:i + BATCH_SIZE]
@@ -187,10 +267,17 @@ def trigger_ingestion_for_connector(self, connector_id: str, org_id: str):
         if not batches:
             sync.status = 'completed'
             sync.completed_at = datetime.now(timezone.utc)
+            sync.resources_deleted = deleted_count
             db.session.commit()
-            return {'status': 'completed', 'total_files': 0, 'total_batches': 0}
+            return {
+                'status': 'completed',
+                'total_files': 0,
+                'total_batches': 0,
+                'deleted': deleted_count,
+            }
 
         sync.total_batches = len(batches)
+        sync.resources_deleted = deleted_count
         db.session.commit()
 
         logger.info(
@@ -215,6 +302,7 @@ def trigger_ingestion_for_connector(self, connector_id: str, org_id: str):
             'sync_id': sync_id,
             'total_files': len(files),
             'total_batches': len(batches),
+            'deleted': deleted_count,
         }
 
     except Exception as e:
@@ -267,18 +355,8 @@ def ingest_batch(
 
     logger.info(f"Batch {batch_idx + 1} complete: {results}")
 
-    # Update ConnectorSync atomically
-    if sync_id:
-        _update_connector_sync(
-            sync_id=sync_id,
-            processed=len(batch),
-            created=results.get('done', 0),
-            failed=results.get('failed', 0),
-            total_batches=total_batches,
-            org_id=org_id,  
-        )
-    
-    # Trigger knowledge graph build if this was the last batch
+    # Update ConnectorSync atomically. The last batch to report in marks the
+    # sync complete and triggers the KG build (both handled inside the helper).
     if sync_id:
         _update_connector_sync(
             sync_id=sync_id,
@@ -288,8 +366,6 @@ def ingest_batch(
             total_batches=total_batches,
             org_id=org_id,
         )
-        logger.info(f"KG build triggered for org {org_id}")
-
 
     return results
 
@@ -308,7 +384,7 @@ def ingest_single_file(
     Ingest a single file — download, extract, embed, save.
     Returns 'done', 'skipped', or 'failed'.
     """
-    external_id = file_metadata.get('id') or file_metadata.get('path_lower', '')
+    external_id = _resource_external_id(file_metadata)
     title = file_metadata.get('name', 'Untitled')
 
     # Upsert Resource record
@@ -338,6 +414,28 @@ def ingest_single_file(
         db.session.commit()
         logger.info(f"Skipped (unchanged): {title}")
         return 'skipped'
+
+    # Pre-download filter (file connectors only) — don't waste a download +
+    # ReadTimeout on unsupported types (ISO/APK/MP4/SVG...) or oversized files.
+    if connector_type != 'sql':
+        # Drive puts the MIME in 'type'; Dropbox has none → fall back to the
+        # filename extension inside is_supported().
+        mime = (file_metadata.get('type') or file_metadata.get('mimeType')
+                or file_metadata.get('mime_type') or '')
+        if not _get_extractor().is_supported(mime, title):
+            resource.ingestion_status = 'skipped'
+            resource.ingestion_error = f'Unsupported file type ({mime or "unknown"})'
+            db.session.commit()
+            logger.info(f"Skipped (unsupported type): {title}")
+            return 'skipped'
+
+        size = _coerce_int(file_metadata.get('size') or file_metadata.get('bytes'))
+        if size and size > MAX_DOWNLOAD_BYTES:
+            resource.ingestion_status = 'skipped'
+            resource.ingestion_error = f'File too large ({size} bytes)'
+            db.session.commit()
+            logger.info(f"Skipped (too large, {size} bytes): {title}")
+            return 'skipped'
 
     # Mark as processing
     resource.ingestion_status = 'processing'
@@ -399,6 +497,41 @@ def ingest_single_file(
 # SYNC TRACKING HELPER
 # ============================================================================
 
+def _reset_sync_for_connector(connector_id: str) -> ConnectorSync:
+    """Return the single ConnectorSync row for a connector (creating it if
+    missing), reset for a fresh run. Any duplicate/legacy rows are removed so
+    there is exactly ONE sync record per connector."""
+    cid = UUID(connector_id)
+    rows = (
+        ConnectorSync.query
+        .filter_by(connector_id=cid)
+        .order_by(ConnectorSync.started_at.desc())
+        .all()
+    )
+    sync = rows[0] if rows else None
+    for extra in rows[1:]:        # collapse historical duplicates → one row
+        db.session.delete(extra)
+
+    if sync is None:
+        sync = ConnectorSync(connector_id=cid)
+        db.session.add(sync)
+
+    now = datetime.now(timezone.utc)
+    sync.status = 'running'
+    sync.started_at = now
+    sync.completed_at = None
+    sync.error_message = None
+    sync.resources_processed = 0
+    sync.resources_created = 0
+    sync.resources_updated = 0
+    sync.resources_deleted = 0
+    sync.total_batches = 0
+    sync.batches_completed = 0
+    sync.kg_built = False
+    db.session.commit()
+    return sync
+
+
 def _update_connector_sync(
     sync_id: str,
     processed: int,
@@ -432,7 +565,11 @@ def _update_connector_sync(
     # Re-fetch to check if this was the last batch
     sync = ConnectorSync.query.get(UUID(sync_id))
     if sync and sync.batches_completed >= sync.total_batches:
-        sync.status = 'failed' if (sync.resources_processed - sync.resources_created) > 0 and sync.resources_created == 0 else 'completed'
+        # The sync completed: per-file failures (or files skipped as unchanged)
+        # are tracked on each Resource, NOT on the sync — a re-sync where nothing
+        # changed is a success, not a failure. Only listing/dispatch errors
+        # (handled in trigger_ingestion's except) mark the sync 'failed'.
+        sync.status = 'completed'
         sync.completed_at = datetime.now(timezone.utc)
         db.session.commit()
         logger.info(
@@ -440,15 +577,81 @@ def _update_connector_sync(
             f"processed={sync.resources_processed} created={sync.resources_created}"
         )
         if org_id and sync.status == 'completed' and not sync.kg_built:
-            sync.kg_built = True
-            db.session.commit()
-            build_knowledge_graph.delay(org_id=org_id)
-            logger.info(f"KG build triggered for org {org_id} after sync {sync_id}")
+            # Only (re)build the KG when something actually changed — new/updated
+            # resources ingested, or stale ones deleted. A no-change re-sync
+            # (everything skipped) must NOT trigger a build.
+            has_changes = (sync.resources_created or 0) > 0 or (sync.resources_deleted or 0) > 0
+            if has_changes:
+                sync.kg_built = True
+                db.session.commit()
+                build_knowledge_graph.delay(org_id=org_id)
+                logger.info(
+                    f"KG build triggered for org {org_id} after sync {sync_id} "
+                    f"(created={sync.resources_created}, deleted={sync.resources_deleted})"
+                )
+            else:
+                logger.info(
+                    f"Sync {sync_id}: no changes (all skipped) — KG build skipped"
+                )
 
 
 # ============================================================================
 # FILE LISTING HELPERS
 # ============================================================================
+
+_GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+def _get_drive_access_token(creds) -> str | None:
+    """Return a valid Google Drive access token, refreshing it when expired.
+
+    Google access tokens live ~1h. We keep the raw access token in
+    `encrypted_token` and the refresh token in `refresh_token`; when the token is
+    (near) expired we exchange the refresh token for a new one and persist it,
+    so re-syncs keep working indefinitely.
+    """
+    if not creds:
+        return None
+
+    now = datetime.now(timezone.utc)
+
+    # Still valid (with 60s headroom) → use as-is.
+    if creds.encrypted_token and creds.expires_at:
+        exp = creds.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp - now > timedelta(seconds=60):
+            return creds.encrypted_token
+
+    if not creds.refresh_token:
+        logger.warning("Drive token expired and no refresh_token — using stored token as-is")
+        return creds.encrypted_token
+
+    try:
+        resp = requests.post(
+            _GOOGLE_TOKEN_URL,
+            data={
+                "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+                "refresh_token": creds.refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        new_token = data["access_token"]
+        expires_in = int(data.get("expires_in", 3600))
+
+        creds.encrypted_token = new_token
+        creds.expires_at = now + timedelta(seconds=expires_in)
+        db.session.commit()
+        logger.info("Refreshed Google Drive access token (expires in %ss)", expires_in)
+        return new_token
+    except Exception as e:
+        logger.error("Google Drive token refresh failed: %s", e, exc_info=True)
+        return creds.encrypted_token
+
 
 def _list_drive_resources(connector: Connector, org_id: str) -> list[dict]:
     """List all Drive files for batching."""
@@ -461,10 +664,22 @@ def _list_drive_resources(connector: Connector, org_id: str) -> list[dict]:
 
     try:
         client = get_mcp_client('google_drive')
-        result = asyncio.run(
-            client.list_documents(max_results=1000, access_token=creds.encrypted_token)
-        )
-        return result.get('documents', [])
+        access_token = _get_drive_access_token(creds)
+        documents: list[dict] = []
+        page_token = None
+        while True:
+            result = asyncio.run(
+                client.list_documents(
+                    max_results=1000,
+                    access_token=access_token,
+                    page_token=page_token,
+                )
+            )
+            documents.extend(result.get('documents', []))
+            page_token = result.get('next_page_token')
+            if not page_token:
+                break
+        return documents
     except Exception as e:
         logger.error("Failed to list Google Drive files for connector %s: %s", connector.id, e)
         return []
@@ -482,12 +697,25 @@ def _list_dropbox_resources(connector: Connector, org_id: str) -> list[dict]:
     try:
         access_token = _get_encryption_service().decrypt(creds.encrypted_token)
         client = get_mcp_client('dropbox')
+
+        entries: list[dict] = []
         result = asyncio.run(
             client.list_dropbox_files(
-                path="", recursive=True, limit=1000, bearer_token=access_token
+                path="", recursive=True, limit=2000, bearer_token=access_token
             )
         )
-        return [e for e in result.get('entries', []) if e.get('tag') == 'file']
+        entries.extend(result.get('entries', []))
+
+        # Follow the cursor until Dropbox reports no more pages
+        while result.get('has_more') and result.get('cursor'):
+            result = asyncio.run(
+                client.continue_dropbox_files(
+                    cursor=result['cursor'], bearer_token=access_token
+                )
+            )
+            entries.extend(result.get('entries', []))
+
+        return [e for e in entries if e.get('tag') == 'file']
     except Exception as e:
         logger.error("Failed to list Dropbox files for connector %s: %s", connector.id, e)
         return []
@@ -554,8 +782,14 @@ def _download_drive_file(file_metadata: dict, creds) -> tuple[bytes, str]:
     mime_type = file_metadata.get('type', '')
     client = get_mcp_client('google_drive')
 
+    # The MCP server needs the user's OAuth token to act as them (the service
+    # account can't see their files); refresh it if expired.
+    access_token = _get_drive_access_token(creds)
+
     result = asyncio.run(
-        client.download_drive_file_base64(file_id=file_id, mime_type=mime_type)
+        client.download_drive_file_base64(
+            file_id=file_id, mime_type=mime_type, access_token=access_token
+        )
     )
 
     content_b64 = result.get('content_base64', '')
@@ -596,14 +830,15 @@ def _download_sql_table(file_metadata: dict, creds) -> tuple[bytes, str]:
     )
     sample = asyncio.run(
         client.query_database(
-            f"SELECT * FROM {table_name} LIMIT 100",
+            f"SELECT * FROM {table_name}",
+            limit=SQL_SAMPLE_ROWS,
             database_url=database_url
         )
     )
 
     content = f"# Table: {table_name}\n\n"
     content += f"## Schema\n{json.dumps(schema, indent=2)}\n\n"
-    content += f"## Sample rows (100)\n{json.dumps(sample, indent=2)}"
+    content += f"## Sample rows ({SQL_SAMPLE_ROWS})\n{json.dumps(sample, indent=2)}"
 
     return content.encode('utf-8'), 'text/plain'
 
@@ -627,6 +862,25 @@ def _mime_from_filename(filename: str) -> str:
 # ============================================================================
 # TASK 4 — KNOWLEDGE GRAPH BUILDER
 # ============================================================================
+def start_ingestion(connector_id: str, org_id: str) -> str | None:
+    """Enqueue the ingestion pipeline for a connector.
+
+    Safe to call from web request handlers (connector creation, OAuth callbacks):
+    it never raises — a broker hiccup must not fail the HTTP request. Returns the
+    Celery task id, or None if enqueuing failed.
+    """
+    try:
+        task = trigger_ingestion_for_connector.delay(str(connector_id), str(org_id))
+        logger.info("Ingestion enqueued for connector %s (task %s)", connector_id, task.id)
+        return task.id
+    except Exception as e:
+        logger.error(
+            "Failed to enqueue ingestion for connector %s: %s",
+            connector_id, e, exc_info=True
+        )
+        return None
+
+
 @celery_app.task(bind=True, max_retries=3)
 def build_knowledge_graph(self, org_id: str, sync_id: str = None):
     """Build the knowledge graph for an org after ingestion completes."""

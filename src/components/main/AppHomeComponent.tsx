@@ -87,6 +87,42 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [connectorSaving, setConnectorSaving] = useState(false);
     const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
+    const [isEnterpriseMode, setIsEnterpriseMode]   = useState(false);
+    const [enterpriseOrgId, setEnterpriseOrgId]     = useState(
+        () => localStorage.getItem('flexi_active_org') || ''
+    );
+    const [enterpriseLoading, setEnterpriseLoading] = useState(false);
+    const [enterpriseResult, setEnterpriseResult]   = useState<{
+        answer: string;
+        citations: { index: number; source: string; type: string; similarity: number }[];
+    } | null>(null);
+    const [enterpriseError, setEnterpriseError]     = useState('');
+
+    const handleEnterpriseSearch = async () => {
+        if (!query.trim() || !enterpriseOrgId) return;
+        setEnterpriseLoading(true);
+        setEnterpriseResult(null);
+        setEnterpriseError('');
+        try {
+            const res = await fetch(`${API_BASE}/api/mcp/search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Organization-Id': enterpriseOrgId,
+                },
+                body: JSON.stringify({ query: query.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || res.statusText);
+            setEnterpriseResult({ answer: data.answer, citations: data.citations || [] });
+            setQuery('');
+        } catch (e: unknown) {
+            setEnterpriseError((e as Error).message);
+        } finally {
+            setEnterpriseLoading(false);
+        }
+    };
+
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const modelPopupRef = useRef<HTMLDivElement>(null);
     const modelBadgeRef = useRef<HTMLDivElement>(null);
@@ -277,15 +313,11 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (query.trim() && !loading) {
-            // Check query limit for unauthenticated users
-            if (!isAuthenticated && !checkQueryLimit()) {
-                setAlertMessage(t('query.limitReached'));
-                return;
-            }
-            onQuerySubmit(query, researchMode);
-            setQuery('');
-        }
+        if (!query.trim() || loading || enterpriseLoading) return;
+        if (isEnterpriseMode) { handleEnterpriseSearch(); return; }
+        if (!isAuthenticated && !checkQueryLimit()) { setAlertMessage(t('query.limitReached')); return; }
+        onQuerySubmit(query, researchMode);
+        setQuery('');
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -569,6 +601,22 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     )}
                                 </div>
 
+                                {/* Enterprise search toggle */}
+                                <button
+                                    onClick={() => { setIsEnterpriseMode(m => !m); setEnterpriseResult(null); setEnterpriseError(''); }}
+                                    className="rounded-md px-2 py-1 text-xs flex items-center gap-1 transition-colors border"
+                                    style={isEnterpriseMode
+                                        ? { background: '#7c3aed', color: '#fff', borderColor: '#6d28d9' }
+                                        : tc.modeLocal}
+                                    title="Toggle Enterprise Search mode"
+                                >
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+                                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                                    </svg>
+                                    Enterprise
+                                </button>
+
                                 {/* Research mode toggle */}
                     <button
                         onClick={() => setResearchMode(researchMode === 'online' ? 'local' : 'online')}
@@ -643,18 +691,91 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
                     </div>
 
+                    {/* ─── Enterprise Search: org input + results ─── */}
+                    {isEnterpriseMode && (
+                        <div className="mt-3 flex flex-col gap-3">
+                            {/* Org ID input */}
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium flex-shrink-0" style={{ color: tc.textMuted }}>Org ID</span>
+                                <input
+                                    type="text"
+                                    value={enterpriseOrgId}
+                                    onChange={e => {
+                                        setEnterpriseOrgId(e.target.value);
+                                        localStorage.setItem('flexi_active_org', e.target.value);
+                                    }}
+                                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                                    className="flex-1 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                                    style={{
+                                        background: tc.inputBg,
+                                        border: `1px solid ${tc.inputBorder}`,
+                                        color: tc.textPrimary,
+                                    }}
+                                />
+                            </div>
+
+                            {/* Loading indicator */}
+                            {enterpriseLoading && (
+                                <div className="flex items-center gap-2 text-xs" style={{ color: tc.textMuted }}>
+                                    <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
+                                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/>
+                                    </svg>
+                                    Enterprise agent running… (may take 10-20s)
+                                </div>
+                            )}
+
+                            {/* Error */}
+                            {enterpriseError && (
+                                <p className="text-xs px-1" style={{ color: '#ef4444' }}>{enterpriseError}</p>
+                            )}
+
+                            {/* Result panel */}
+                            {enterpriseResult && (
+                                <div className="rounded-xl p-4 text-sm" style={{ background: tc.ctrlBg, border: `1px solid ${tc.ctrlBorder}` }}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="font-semibold text-xs uppercase tracking-wider" style={{ color: tc.textMuted }}>Answer</p>
+                                        <button
+                                            onClick={() => setEnterpriseResult(null)}
+                                            className="text-xs opacity-50 hover:opacity-100 transition-opacity"
+                                            style={{ color: tc.textMuted }}
+                                        >✕</button>
+                                    </div>
+                                    <p className="leading-relaxed whitespace-pre-wrap mb-3" style={{ color: tc.textPrimary }}>
+                                        {enterpriseResult.answer}
+                                    </p>
+                                    {enterpriseResult.citations.length > 0 && (
+                                        <>
+                                            <p className="text-xs font-semibold mb-1.5" style={{ color: tc.textMuted }}>Sources</p>
+                                            <div className="flex flex-col gap-1">
+                                                {enterpriseResult.citations.map(c => (
+                                                    <div key={c.index} className="flex items-center gap-2 text-xs" style={{ color: tc.textMuted }}>
+                                                        <span className="font-bold w-5 flex-shrink-0">[{c.index}]</span>
+                                                        <span className="flex-1 truncate">{c.source}</span>
+                                                        <span className="flex-shrink-0 tabular-nums">{Math.round(c.similarity * 100)}%</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* ─── Connector icon strip (below form) ─── */}
-                    <div className="mt-3 flex items-center justify-center gap-3">
+                    <div className="mt-3 flex items-center justify-center flex-wrap gap-2">
                         {CONNECTOR_DEFS.map(({ id, label, icon }) => (
                             <button
                                 key={id}
                                 title={t('connector.connectService', { service: label })}
                                 onClick={() => { setActiveConnector(id); setConnectorForm({}); setConnectorMsg(null); }}
-                                className="w-8 h-8 flex items-center justify-center rounded-full border hover:border-purple-400 hover:scale-110 hover:shadow-sm transition-all duration-200"
+                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border hover:border-purple-400 hover:scale-105 hover:shadow-sm transition-all duration-200"
                                 style={tc.connBtn}
                                 aria-label={t('connector.connect', { service: label })}
                             >
-                                <span className="w-4 h-4 flex items-center justify-center">{icon}</span>
+                                <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center">{icon}</span>
+                                <span className="text-xs font-medium whitespace-nowrap" style={{ color: tc.textMuted }}>{label}</span>
                             </button>
                         ))}
                     </div>

@@ -129,34 +129,40 @@ async def execute_tool(request: Request):
     body = await request.json()
     tool_name = body.get("tool_name")
     params = body.get("params") or {}
+    access_token = body.get("access_token")
 
     logger.info("Executing tool '%s' with params: %s", tool_name, params)
 
     try:
+        # Act as the user when an OAuth token is supplied (the service account
+        # cannot see a user's personal Drive); otherwise use the global account.
+        tools = GoogleDriveTools.from_access_token(access_token) if access_token else gd_tools
+
         if tool_name == "list_documents":
-            return gd_tools.list_documents(
+            return tools.list_documents(
                 params.get("parent_id"),
-                params.get("max_results", 50)
+                params.get("max_results", 50),
+                params.get("page_token"),
             )
         elif tool_name == "list_folders":
-            return gd_tools.list_folders(
+            return tools.list_folders(
                 params.get("parent_id"),
                 params.get("max_results", 50)
             )
         elif tool_name == "get_file_info":
-            return gd_tools.get_file_info(params.get("file_id", ""))
+            return tools.get_file_info(params.get("file_id", ""))
         elif tool_name == "search_files":
-            return gd_tools.search_files(
+            return tools.search_files(
                 params.get("query", ""),
                 params.get("max_results", 20)
             )
         elif tool_name == "get_folder_tree":
-            return gd_tools.get_folder_tree(
+            return tools.get_folder_tree(
                 params.get("folder_id"),
                 params.get("max_depth", 3)
             )
         elif tool_name == "download_file_base64":
-            return gd_tools.download_file_base64(
+            return tools.download_file_base64(
                 file_id=params.get("file_id", ""),
                 mime_type=params.get("mime_type", ""),
             )

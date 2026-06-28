@@ -1,4 +1,5 @@
 """SQL Database Tools for fastMcp"""
+import re
 from typing import Any
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import NullPool
@@ -56,7 +57,12 @@ class SQLTools:
             inspector = inspect(self.engine)
             columns = inspector.get_columns(table_name)
             primary_keys = inspector.get_pk_constraint(table_name)
-            
+
+            try:
+                foreign_keys = inspector.get_foreign_keys(table_name)
+            except Exception:
+                foreign_keys = []
+
             schema = {
                 "table": table_name,
                 "columns": [
@@ -68,7 +74,15 @@ class SQLTools:
                     }
                     for col in columns
                 ],
-                "primary_keys": primary_keys.get("constrained_columns", [])
+                "primary_keys": primary_keys.get("constrained_columns", []),
+                "foreign_keys": [
+                    {
+                        "columns": fk.get("constrained_columns", []),
+                        "referred_table": fk.get("referred_table"),
+                        "referred_columns": fk.get("referred_columns", []),
+                    }
+                    for fk in foreign_keys
+                ],
             }
             return {"status": "success", "schema": schema}
         except Exception as e:
@@ -83,16 +97,25 @@ class SQLTools:
             limit: Maximum number of rows to return
         """
         try:
+            # Normalize: drop trailing semicolons/whitespace before any rewriting
+            cleaned = sql_query.strip().rstrip(";").strip()
+
             # Validate it's a SELECT query
-            query_upper = sql_query.strip().upper()
-            if not query_upper.startswith("SELECT"):
+            if not cleaned.upper().startswith("SELECT"):
                 return {
                     "status": "error",
                     "message": "Only SELECT queries are allowed"
                 }
-            
+
+            # Only append LIMIT when the query doesn't already define one,
+            # otherwise we'd produce invalid SQL like "... LIMIT 100 LIMIT 1000".
+            if re.search(r"\blimit\b", cleaned, re.IGNORECASE):
+                final_query = cleaned
+            else:
+                final_query = f"{cleaned} LIMIT {limit}"
+
             with self.engine.connect() as conn:
-                result = conn.execute(text(f"{sql_query} LIMIT {limit}"))
+                result = conn.execute(text(final_query))
                 rows = result.fetchall()
                 columns = list(result.keys())
                 

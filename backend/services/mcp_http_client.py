@@ -2,10 +2,14 @@
 Simple HTTP client for shared MCP servers.
 For MVP: one shared server per connector type.
 """
+import os
 import httpx
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Larger timeout for file downloads (base64 of potentially big files).
+DOWNLOAD_TIMEOUT = float(os.getenv("MCP_DOWNLOAD_TIMEOUT", "180"))
 
 MCP_SERVERS = {
     "sql":          "http://localhost:3001",
@@ -42,6 +46,7 @@ class MCPHttpClient:
         database_url: str = None,
         access_token: str = None,
         bearer_token: str = None,
+        timeout: float = 30,
     ) -> dict:
         body = {"tool_name": tool_name, "params": params or {}}
         if database_url:
@@ -53,7 +58,7 @@ class MCPHttpClient:
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.post(
                 f"{self.base_url}/execute",
                 json=body,
@@ -106,20 +111,22 @@ class MCPHttpClient:
         folder_id: str = None,
         max_results: int = 50,
         access_token: str = None,
+        page_token: str = None,
     ) -> dict:
-        return await self.call_tool("list_documents", {
-            "parent_id": folder_id,
-            "max_results": max_results
-        }, access_token=access_token)
+        params = {"parent_id": folder_id, "max_results": max_results}
+        if page_token:
+            params["page_token"] = page_token
+        return await self.call_tool("list_documents", params, access_token=access_token)
 
     async def search_files(self, query: str, access_token: str = None) -> dict:
         return await self.call_tool("search_files", {"query": query}, access_token=access_token)
 
     async def download_drive_file_base64(self, file_id: str, mime_type: str, access_token: str = None) -> dict:
+        # Downloads can be large → allow more time than the default 30s.
         return await self.call_tool("download_file_base64", {
             "file_id": file_id,
             "mime_type": mime_type,
-        }, access_token=access_token)
+        }, access_token=access_token, timeout=DOWNLOAD_TIMEOUT)
 
     # --- Dropbox shortcuts ---
     async def list_dropbox_files(
@@ -133,6 +140,15 @@ class MCPHttpClient:
             "path": path,
             "recursive": recursive,
             "limit": limit,
+        }, bearer_token=bearer_token)
+
+    async def continue_dropbox_files(
+        self,
+        cursor: str,
+        bearer_token: str = None,
+    ) -> dict:
+        return await self.call_tool("list_folder_continue", {
+            "cursor": cursor,
         }, bearer_token=bearer_token)
 
     async def search_dropbox_files(
@@ -149,10 +165,16 @@ class MCPHttpClient:
         }, bearer_token=bearer_token)
 
     async def download_dropbox_file_text(self, path: str, bearer_token: str = None) -> dict:
-        return await self.call_tool("download_file_text", {"path": path}, bearer_token=bearer_token)
+        return await self.call_tool(
+            "download_file_text", {"path": path},
+            bearer_token=bearer_token, timeout=DOWNLOAD_TIMEOUT,
+        )
 
     async def download_dropbox_file_base64(self, path: str, bearer_token: str = None) -> dict:
-        return await self.call_tool("download_file_base64", {"path": path}, bearer_token=bearer_token)
+        return await self.call_tool(
+            "download_file_base64", {"path": path},
+            bearer_token=bearer_token, timeout=DOWNLOAD_TIMEOUT,
+        )
 
 
 def get_mcp_client(connector_type: str) -> MCPHttpClient:

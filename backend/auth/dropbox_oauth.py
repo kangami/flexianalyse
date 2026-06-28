@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, redirect, request
 from models.connector import ConnectorCredentials
 from services import locator
 from services.encryption_service import EncryptionService
+from auth.oauth_result import oauth_popup_response
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def dropbox_callback():
 
     if error:
         logger.warning("Dropbox OAuth error [%s]: %s", connector_id, error)
-        return redirect(f"{_FRONTEND_URL}?connector_error=dropbox&reason={error}")
+        return oauth_popup_response(_FRONTEND_URL, "error", "dropbox", connector_id, error)
 
     if not connector_id or not code:
         return jsonify({"error": "Missing state or code"}), 400
@@ -112,9 +113,16 @@ def dropbox_callback():
             )
 
         logger.info("Dropbox credentials stored for connector %s", connector_id)
-        return redirect(f"{_FRONTEND_URL}?connector_connected=dropbox&id={connector_id}")
+
+        # Credentials are now available → start ingestion.
+        connector = locator.connectors.get_by_id(UUID(connector_id))
+        if connector:
+            from ai.agents.office_manager.ingestion.tasks import start_ingestion
+            start_ingestion(connector_id, str(connector.organization_id))
+
+        return oauth_popup_response(_FRONTEND_URL, "success", "dropbox", connector_id)
     except Exception as exc:
         logger.error("Dropbox callback error [%s]: %s", connector_id, exc, exc_info=True)
-        return redirect(
-            f"{_FRONTEND_URL}?connector_error=dropbox&reason=token_exchange_failed"
+        return oauth_popup_response(
+            _FRONTEND_URL, "error", "dropbox", connector_id, "token_exchange_failed"
         )

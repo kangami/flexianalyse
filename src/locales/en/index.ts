@@ -191,10 +191,10 @@ export const enUS = {
   'app.errors.dailyQueries': 'Error reading daily queries',
 
   // App Home Component
-  'app.feature1': 'can search across your entire Organisation',
-  'app.feature2': 'can help every employee work like an expert',
-  'app.feature3': 'can analyze your databases using plain English',
-  'app.feature4': 'can detect anomalies before they become problems',
+  'app.feature1': 'Can search across your entire Organisation',
+  'app.feature2': 'Can help every employee work like an expert',
+  'app.feature3': 'Can analyze your databases using plain text',
+  'app.feature4': 'Can detect anomalies and predict outcomes',
   'app.logoAlt': 'Flexi Logo',
   'app.close': 'Close',
   'app.closeAlert': 'Close alert',

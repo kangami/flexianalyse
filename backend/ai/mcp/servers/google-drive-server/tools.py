@@ -1,6 +1,7 @@
 """Google Drive Tools for fastMcp"""
 from typing import Any, Optional
 from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials as UserCredentials
 from googleapiclient.discovery import build
 import logging
 
@@ -12,19 +13,33 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 class GoogleDriveTools:
     """Tools for interacting with Google Drive"""
-    
-    def __init__(self, service_account_json: str):
+
+    def __init__(self, service_account_json: str = None, service=None):
         """
-        Initialize Google Drive tools with service account credentials
-        
+        Initialize Google Drive tools.
+
         Args:
-            service_account_json: Path to service account JSON file
+            service_account_json: Path to a service account JSON file (fallback).
+            service: A pre-built Google API service (e.g. from a user OAuth token).
         """
-        self.service = None
-        self._connect(service_account_json)
-    
+        if service is not None:
+            self.service = service
+        else:
+            self.service = None
+            self._connect(service_account_json)
+
+    @classmethod
+    def from_access_token(cls, access_token: str) -> "GoogleDriveTools":
+        """Build a client that acts AS THE USER, using their OAuth access token.
+
+        This is what connector ingestion needs — the service account cannot see
+        a user's personal Drive, so listing/download must use the user's token.
+        """
+        credentials = UserCredentials(token=access_token)
+        return cls(service=build("drive", "v3", credentials=credentials))
+
     def _connect(self, service_account_json: str):
-        """Establish Google Drive connection"""
+        """Establish Google Drive connection via a service account."""
         try:
             credentials = Credentials.from_service_account_file(
                 service_account_json,
@@ -36,30 +51,40 @@ class GoogleDriveTools:
             logger.error(f"✗ Google Drive connection failed: {str(e)}")
             raise
     
-    def list_documents(self, parent_id: Optional[str] = None, max_results: int = 50) -> dict[str, Any]:
+    def list_documents(
+        self,
+        parent_id: Optional[str] = None,
+        max_results: int = 50,
+        page_token: Optional[str] = None,
+    ) -> dict[str, Any]:
         """
         List all documents in a folder or root Drive
-        
+
         Args:
             parent_id: Folder ID to list contents (None for root)
-            max_results: Maximum number of results
-        
+            max_results: Maximum number of results per page
+            page_token: Opaque token to fetch the next page (from a prior call)
+
         Returns:
-            Dictionary with document list
+            Dictionary with document list and `next_page_token` (None on last page)
         """
         try:
             query = "mimeType != 'application/vnd.google-apps.folder' and trashed = false"
             if parent_id:
                 query += f" and '{parent_id}' in parents"
-            
-            results = self.service.files().list(
+
+            list_kwargs = dict(
                 q=query,
                 spaces="drive",
-                fields="files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink, owners)",
+                fields="nextPageToken, files(id, name, mimeType, createdTime, modifiedTime, size, webViewLink, owners)",
                 pageSize=max_results,
-                orderBy="modifiedTime desc"
-            ).execute()
-            
+                orderBy="modifiedTime desc",
+            )
+            if page_token:
+                list_kwargs["pageToken"] = page_token
+
+            results = self.service.files().list(**list_kwargs).execute()
+
             files = results.get("files", [])
             return {
                 "status": "success",
@@ -76,7 +101,8 @@ class GoogleDriveTools:
                     }
                     for f in files
                 ],
-                "count": len(files)
+                "count": len(files),
+                "next_page_token": results.get("nextPageToken"),
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}

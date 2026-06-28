@@ -170,6 +170,8 @@ async def execute_tool(request: Request):
                 recursive=bool(params.get("recursive", False)),
                 limit=int(params.get("limit", 50)),
             )
+        elif tool_name == "list_folder_continue":
+            return tools.list_folder_continue(cursor=params.get("cursor", ""))
         elif tool_name == "search_files":
             return tools.search_files(
                 query=params.get("query", ""),

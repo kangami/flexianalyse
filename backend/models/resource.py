@@ -57,6 +57,10 @@ class ResourceChunk(db.Model):
     token_count = db.Column(db.Integer, nullable=True)
     chunk_metadata = db.Column(db.JSON, default=dict)
 
+    # KG incremental processing — NULL = entities not yet extracted from this chunk.
+    # Reset to NULL whenever the chunk is (re)created during ingestion.
+    kg_processed_at = db.Column(db.DateTime, nullable=True, index=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class ResourceBinding(db.Model):

@@ -346,6 +346,61 @@ async def ingestion_status(task_id: str):
         return jsonify({'error': str(e)}), 500
 
 # ============================================================================
+# ENTERPRISE SEARCH (SearchAgent)
+# ============================================================================
+"""@mcp_bp.route('/search', methods=['POST'])
+def enterprise_search():
+    Run the SearchAgent (LangGraph multi-step) for an org.
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+
+    data = request.get_json(silent=True) or {}
+    query = data.get('query', '').strip()
+    if not query:
+        return jsonify({'error': 'query is required'}), 400
+
+    context = data.get('context', {})
+    try:
+        from ai.agents.office_manager.sub_agents.search_agent import SearchAgent
+        agent = SearchAgent(org_id=org_id)
+        result = agent.search(query=query, context=context)
+        return jsonify({
+            'status': 'success',
+            'answer': result.get('answer', ''),
+            'citations': result.get('citations', []),
+            'execution_trace': result.get('execution_trace', []),
+        })
+    except Exception as e:
+        logger.exception("Enterprise search failed for org %s", org_id)
+        return jsonify({'error': str(e)}), 500"""
+
+@mcp_bp.route('/search', methods=['POST'])
+async def enterprise_search():
+    """Enterprise Search Agent endpoint."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+
+    data  = request.get_json() or {}
+    query = data.get('query')
+    if not query:
+        return jsonify({'error': 'query required'}), 400
+
+    try:
+        from ai.agents.search.graph import run_search
+        result = run_search(
+            query=query,
+            org_id=org_id,
+            user_role=data.get('user_role', 'employee'),
+            allowed_connectors=data.get('allowed_connectors'),
+        )
+        return jsonify({'status': 'success', **result})
+    except Exception as e:
+        logger.error(f"Search error: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # KNOWLEDGE GRAPH
 # ============================================================================
 @mcp_bp.route('/knowledge-graph/build', methods=['POST'])

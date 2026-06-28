@@ -124,14 +124,15 @@ async def execute_tool(request: Request):
     params = body.get("params", {})
     database_url = body.get("database_url")  # ← URL dynamique par requête
 
-    # Utilise l'URL dynamique ou celle par défaut
-    if database_url:
-        from tools import SQLTools
-        tools = SQLTools(database_url)
-    else:
-        tools = sql_tools  # défaut global
-
     try:
+        # Build the client INSIDE the try so a connection failure surfaces as a
+        # readable error instead of an opaque "Internal Server Error".
+        if database_url:
+            from tools import SQLTools
+            tools = SQLTools(database_url)
+        else:
+            tools = sql_tools  # défaut global
+
         if tool_name == "show_tables":
             return tools.show_tables()
         elif tool_name == "query_database":
@@ -147,7 +148,10 @@ async def execute_tool(request: Request):
             return tools.get_table_indexes(params.get("table_name", ""))
         else:
             raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error("Tool '%s' failed: %s", tool_name, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tools")
