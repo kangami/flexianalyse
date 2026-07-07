@@ -48,7 +48,7 @@ const fetchAvailableModels = async (): Promise<ModelInfo[]> => {
     }
   } catch {}
   try {
-    const response = await fetch('https://flexianalyse.com/models');
+    const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://flexianalyse.com'}/models`);
     if (response.ok) {
       const data = await response.json();
       const models: ModelInfo[] = [

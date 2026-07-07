@@ -7,12 +7,12 @@ Query Understanding Node
 """
 import json
 import logging
-from openai import OpenAI
 
 from ai.agents.search.state import SearchState
+from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
-_client = OpenAI()
+_client = make_openai_client()
 
 _SYSTEM_PROMPT = """You are a search query analyst for an enterprise AI assistant.
 

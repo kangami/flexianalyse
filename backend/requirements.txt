@@ -63,3 +63,5 @@ tiktoken>=0.7.0
 pgvector
 openpyxl>=3.1.0
 onnxruntime
+langdetect>=1.0.9
+langsmith>=0.1.0

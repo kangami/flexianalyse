@@ -25,6 +25,7 @@ from services.encryption_service import EncryptionService
 from services.mcp_http_client import get_mcp_client
 from ai.ingestion.extractor import DocumentExtractor
 from ai.ingestion.embedder import Embedder
+from ai.ingestion.router import classify_document
 
 logger = logging.getLogger(__name__)
 
@@ -194,8 +195,18 @@ def _save_chunks(resource: Resource, extraction_result):
     if not extraction_result.chunks:
         return
 
-    # Embed all chunks in one batch call
-    texts = [c.content for c in extraction_result.chunks]
+    # Embed each chunk WITH its document title + section as context (contextual
+    # retrieval): an ambiguous chunk like "Net à payer : 1373,22" becomes
+    # "Bulletin-Paie-Bernis › Salaire\nNet à payer : 1373,22", which the dense
+    # retriever can match to a person/topic query. The raw content is stored
+    # unchanged; only the embedded text is enriched.
+    doc_title = resource.title or ''
+
+    def _embed_text(c) -> str:
+        prefix = ' › '.join(p for p in (doc_title, c.section_title or '') if p)
+        return f"{prefix}\n{c.content}" if prefix else c.content
+
+    texts = [_embed_text(c) for c in extraction_result.chunks]
     embeddings = _get_embedder().embed_chunks(texts)
 
     for chunk, embedding in zip(extraction_result.chunks, embeddings):
@@ -387,6 +398,23 @@ def ingest_single_file(
     external_id = _resource_external_id(file_metadata)
     title = file_metadata.get('name', 'Untitled')
 
+    # Pre-filter BEFORE any DB write — unsupported types (ISO/APK/MP4/SVG...) and
+    # oversized files are NEVER persisted as resources (no junk 'skipped' rows,
+    # and no wasted download / ReadTimeout). File connectors only.
+    if connector_type != 'sql':
+        # Drive puts the MIME in 'type'; Dropbox has none → fall back to the
+        # filename extension inside is_supported().
+        mime = (file_metadata.get('type') or file_metadata.get('mimeType')
+                or file_metadata.get('mime_type') or '')
+        if not _get_extractor().is_supported(mime, title):
+            logger.info(f"Skipped (unsupported type, not saved): {title}")
+            return 'skipped'
+
+        size = _coerce_int(file_metadata.get('size') or file_metadata.get('bytes'))
+        if size and size > MAX_DOWNLOAD_BYTES:
+            logger.info(f"Skipped (too large, not saved, {size} bytes): {title}")
+            return 'skipped'
+
     # Upsert Resource record
     resource = Resource.query.filter_by(
         organization_id=org_id,
@@ -408,34 +436,13 @@ def ingest_single_file(
         db.session.add(resource)
         db.session.flush()
 
-    # Skip if unchanged
+    # Skip if unchanged — the resource already exists and is valid, so we keep
+    # it (only NEW unsupported/oversized files are filtered, above, with no row).
     if _should_skip(resource, file_metadata):
         resource.ingestion_status = 'skipped'
         db.session.commit()
         logger.info(f"Skipped (unchanged): {title}")
         return 'skipped'
-
-    # Pre-download filter (file connectors only) — don't waste a download +
-    # ReadTimeout on unsupported types (ISO/APK/MP4/SVG...) or oversized files.
-    if connector_type != 'sql':
-        # Drive puts the MIME in 'type'; Dropbox has none → fall back to the
-        # filename extension inside is_supported().
-        mime = (file_metadata.get('type') or file_metadata.get('mimeType')
-                or file_metadata.get('mime_type') or '')
-        if not _get_extractor().is_supported(mime, title):
-            resource.ingestion_status = 'skipped'
-            resource.ingestion_error = f'Unsupported file type ({mime or "unknown"})'
-            db.session.commit()
-            logger.info(f"Skipped (unsupported type): {title}")
-            return 'skipped'
-
-        size = _coerce_int(file_metadata.get('size') or file_metadata.get('bytes'))
-        if size and size > MAX_DOWNLOAD_BYTES:
-            resource.ingestion_status = 'skipped'
-            resource.ingestion_error = f'File too large ({size} bytes)'
-            db.session.commit()
-            logger.info(f"Skipped (too large, {size} bytes): {title}")
-            return 'skipped'
 
     # Mark as processing
     resource.ingestion_status = 'processing'
@@ -455,8 +462,21 @@ def ingest_single_file(
             db.session.commit()
             return 'failed'
 
-        # Extract + chunk
-        extraction = _get_extractor().extract(raw_content, mime_type, title)
+        # Adaptive ingestion router — classify the document and pick a strategy.
+        extractor = _get_extractor()
+        file_format = extractor.detect_format(mime_type, title)
+        sample = extractor.sample_text(raw_content, file_format, title) if file_format else ""
+        route = classify_document(file_format or '', title, sample)
+        # Record the routing decision on the resource (visibility + future filtering).
+        resource.ressource_metadata = {
+            **(file_metadata or {}),
+            "doc_type": route.doc_type,
+            "ingestion_strategy": route.strategy,
+            "route_confidence": route.confidence,
+        }
+
+        # Extract + chunk (strategy-aware; generic path until per-strategy is wired)
+        extraction = extractor.extract(raw_content, mime_type, title, strategy=route.strategy)
 
         if not extraction.success:
             if extraction.file_format == 'unsupported':
@@ -685,6 +705,61 @@ def _list_drive_resources(connector: Connector, org_id: str) -> list[dict]:
         return []
 
 
+_DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
+
+
+def _get_dropbox_access_token(creds) -> str | None:
+    """Return a valid Dropbox access token, refreshing via the stored refresh
+    token when expired (Dropbox short-lived tokens last ~4h). Both the access
+    token and refresh token are stored ENCRYPTED for Dropbox."""
+    if not creds or not creds.encrypted_token:
+        return None
+    enc = _get_encryption_service()
+    now = datetime.now(timezone.utc)
+
+    # Still valid (with 60s headroom)?
+    if creds.expires_at:
+        exp = creds.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp - now > timedelta(seconds=60):
+            try:
+                return enc.decrypt(creds.encrypted_token)
+            except Exception:
+                pass
+
+    if not creds.refresh_token:
+        logger.warning("Dropbox token expired and no refresh_token stored")
+        try:
+            return enc.decrypt(creds.encrypted_token)
+        except Exception:
+            return None
+
+    try:
+        refresh_token = enc.decrypt(creds.refresh_token)
+        resp = requests.post(
+            _DROPBOX_TOKEN_URL,
+            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            auth=(os.getenv("DROPBOX_CLIENT_ID"), os.getenv("DROPBOX_CLIENT_SECRET")),
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        new_token = data["access_token"]
+        expires_in = int(data.get("expires_in", 14400))
+        creds.encrypted_token = enc.encrypt(new_token)
+        creds.expires_at = now + timedelta(seconds=expires_in)
+        db.session.commit()
+        logger.info("Refreshed Dropbox access token (expires in %ss)", expires_in)
+        return new_token
+    except Exception as e:
+        logger.error("Dropbox token refresh failed: %s", e, exc_info=True)
+        try:
+            return enc.decrypt(creds.encrypted_token)
+        except Exception:
+            return None
+
+
 def _list_dropbox_resources(connector: Connector, org_id: str) -> list[dict]:
     """List all Dropbox files for batching."""
     import asyncio
@@ -695,7 +770,7 @@ def _list_dropbox_resources(connector: Connector, org_id: str) -> list[dict]:
         return []
 
     try:
-        access_token = _get_encryption_service().decrypt(creds.encrypted_token)
+        access_token = _get_dropbox_access_token(creds)
         client = get_mcp_client('dropbox')
 
         entries: list[dict] = []
@@ -704,6 +779,13 @@ def _list_dropbox_resources(connector: Connector, org_id: str) -> list[dict]:
                 path="", recursive=True, limit=2000, bearer_token=access_token
             )
         )
+        # Surface auth/API errors instead of silently treating them as "0 files".
+        if result.get('status') == 'error':
+            logger.error(
+                "Dropbox listing failed for connector %s: %s",
+                connector.id, result.get('message') or result.get('detail') or result,
+            )
+            return []
         entries.extend(result.get('entries', []))
 
         # Follow the cursor until Dropbox reports no more pages
@@ -802,7 +884,7 @@ def _download_dropbox_file(file_metadata: dict, creds) -> tuple[bytes, str]:
     """Download a Dropbox file as raw bytes (binary-safe)."""
     import asyncio
     import base64
-    access_token = _get_encryption_service().decrypt(creds.encrypted_token)
+    access_token = _get_dropbox_access_token(creds)
     client = get_mcp_client('dropbox')
 
     path = file_metadata.get('path_display') or file_metadata.get('path_lower')

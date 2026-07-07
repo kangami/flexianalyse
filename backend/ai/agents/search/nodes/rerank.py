@@ -6,12 +6,12 @@ Reranking Node
 """
 import json
 import logging
-from openai import OpenAI
 
 from ai.agents.search.state import SearchState
+from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
-_client = OpenAI()
+_client = make_openai_client()
 
 RRF_K         = 60    # RRF constant
 TOP_N_RERANK  = 20    # candidates sent to cross-encoder

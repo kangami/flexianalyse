@@ -22,7 +22,11 @@ from typing import Optional
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    RapidOcrOptions,
+    PictureDescriptionApiOptions,
+)
 from docling.chunking import HybridChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -81,6 +85,16 @@ FIXED_FORMATS    = {'text', 'csv', 'xlsx', 'sheet'}
 
 FIXED_CHUNK_SIZE    = int(os.getenv('CHUNK_SIZE', '500'))
 FIXED_CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '50'))
+
+# Minimum fraction of the document's text the structure-aware chunker must
+# capture; below this we rebuild from the full markdown so no content is lost.
+EXTRACT_MIN_COVERAGE = float(os.getenv('EXTRACT_MIN_COVERAGE', '0.85'))
+
+
+def _alnum_len(s: str) -> int:
+    """Count alphanumeric characters — a formatting-agnostic measure of how much
+    actual text content a string holds (ignores markdown pipes, '#', spaces)."""
+    return sum(1 for c in (s or '') if c.isalnum())
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +157,10 @@ class DocumentExtractor:
         except (TypeError, ValueError):
             self._image_scale = 1.0
 
+        # VLM image/chart description via GPT-4o-vision — OFF by default.
+        # FLEXIANALYSE_VLM=true → describe figures/charts/diagrams with GPT-4o.
+        self._vlm_enabled = os.getenv("FLEXIANALYSE_VLM", "false").lower() in ("1", "true", "yes")
+
         # Default converter: NO OCR (fast, low memory) — used for native-text
         # PDFs and every other semantic format.
         self._converter = self._build_converter(do_ocr=False)
@@ -151,7 +169,10 @@ class DocumentExtractor:
         self._ocr_converter = (
             self._build_converter(do_ocr=True) if self._ocr_mode == "true" else None
         )
-        logger.info("Docling extractor ready (OCR mode=%s)", self._ocr_mode)
+        logger.info(
+            "Docling extractor ready (OCR mode=%s, engine=PaddleOCR, VLM=%s)",
+            self._ocr_mode, self._vlm_enabled,
+        )
 
         self._hybrid_chunker = HybridChunker(
             tokenizer="BAAI/bge-small-en-v1.5",  # tokenizer for chunk sizing
@@ -180,7 +201,29 @@ class DocumentExtractor:
         pdf_options.do_ocr = do_ocr
         pdf_options.do_table_structure = True
         if do_ocr:
+            # PaddleOCR engine = RapidOCR with the PaddlePaddle backend (avoids
+            # the onnxruntime std::bad_alloc seen with the default ONNX backend).
+            pdf_options.ocr_options = RapidOcrOptions(backend="paddle")
             pdf_options.images_scale = self._image_scale
+
+        # Optional VLM (GPT-4o-vision) description of figures/charts/diagrams.
+        if self._vlm_enabled:
+            pdf_options.do_picture_description = True
+            pdf_options.enable_remote_services = True   # required for remote API
+            pdf_options.generate_picture_images = True  # render images for the VLM
+            pdf_options.images_scale = max(self._image_scale, 1.0)
+            pdf_options.picture_description_options = PictureDescriptionApiOptions(
+                url="https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {os.getenv('OPENAI_API_KEY', '')}"},
+                params={"model": os.getenv("VLM_MODEL", "gpt-4o")},
+                prompt=(
+                    "Describe this image, chart, diagram or table in detail. "
+                    "Include any data, numbers, axis labels, legends and trends "
+                    "so it can be searched by text."
+                ),
+                timeout=60,
+            )
+
         return DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)
@@ -250,11 +293,45 @@ class DocumentExtractor:
         MP4, images, archives...) BEFORE downloading them."""
         return self._detect_format(mime_type or "", filename or "") is not None
 
+    def detect_format(self, mime_type: str, filename: str):
+        """Public: resolve the internal format ('pdf', 'docx', 'csv'...) or None."""
+        return self._detect_format(mime_type or "", filename or "")
+
+    def sample_text(self, raw_content: bytes, file_format: str, filename: str,
+                    max_chars: int = 3000) -> str:
+        """Cheap text sample for the ingestion router (no full Docling parse).
+        PDFs: first pages via pypdfium2; flat formats: decoded head. Best-effort."""
+        try:
+            if file_format in ('csv', 'xlsx', 'sheet', 'text', 'html'):
+                return (self._decode_to_text(raw_content, file_format, filename) or "")[:max_chars]
+            if file_format == 'pdf':
+                import pypdfium2 as pdfium
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                    t.write(raw_content)
+                    p = t.name
+                try:
+                    pdf = pdfium.PdfDocument(p)
+                    parts = []
+                    for i in range(min(2, len(pdf))):
+                        page = pdf[i]
+                        tp = page.get_textpage()
+                        parts.append(tp.get_text_range() or "")
+                        tp.close()
+                        page.close()
+                    pdf.close()
+                    return ("\n".join(parts))[:max_chars]
+                finally:
+                    os.unlink(p)
+        except Exception as e:
+            logger.warning("sample_text failed for %s: %s", filename, e)
+        return ""
+
     def extract(
         self,
         raw_content: bytes,
         mime_type: str,
         filename: str,
+        strategy: str = "generic",
     ) -> ExtractionResult:
         """
         Main entry point — extract and chunk a document.
@@ -263,10 +340,17 @@ class DocumentExtractor:
             raw_content : raw bytes of the file
             mime_type   : MIME type string
             filename    : original filename (used for extension fallback)
+            strategy    : ingestion strategy chosen by the router. Currently only
+                          'generic' changes nothing; per-strategy extraction is
+                          wired in the next phase. Recorded for visibility.
 
         Returns:
             ExtractionResult with chunks ready for embedding
         """
+        if strategy and strategy != "generic":
+            logger.info("Extraction strategy '%s' requested for %s (generic path for now)",
+                        strategy, filename)
+
         file_format = self._detect_format(mime_type, filename)
 
         if file_format is None:
@@ -396,41 +480,93 @@ class DocumentExtractor:
             except Exception as e:
                 logger.warning(f"HybridChunker failed for {filename}: {e}")
 
-            # --- Pass 2: markdown export fallback ---
-            if not chunks:
-                logger.info(
-                    f"HybridChunker yielded 0 chunks for {filename}, "
-                    f"trying markdown fallback"
-                )
-                try:
-                    md = doc.export_to_markdown()
-                    if md.strip():
-                        raw_chunks = self._fixed_splitter.split_text(md)
-                        for i, chunk_text in enumerate(raw_chunks):
-                            chunk_text = chunk_text.strip()
-                            if chunk_text:
-                                chunks.append(ExtractedChunk(
-                                    content=chunk_text,
-                                    chunk_index=i,
-                                    chunk_type='text',
-                                    token_count=len(chunk_text.split()),
-                                    chunk_metadata={
-                                        'filename': filename,
-                                        'format': file_format,
-                                        'extraction': 'markdown_fallback',
-                                    }
-                                ))
-                        logger.info(
-                            f"Markdown fallback: {filename} → {len(chunks)} chunks"
-                        )
-                except Exception as e:
-                    logger.error(f"Markdown fallback failed for {filename}: {e}")
+            # --- Pass 2: coverage guard against the FULL markdown export ---
+            # The structure-aware chunker can silently miss content (tables,
+            # multi-column layouts, captions). We compare what it captured to the
+            # complete markdown representation; if it covers too little, we
+            # rebuild from the markdown so NOTHING is lost (quality > structure).
+            md = ""
+            try:
+                md = doc.export_to_markdown() or ""
+            except Exception as e:
+                logger.warning(f"Markdown export failed for {filename}: {e}")
 
-            logger.info(f"Semantic extraction: {filename} → {len(chunks)} chunks")
+            hc_alnum = sum(_alnum_len(c.content) for c in chunks)
+            md_alnum = _alnum_len(md)
+            coverage = (hc_alnum / md_alnum) if md_alnum else 1.0
+
+            if md.strip() and (not chunks or coverage < EXTRACT_MIN_COVERAGE):
+                logger.info(
+                    f"{filename}: chunker captured {coverage:.0%} of the text "
+                    f"(hc={hc_alnum} vs md={md_alnum}) — rebuilding from markdown "
+                    f"to avoid content loss"
+                )
+                md_chunks: list[ExtractedChunk] = []
+                for i, chunk_text in enumerate(self._fixed_splitter.split_text(md)):
+                    chunk_text = chunk_text.strip()
+                    if chunk_text:
+                        md_chunks.append(ExtractedChunk(
+                            content=chunk_text,
+                            chunk_index=i,
+                            chunk_type='text',
+                            token_count=len(chunk_text.split()),
+                            chunk_metadata={
+                                'filename': filename,
+                                'format': file_format,
+                                'extraction': 'markdown_full',
+                            }
+                        ))
+                if md_chunks:
+                    chunks = md_chunks
+
+            # VLM descriptions of figures/charts become searchable chunks.
+            if self._vlm_enabled:
+                chunks = chunks + self._picture_chunks(doc, filename, file_format)
+
+            logger.info(
+                f"Semantic extraction: {filename} → {len(chunks)} chunks "
+                f"(coverage {coverage:.0%})"
+            )
             return chunks
 
         finally:
             os.unlink(tmp_path)
+
+    def _picture_chunks(self, doc, filename: str, file_format: str) -> list[ExtractedChunk]:
+        """Turn Docling picture descriptions (VLM annotations) into chunks so
+        charts/diagrams become searchable. Best-effort — never raises."""
+        out: list[ExtractedChunk] = []
+        try:
+            for idx, pic in enumerate(getattr(doc, 'pictures', []) or []):
+                desc = None
+                for ann in (getattr(pic, 'annotations', []) or []):
+                    txt = getattr(ann, 'text', None)
+                    if txt and txt.strip():
+                        desc = txt.strip()
+                        break
+                if not desc:
+                    continue
+                page = None
+                prov = getattr(pic, 'prov', None)
+                if prov:
+                    page = getattr(prov[0], 'page_no', None)
+                out.append(ExtractedChunk(
+                    content=f"[Figure] {desc}",
+                    chunk_index=100000 + idx,
+                    chunk_type='figure',
+                    page_number=page,
+                    token_count=len(desc.split()),
+                    chunk_metadata={
+                        'filename': filename,
+                        'format': file_format,
+                        'extraction': 'vlm_picture',
+                    },
+                ))
+            if out:
+                logger.info(f"VLM described {len(out)} figure(s) in {filename}")
+        except Exception as e:
+            logger.warning(f"Picture description extraction failed for {filename}: {e}")
+        return out
 
     # =========================================================================
     # FIXED EXTRACTION (CSV, XLSX, plain text, code)

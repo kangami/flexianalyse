@@ -6,6 +6,35 @@
 
 
 
+/* ── Connector progress ring (ingestion in progress) ───────────────── */
+@keyframes connector-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes connector-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+@keyframes connector-arc-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+/* gentle grow/shrink of the whole ring while a sync is running */
+.connector-ring--running {
+  animation: connector-breathe 1.8s ease-in-out infinite;
+}
+/* rotating "comet" sweep that signals live activity */
+.connector-ring-sweep {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: connector-spin 1.1s linear infinite;
+}
+/* progress arc breathes in opacity while running */
+.connector-ring-arc--running {
+  animation: connector-arc-pulse 1.6s ease-in-out infinite;
+}
+
+
+
 /* Styles pour les scrollbars dans FileViewer */
 
 .fileviewer-content::-webkit-scrollbar,

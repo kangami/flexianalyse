@@ -6,6 +6,7 @@ Hybrid Retrieval Node
 - PostgreSQL Full-Text Search (exact matches)
 """
 import logging
+import os
 from uuid import UUID
 
 from sqlalchemy import text
@@ -22,6 +23,37 @@ KG_LIMIT      = 10
 VECTOR_LIMIT  = 20
 FTS_LIMIT     = 10
 EMBEDDING_DIM = 1536
+
+# Full-text search language: chosen dynamically per query so a multilingual
+# client base works. Set FTS_LANGUAGE to force one Postgres regconfig.
+FTS_LANGUAGE_OVERRIDE = os.getenv("FTS_LANGUAGE")  # e.g. "french" to force
+FTS_MIN_CHARS_FOR_DETECT = 12  # below this, detection is unreliable → 'simple'
+
+# ISO 639-1 → Postgres text-search config (only langs Postgres ships by default).
+_PG_TS_CONFIGS = {
+    "fr": "french", "en": "english", "es": "spanish", "de": "german",
+    "it": "italian", "pt": "portuguese", "nl": "dutch", "ru": "russian",
+    "sv": "swedish", "no": "norwegian", "da": "danish", "fi": "finnish",
+    "tr": "turkish", "hu": "hungarian", "ro": "romanian",
+}
+
+
+def _fts_regconfig(query: str) -> str:
+    """Pick a Postgres text-search config for this query.
+
+    'simple' (no stemming, language-agnostic) is the safe fallback — it still
+    matches exact tokens (names, numbers, codes) in ANY language, and the dense
+    vector leg covers morphology/semantics.
+    """
+    if FTS_LANGUAGE_OVERRIDE:
+        return FTS_LANGUAGE_OVERRIDE
+    if not query or len(query.strip()) < FTS_MIN_CHARS_FOR_DETECT:
+        return "simple"
+    try:
+        from langdetect import detect
+        return _PG_TS_CONFIGS.get(detect(query)[:2], "simple")
+    except Exception:
+        return "simple"
 
 
 def retrieve(state: SearchState) -> SearchState:
@@ -144,15 +176,17 @@ def _search_vector(org_id: str, allowed: set, embedding: list = None) -> list[di
 
 
 def _search_fts(org_id: str, query: str, allowed: set) -> list[dict]:
-    """PostgreSQL full-text search on resource_chunks content."""
+    """PostgreSQL full-text search on resource_chunks content.
+
+    Uses `websearch_to_tsquery` (tolerant of any user input — no manual term
+    sanitization, handles phrases/accents/apostrophes and never raises on
+    syntax) with a language-aware config so French content stems correctly.
+    """
     try:
-        # Sanitize query for tsquery
-        terms = " & ".join(
-            word for word in query.split()
-            if len(word) > 2
-        )
-        if not terms:
+        if not query or not query.strip():
             return []
+
+        lang = _fts_regconfig(query)
 
         rows = db.session.execute(
             text("""
@@ -166,19 +200,19 @@ def _search_fts(org_id: str, query: str, allowed: set) -> list[dict]:
                     r.type         AS connector_type,
                     r.external_id  AS external_id,
                     ts_rank(
-                        to_tsvector('english', rc.content),
-                        to_tsquery('english', :terms)
+                        to_tsvector(CAST(:lang AS regconfig), rc.content),
+                        websearch_to_tsquery(CAST(:lang AS regconfig), :q)
                     ) AS score
                 FROM resource_chunks rc
                 JOIN resources r ON r.id = rc.resource_id
                 WHERE rc.organization_id = :org_id
                   AND r.deleted_at IS NULL
-                  AND to_tsvector('english', rc.content)
-                      @@ to_tsquery('english', :terms)
+                  AND to_tsvector(CAST(:lang AS regconfig), rc.content)
+                      @@ websearch_to_tsquery(CAST(:lang AS regconfig), :q)
                 ORDER BY score DESC
                 LIMIT :limit
             """),
-            {"org_id": org_id, "terms": terms, "limit": FTS_LIMIT},
+            {"org_id": org_id, "q": query, "lang": lang, "limit": FTS_LIMIT},
         ).fetchall()
 
         return [

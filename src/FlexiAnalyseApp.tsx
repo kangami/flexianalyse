@@ -408,7 +408,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-  const apiUrl = 'http://127.0.0.1:5000'; // 'https://flexianalyse.com' 'http://127.0.0.1:5000';
+  const apiUrl = import.meta.env.VITE_API_URL || 'https://flexianalyse.com';
 
   // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
 

@@ -27,12 +27,12 @@ import time
 import logging
 
 import httpx
-from openai import OpenAI
 
 from ai.agents.search.state import SearchState
+from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
-_client = OpenAI()
+_client = make_openai_client()
 
 # Must match services.mcp_http_client.MCP_SERVERS["sql"] / docker-compose port.
 SQL_MCP_URL = os.getenv("SQL_MCP_URL", "http://localhost:3001")

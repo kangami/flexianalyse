@@ -43,6 +43,106 @@ const CONNECTOR_META: Record<string, { title: string; apiType: string }> = {
   dropbox:      { title: 'Dropbox',        apiType: 'dropbox' },
 };
 
+// Backend connector.type → frontend ConnectorType (reverse of CONNECTOR_META.apiType)
+const API_TYPE_TO_CONNECTOR: Record<string, ConnectorType> = {
+  sql:          'database',
+  google_drive: 'google_drive',
+  sharepoint:   'sharepoint',
+  dropbox:      'dropbox',
+};
+
+// Display metadata for a saved connector row (by backend type)
+const CONNECTOR_BADGE: Record<string, { label: string; cls: string; icon: string }> = {
+  sql:          { label: 'Database',   cls: 'bg-blue-100 text-blue-600',  icon: 'bi-database' },
+  google_drive: { label: 'Drive',      cls: 'bg-green-100 text-green-600', icon: 'bi-google' },
+  sharepoint:   { label: 'SharePoint', cls: 'bg-teal-100 text-teal-700',  icon: 'bi-microsoft' },
+  dropbox:      { label: 'Dropbox',    cls: 'bg-indigo-100 text-indigo-600', icon: 'bi-dropbox' },
+};
+
+// Circular progress ring drawn around a connector logo to show the % of
+// ingestion completion. While a sync is running it grows (breathe), the arc
+// pulses, and a gradient "comet" sweep rotates to signal live activity.
+const ConnectorProgressRing: React.FC<{
+  percent: number;
+  status: string;
+  children: React.ReactNode;
+}> = ({ percent, status, children }) => {
+  const size = 42;
+  const stroke = 3.5;
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+  const offset = circ - (pct / 100) * circ;
+  const running = status === 'running';
+  const failed = status === 'failed';
+  const done = pct >= 100 && !running;
+
+  // Preset gradients per state.
+  const gradId = failed ? 'ringGradFail' : done ? 'ringGradDone' : 'ringGradRun';
+  const sweepLen = circ * 0.22; // length of the rotating comet arc
+
+  return (
+    <div
+      className={`relative flex-shrink-0 ${running ? 'connector-ring--running' : ''}`}
+      style={{ width: size, height: size }}
+      title={failed ? 'Sync failed' : running ? `Ingestion ${pct}%` : `${pct}%`}
+    >
+      <svg width={size} height={size} className="absolute inset-0 -rotate-90">
+        <defs>
+          <linearGradient id="ringGradRun" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#8b5cf6" />
+            <stop offset="100%" stopColor="#ec4899" />
+          </linearGradient>
+          <linearGradient id="ringGradDone" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#22c55e" />
+            <stop offset="100%" stopColor="#10b981" />
+          </linearGradient>
+          <linearGradient id="ringGradFail" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#f87171" />
+            <stop offset="100%" stopColor="#ef4444" />
+          </linearGradient>
+        </defs>
+
+        {/* track */}
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e5e7eb" strokeWidth={stroke} />
+
+        {/* progress arc */}
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={`url(#${gradId})`}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          className={running ? 'connector-ring-arc--running' : ''}
+          style={{ transition: 'stroke-dashoffset 0.8s cubic-bezier(0.22,1,0.36,1), stroke 0.3s' }}
+        />
+
+        {/* rotating comet sweep — only while running */}
+        {running && (
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            fill="none"
+            stroke="url(#ringGradRun)"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={`${sweepLen} ${circ}`}
+            className="connector-ring-sweep"
+            opacity={0.9}
+          />
+        )}
+      </svg>
+
+      <div className="absolute inset-0 flex items-center justify-center">{children}</div>
+    </div>
+  );
+};
+
 const PERM_RESOURCES = ['organizations', 'users', 'memberships', 'departments', 'teams', 'roles', 'permissions', 'connectors', 'documents', 'cases', 'analyses', 'prompts', 'ai_agents', 'audit_logs', 'settings', 'billing'] as const;
 
 const RESOURCE_ACTIONS: Record<string, readonly string[]> = {
@@ -470,6 +570,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [connectorForm, setConnectorForm] = useState<Record<string, string>>({});
   const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [connectorSaving, setConnectorSaving] = useState(false);
+  // Saved connectors list + edit/action state
+  const [savedConnectors, setSavedConnectors] = useState<{
+    id: string; type: string; name: string; status: string;
+    progress?: { percent: number; status: string; total: number; done: number; failed: number; skipped: number } | null;
+  }[]>([]);
+  const [connectorsLoading, setConnectorsLoading] = useState(false);
+  const [connectorEditId, setConnectorEditId] = useState<string | null>(null);
+  const [connectorBusyId, setConnectorBusyId] = useState<string | null>(null);
   
   // Organisation management state
   const [orgs, setOrgs] = useState<{ id: string; name: string }[]>([]);
@@ -540,7 +648,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     },
   ], [orgs]);
 
-  const API =import.meta.env.VITE_API_URL || 'https://flexianalyse.com'; // 'http://localhost:5000';
+  const API =import.meta.env.VITE_API_URL || 'http://localhost:5000'; // 'https://flexianalyse.com';
   const flyoutRef = useRef<HTMLDivElement>(null);
   const iconRailRef = useRef<HTMLDivElement>(null);
   
@@ -1238,13 +1346,119 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Handle icon click - toggle panel
   const handleIconClick = useCallback((panel: SidebarPanel) => {
     setActivePanel(prev => prev === panel ? null : panel);
-    if (panel !== 'connector') { setActiveConnectorType(null); setConnectorForm({}); setConnectorMsg(null); }
+    if (panel !== 'connector') { setActiveConnectorType(null); setConnectorForm({}); setConnectorMsg(null); setConnectorEditId(null); }
+  }, []);
+
+  const resetConnectorForm = useCallback(() => {
+    setActiveConnectorType(null);
+    setConnectorForm({});
+    setConnectorMsg(null);
+    setConnectorEditId(null);
+  }, []);
+
+  const loadConnectors = useCallback(async () => {
+    if (!selectedOrgId) { setSavedConnectors([]); return; }
+    setConnectorsLoading(true);
+    try {
+      const r = await fetch(`${API}/api/v2/connectors`, {
+        headers: { 'X-Organization-Id': selectedOrgId },
+      });
+      const d = await r.json();
+      setSavedConnectors(d.data || []);
+    } catch {
+      /* ignore — keep previous list */
+    } finally {
+      setConnectorsLoading(false);
+    }
+  }, [API, selectedOrgId]);
+
+  // Load saved connectors when the panel opens or the org changes
+  useEffect(() => {
+    if (activePanel === 'connector') loadConnectors();
+  }, [activePanel, selectedOrgId, loadConnectors]);
+
+  // Live progress: poll while any connector is actively ingesting so the rings
+  // animate towards 100%. Stops automatically once nothing is running.
+  useEffect(() => {
+    if (activePanel !== 'connector') return;
+    const anyRunning = savedConnectors.some(c => c.progress?.status === 'running');
+    if (!anyRunning) return;
+    const t = setInterval(loadConnectors, 3000);
+    return () => clearInterval(t);
+  }, [activePanel, savedConnectors, loadConnectors]);
+
+  // Receive the OAuth result from the popup (postMessage) — refresh the list
+  // instead of reloading the whole app.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.type !== 'connector_oauth') return;
+      if (data.status === 'success') {
+        resetConnectorForm();
+        setConnectorMsg({ text: 'Connector authorized — ingestion started!', ok: true });
+        loadConnectors();
+      } else {
+        setConnectorMsg({ text: `Authorization failed: ${data.reason || 'error'}`, ok: false });
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [loadConnectors, resetConnectorForm]);
+
+  const handleSyncConnector = useCallback(async (id: string) => {
+    setConnectorBusyId(id);
+    setConnectorMsg(null);
+    try {
+      const r = await fetch(`${API}/api/v2/connectors/${id}/ingest`, {
+        method: 'POST',
+        headers: { 'X-Organization-Id': selectedOrgId },
+      });
+      if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
+      setConnectorMsg({ text: 'Ingestion started!', ok: true });
+    } catch (e: any) {
+      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+    } finally {
+      setConnectorBusyId(null);
+    }
+  }, [API, selectedOrgId]);
+
+  const handleDeleteConnector = useCallback(async (id: string) => {
+    setConnectorBusyId(id);
+    try {
+      const r = await fetch(`${API}/api/v2/connectors/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Organization-Id': selectedOrgId },
+      });
+      if (r.ok) {
+        setSavedConnectors(prev => prev.filter(c => c.id !== id));
+        if (connectorEditId === id) resetConnectorForm();
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setConnectorBusyId(null);
+    }
+  }, [API, selectedOrgId, connectorEditId, resetConnectorForm]);
+
+  const handleEditConnector = useCallback((c: { id: string; type: string; name: string }) => {
+    setActiveConnectorType(API_TYPE_TO_CONNECTOR[c.type] || null);
+    setConnectorEditId(c.id);
+    setConnectorForm({ name: c.name });
+    setConnectorMsg(null);
   }, []);
 
   const handleSaveConnector = useCallback(async () => {
     if (!activeConnectorType) return;
     setConnectorSaving(true);
     setConnectorMsg(null);
+    const isEdit = !!connectorEditId;
+
+    // Open the OAuth popup synchronously (inside the click gesture) to dodge
+    // popup blockers; its URL is set once we have the connector id.
+    let oauthPopup: Window | null = null;
+    if (!isEdit && OAUTH_CONNECTORS.has(activeConnectorType)) {
+      oauthPopup = window.open('about:blank', 'oauth_connect', 'width=600,height=720');
+    }
 
     try {
       if (!selectedOrgId) throw new Error('Select an organisation first (Organisation tab)');
@@ -1258,25 +1472,41 @@ const Sidebar: React.FC<SidebarProps> = ({
         name: connectorForm.name || `New ${activeConnectorType}`,
       };
 
-      // Token selon le type
+      // Token selon le type (requis en création, optionnel en édition)
       if (activeConnectorType === 'database') {
-        if (!connectorForm.connection_url) throw new Error('Connection URL is required');
-        body.token = connectorForm.connection_url;
+        if (!isEdit && !connectorForm.connection_url) throw new Error('Connection URL is required');
+        if (connectorForm.connection_url) body.token = connectorForm.connection_url;
 
       } else if (activeConnectorType === 'sharepoint') {
-        if (!connectorForm.tenant_id) throw new Error('Tenant ID is required');
-        if (!connectorForm.site_url) throw new Error('Site URL is required');
-        body.token = JSON.stringify({
-          tenant_id: connectorForm.tenant_id,
-          site_url: connectorForm.site_url,
-        });
+        if (!isEdit && (!connectorForm.tenant_id || !connectorForm.site_url))
+          throw new Error('Tenant ID and Site URL are required');
+        if (connectorForm.tenant_id && connectorForm.site_url) {
+          body.token = JSON.stringify({
+            tenant_id: connectorForm.tenant_id,
+            site_url: connectorForm.site_url,
+          });
+        }
 
       } else if (activeConnectorType === 'google_drive') {
         // Google Drive = OAuth, pas besoin de token manuel
-        body.token = connectorForm.folder_id || undefined;
+        if (connectorForm.folder_id) body.token = connectorForm.folder_id;
       }
 
-      // Sauvegarde le connector
+      // ── Édition : met à jour le connecteur existant
+      if (isEdit) {
+        const r = await fetch(`${API}/api/v2/connectors/${connectorEditId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'X-Organization-Id': selectedOrgId },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
+        setConnectorMsg({ text: 'Connection updated!', ok: true });
+        await loadConnectors();
+        setTimeout(resetConnectorForm, 1500);
+        return;
+      }
+
+      // ── Création
       const r = await fetch(`${API}/api/v2/connectors`, {
         method: 'POST',
         headers: {
@@ -1288,29 +1518,37 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
       const saved = await r.json();
+      await loadConnectors();
 
       // OAuth flow pour Google Drive, SharePoint et Dropbox
       if (OAUTH_CONNECTORS.has(activeConnectorType)) {
         const provider = activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft';
-        setConnectorMsg({ text: `Connector saved — opening ${provider} authorization…`, ok: true });
-        setTimeout(() => {
-          window.open(`${API}/auth/${activeConnectorType}?connector_id=${saved.id}`, '_blank');
-        }, 400);
+        const authUrl = `${API}/auth/${activeConnectorType}?connector_id=${saved.id}`;
+        if (oauthPopup && !oauthPopup.closed) {
+          oauthPopup.location.href = authUrl;
+        } else {
+          // Popup was blocked — fall back to a new tab.
+          window.open(authUrl, '_blank');
+        }
+        setConnectorMsg({ text: `Opening ${provider} authorization…`, ok: true });
+        // The form stays open; the 'message' listener closes it on success.
       } else {
-        setConnectorMsg({ text: 'Connection saved successfully!', ok: true });
-        setTimeout(() => {
-          setActiveConnectorType(null);
-          setConnectorForm({});
-          setConnectorMsg(null);
-        }, 2000);
+        setConnectorMsg({
+          text: saved.ingestion_task_id
+            ? 'Connection saved — ingestion started!'
+            : 'Connection saved successfully!',
+          ok: true,
+        });
+        setTimeout(resetConnectorForm, 2000);
       }
 
     } catch (e: any) {
+      if (oauthPopup && !oauthPopup.closed) oauthPopup.close();
       setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
     } finally {
       setConnectorSaving(false);
     }
-  }, [activeConnectorType, connectorForm, API, selectedOrgId]);
+  }, [activeConnectorType, connectorForm, API, selectedOrgId, connectorEditId, loadConnectors, resetConnectorForm]);
 
   // Close flyout when clicking outside
   useEffect(() => {
@@ -1329,15 +1567,16 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const renderConnectorForm = () => {
     if (!activeConnectorType) return null;
+    const isEdit = !!connectorEditId;
     return (
       <div className="p-4 flex flex-col gap-3 h-full">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">New connection</p>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">{isEdit ? 'Edit connection' : 'New connection'}</p>
             <h4 className="text-sm font-semibold text-gray-800">{CONNECTOR_META[activeConnectorType].title}</h4>
           </div>
           <button
-            onClick={() => { setActiveConnectorType(null); setConnectorForm({}); setConnectorMsg(null); }}
+            onClick={resetConnectorForm}
             className="text-gray-400 hover:text-gray-600 transition-colors p-1 rounded hover:bg-gray-100"
           >
             <i className="bi bi-x text-lg"></i>
@@ -1345,6 +1584,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="flex flex-col gap-2.5 flex-1">
+          {/* Edit hint */}
+          {isEdit && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
+              <i className="bi bi-info-circle text-amber-500 text-sm mt-0.5 flex-shrink-0"></i>
+              <p className="text-[10px] text-amber-700 leading-snug">
+                Leave secret/connection fields blank to keep the current credentials.
+              </p>
+            </div>
+          )}
+
           {/* OAuth info banner */}
           {OAUTH_CONNECTORS.has(activeConnectorType) && (
             <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-2">
@@ -1384,6 +1633,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         >
           {connectorSaving ? (
             'Saving…'
+          ) : isEdit ? (
+            'Save Changes'
           ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
             <>
               <i className="bi bi-box-arrow-up-right text-[11px]"></i>
@@ -1402,8 +1653,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     switch (activePanel) {
       case 'connector':
         return (
-          <div className="p-4 flex flex-col gap-3">
+          <div className="p-4 flex flex-col gap-4">
+            {/* ── Part 1 — Add a new connection ───────────────────────── */}
+            <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-gray-800">Connectors</h3>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Add new</p>
             <div className="flex flex-wrap gap-1">
               {([
                 {
@@ -1459,6 +1713,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     setActiveConnectorType(prev => prev === type ? null : type);
                     setConnectorForm({});
                     setConnectorMsg(null);
+                    setConnectorEditId(null);
                   }}
                   className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                     activeConnectorType === type
@@ -1469,6 +1724,101 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {icon}
                 </button>
               ))}
+            </div>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-gray-100" />
+
+            {/* ── Part 2 — Saved connections ──────────────────────────── */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Saved connections</p>
+                <button
+                  onClick={loadConnectors}
+                  title="Refresh"
+                  className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100 transition-colors"
+                >
+                  <i className={`bi bi-arrow-clockwise text-xs ${connectorsLoading ? 'animate-spin' : ''}`}></i>
+                </button>
+              </div>
+
+              {!selectedOrgId ? (
+                <p className="text-[11px] text-gray-400">Select an organisation first (Organisation tab).</p>
+              ) : connectorsLoading && savedConnectors.length === 0 ? (
+                <p className="text-[11px] text-gray-400">Loading…</p>
+              ) : savedConnectors.length === 0 ? (
+                <p className="text-[11px] text-gray-400">No saved connections yet.</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {savedConnectors.map(c => {
+                    const b = CONNECTOR_BADGE[c.type] || { label: c.type, cls: 'bg-gray-100 text-gray-600', icon: 'bi-plug' };
+                    const busy = connectorBusyId === c.id;
+                    const editing = connectorEditId === c.id;
+                    const pr = c.progress;
+                    const subtitle =
+                      pr?.status === 'running'
+                        ? `Ingesting… ${pr.percent}%`
+                        : pr?.status === 'failed'
+                        ? `${pr.percent}% · errors`
+                        : pr && pr.total > 0
+                        ? `${pr.percent}% ingested`
+                        : c.status;
+                    return (
+                      <div
+                        key={c.id}
+                        className={`group flex items-center gap-2 p-2 rounded-lg border bg-white transition-all ${
+                          editing
+                            ? 'border-purple-300 ring-1 ring-purple-200'
+                            : 'border-gray-100 hover:border-purple-200 hover:shadow-sm'
+                        }`}
+                      >
+                        <ConnectorProgressRing percent={pr?.percent ?? 0} status={pr?.status ?? 'idle'}>
+                          <div className={`w-7 h-7 rounded-md flex items-center justify-center ${b.cls}`}>
+                            <i className={`bi ${b.icon} text-sm`}></i>
+                          </div>
+                        </ConnectorProgressRing>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-gray-800 truncate">{c.name}</p>
+                          <span className="text-[9px] text-gray-400 uppercase tracking-wide">{b.label} · {subtitle}</span>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
+                          <button
+                            title="Sync / ingest"
+                            disabled={busy}
+                            onClick={() => handleSyncConnector(c.id)}
+                            className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
+                          >
+                            <i className={`bi bi-arrow-repeat text-sm ${busy ? 'animate-spin' : ''}`}></i>
+                          </button>
+                          <button
+                            title="Edit"
+                            onClick={() => handleEditConnector(c)}
+                            className="p-1.5 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                          >
+                            <i className="bi bi-pencil text-sm"></i>
+                          </button>
+                          <button
+                            title="Delete"
+                            disabled={busy}
+                            onClick={() => handleDeleteConnector(c.id)}
+                            className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                          >
+                            <i className="bi bi-trash text-sm"></i>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Action feedback (sync/delete) when no form is open */}
+              {connectorMsg && !activeConnectorType && (
+                <p className={`text-[10px] font-medium ${connectorMsg.ok ? 'text-green-600' : 'text-red-500'}`}>
+                  {connectorMsg.ok ? '✓' : '✗'} {connectorMsg.text}
+                </p>
+              )}
             </div>
           </div>
         );
@@ -2153,7 +2503,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           {/* Mobile flyout panel(s) */}
           {activePanel && (
             <div className="flex h-full">
-              <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto`}>
+              <div className={`${activePanel === 'organisation' ? 'w-80' : activePanel === 'connector' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-lg h-full overflow-y-auto`}>
                 {renderFlyoutContent()}
               </div>
               {activePanel === 'connector' && activeConnectorType && (
@@ -2313,7 +2663,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Flyout Panel(s) */}
       {activePanel && (
         <div ref={flyoutRef} className="flex h-full">
-          <div className={`${activePanel === 'organisation' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200`}>
+          <div className={`${activePanel === 'organisation' ? 'w-80' : activePanel === 'connector' ? 'w-80' : 'w-56'} bg-white border-r border-gray-200 shadow-sm h-full overflow-y-auto animate-in slide-in-from-left-2 duration-200`}>
             {renderFlyoutContent()}
           </div>
           {activePanel === 'connector' && activeConnectorType && (

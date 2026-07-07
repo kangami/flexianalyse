@@ -7,7 +7,8 @@ import logging
 import os
 import time
 from typing import Optional
-from openai import OpenAI
+
+from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ class Embedder:
     """Generates embeddings for text chunks using OpenAI."""
 
     def __init__(self):
-        self._client = OpenAI()
+        self._client = make_openai_client()
 
     def embed_chunks(self, texts: list[str]) -> list[Optional[list[float]]]:
         """

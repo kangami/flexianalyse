@@ -7,14 +7,35 @@ Answer Generation + Grounding Validation Node
 """
 import json
 import logging
-from openai import OpenAI
 
 from ai.agents.search.state import SearchState
+from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
-_client = OpenAI()
+_client = make_openai_client()
 
 MAX_CONTEXT_CHARS = 12000
+
+_LANG_NAMES = {
+    "en": "English", "fr": "French", "es": "Spanish", "de": "German",
+    "it": "Italian", "pt": "Portuguese", "nl": "Dutch", "ru": "Russian",
+    "ar": "Arabic", "zh": "Chinese", "ja": "Japanese", "tr": "Turkish",
+}
+
+
+def _detect_language_name(text: str) -> str | None:
+    """Human-readable language name of the text (e.g. 'English'), or None.
+
+    The retrieved documents are often in French, which biases the model to
+    answer in French even for English questions — so we detect the QUERY language
+    explicitly and force the answer into it."""
+    if not text or len(text.strip()) < 4:
+        return None
+    try:
+        from langdetect import detect
+        return _LANG_NAMES.get(detect(text)[:2])
+    except Exception:
+        return None
 
 
 def assemble_context(state: SearchState) -> SearchState:
@@ -114,17 +135,34 @@ def generate_answer(state: SearchState) -> SearchState:
     context = state.get("context", "")
     intent  = state.get("intent", "factual")
 
+    lang_name = _detect_language_name(query)
+
     if not context.strip():
+        msg = (
+            "Je n'ai trouvé aucune information pertinente pour votre requête."
+            if lang_name == "French"
+            else "I couldn't find any relevant information for your query."
+        )
         return {
             **state,
-            "answer":     "I couldn't find any relevant information for your query.",
+            "answer":     msg,
             "confidence": 0.0,
             "grounded":   True,  # honest "no results" is grounded
         }
 
+    lang_line = (
+        f"You MUST write your ENTIRE answer in {lang_name}, regardless of the "
+        f"language of the documents in the context."
+        if lang_name else
+        "You MUST write your ENTIRE answer in the SAME language as the user's "
+        "question, regardless of the language of the documents in the context."
+    )
+
     system_prompt = f"""You are an enterprise search assistant with access to the organization's documents, databases, and files.
 
 Your task: answer the user's query using ONLY the provided context.
+
+{lang_line}
 
 Rules:
 1. Base your answer EXCLUSIVELY on the context provided — never hallucinate
@@ -142,16 +180,19 @@ Rules:
 8. Answer ONLY the current question, on its own. Never refer to a previous
    question, a previous answer, or any other subject the user did not ask about.
 
-If the context contains nothing about the requested subject, respond EXACTLY:
-"Aucune information trouvée pour « <sujet demandé> » dans les documents disponibles."
-(in the language of the query), and nothing else."""
+If the context contains nothing about the requested subject, say briefly that no
+information was found for that subject — written in the answer language — and
+nothing else."""
 
     try:
         response = _client.chat.completions.create(
             model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": f"Context:\n{context}\n\nQuery: {query}"},
+                {"role": "user", "content": (
+                    f"Context:\n{context}\n\nQuery: {query}\n\n"
+                    f"(Answer in {lang_name or 'the same language as the question'}.)"
+                )},
             ],
             # Reasoning model: minimal effort leaves room for the actual answer
             # (avoids empty content) and keeps cost/latency down. SDK-safe.
