@@ -20,7 +20,7 @@ bcrypt==4.0.1
 
 
 # Document parsing
-python-docx==1.1.0
+python-docx>=1.1.2,<2.0.0
 PyPDF2==3.0.1
 
 # AI
