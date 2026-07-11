@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -53,14 +54,19 @@ def create_app():
     with app.app_context():
         import models  # noqa: F401
 
-    # CORS
+    # CORS — origines autorisées (le domaine du frontend Vercel via FRONTEND_URL)
+    allowed_origins = [
+        "http://flexianalyse.com",
+        "http://localhost:5173",
+        "https://flexianalyse.com",
+    ]
+    frontend_url = os.getenv("FRONTEND_URL")
+    if frontend_url and frontend_url not in allowed_origins:
+        allowed_origins.append(frontend_url)
+
     CORS(app, resources={
         r"/*": {
-            "origins": [
-                "http://flexianalyse.com", 
-                "http://localhost:5173", 
-                "https://flexianalyse.com"
-            ],
+            "origins": allowed_origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "Session-ID", "X-Organization-Id", "X-User-Id"]
         }

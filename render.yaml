@@ -1,0 +1,97 @@
+# Render Blueprint — FlexiAnalyse backend
+# Deploys: PostgreSQL (pgvector), Key Value (Redis), Flask API, Celery worker.
+#
+# After the first deploy you MUST enable pgvector once, on the database:
+#   CREATE EXTENSION IF NOT EXISTS vector;
+# (Dashboard → flexianalyse-db → Connect → PSQL command)
+#
+# Adjust `region` and `plan` values to your account/needs before applying.
+
+databases:
+  - name: flexianalyse-db
+    plan: basic-256mb          # bump to basic-1gb+ for real workloads
+    postgresMajorVersion: "16"
+    region: oregon
+
+services:
+  # ── Redis / Key Value (Celery broker + result backend) ──────────────────
+  - type: keyvalue
+    name: flexianalyse-redis
+    plan: starter
+    region: oregon
+    ipAllowList: []            # empty = internal connections only
+
+  # ── Flask API (web) ─────────────────────────────────────────────────────
+  - type: web
+    name: flexianalyse-api
+    runtime: python
+    region: oregon
+    plan: standard             # docling/onnxruntime/faiss are memory-heavy — do NOT use free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: flask db upgrade      # runs Alembic migrations on every deploy
+    startCommand: gunicorn --workers 2 --timeout 120 --bind 0.0.0.0:$PORT "main:create_app()"
+    envVars:
+      # Database (auto-filled from flexianalyse-db)
+      - key: PG_HOST
+        fromDatabase: { name: flexianalyse-db, property: host }
+      - key: PG_PORT
+        fromDatabase: { name: flexianalyse-db, property: port }
+      - key: PG_DATABASE
+        fromDatabase: { name: flexianalyse-db, property: database }
+      - key: PG_USER
+        fromDatabase: { name: flexianalyse-db, property: user }
+      - key: PG_PASSWORD
+        fromDatabase: { name: flexianalyse-db, property: password }
+      # Redis (auto-filled from flexianalyse-redis)
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: flexianalyse-redis, property: connectionString }
+      # Shared config/secrets
+      - fromGroup: flexianalyse-shared
+
+  # ── Celery worker (document ingestion) ──────────────────────────────────
+  - type: worker
+    name: flexianalyse-worker
+    runtime: python
+    region: oregon
+    plan: standard
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: PG_HOST
+        fromDatabase: { name: flexianalyse-db, property: host }
+      - key: PG_PORT
+        fromDatabase: { name: flexianalyse-db, property: port }
+      - key: PG_DATABASE
+        fromDatabase: { name: flexianalyse-db, property: database }
+      - key: PG_USER
+        fromDatabase: { name: flexianalyse-db, property: user }
+      - key: PG_PASSWORD
+        fromDatabase: { name: flexianalyse-db, property: password }
+      - key: REDIS_URL
+        fromService: { type: keyvalue, name: flexianalyse-redis, property: connectionString }
+      - fromGroup: flexianalyse-shared
+
+# ── Shared env vars (same values injected into API + worker) ───────────────
+# Values marked `sync: false` are NOT stored in git — Render prompts you for
+# them in the dashboard on first apply.
+envVarGroups:
+  - name: flexianalyse-shared
+    envVars:
+      - key: EMBEDDING_DIMENSION
+        value: "1536"
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: JWT_SECRET
+        generateValue: true          # generated once, shared by both services
+      - key: RESEND_FROM_EMAIL
+        value: FlexiAnalyse <contact@flexianalyse.com>
+      - key: LEAD_NOTIFICATION_EMAIL
+        value: contact@flexianalyse.com
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FRONTEND_URL           # your Vercel URL, e.g. https://flexianalyse.vercel.app
+        sync: false
