@@ -1,6 +1,7 @@
 """Logique métier — Leads (formulaire Get Started)."""
 import re
 from models.lead import Lead
+from services.email_service import EmailService
 
 
 # ─── Free email domains (non-company) ────────────────────────────────────────
@@ -20,6 +21,7 @@ EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 class LeadService:
     def __init__(self, locator):
         self._loc = locator
+        self._email = EmailService()
 
     # ─── Validation helpers ───────────────────────────────────────────────────
 
@@ -85,6 +87,11 @@ class LeadService:
             message=message,
         )
         created = self._loc.leads.create(lead)
+
+        # Emails (échec silencieux — ne bloque jamais la soumission) :
+        #  - bienvenue au lead, - notification à l'équipe.
+        self._email.send_welcome_email(work_email, first_name)
+        self._email.send_new_lead_notification(created)
 
         return {
             'exists': False,
