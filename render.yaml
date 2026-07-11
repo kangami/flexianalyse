@@ -29,7 +29,7 @@ services:
     plan: standard             # docling/onnxruntime/faiss are memory-heavy — do NOT use free
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: flask db upgrade      # runs Alembic migrations on every deploy
+    preDeployCommand: flask --app "main:create_app" db upgrade   # runs Alembic migrations on every deploy
     startCommand: gunicorn --workers 2 --timeout 120 --bind 0.0.0.0:$PORT "main:create_app()"
     envVars:
       # Database (auto-filled from flexianalyse-db)
@@ -83,6 +83,9 @@ envVarGroups:
         value: "1536"
       - key: PYTHON_VERSION
         value: "3.12.7"
+      - key: FLASK_APP
+        value: main:create_app
+
       - key: JWT_SECRET
         generateValue: true          # generated once, shared by both services
       - key: RESEND_FROM_EMAIL
