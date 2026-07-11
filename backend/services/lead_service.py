@@ -39,7 +39,8 @@ class LeadService:
     # ─── Public API ───────────────────────────────────────────────────────────
 
     def submit(self, first_name: str, last_name: str, work_email: str,
-               company_size: str | None = None, country: str | None = None) -> dict:
+               company_size: str | None = None, country: str | None = None,
+               message: str | None = None) -> dict:
         """
         Validate and save a new lead.
         Returns a dict with keys: exists (bool), message (str), lead_id (str|None).
@@ -51,6 +52,7 @@ class LeadService:
         work_email = (work_email or '').strip().lower()
         company_size = (company_size or '').strip() or None
         country = (country or '').strip() or None
+        message = (message or '').strip() or None
 
         # Required fields
         if not first_name or not last_name or not work_email:
@@ -80,6 +82,7 @@ class LeadService:
             work_email=work_email,
             company_size=company_size,
             country=country,
+            message=message,
         )
         created = self._loc.leads.create(lead)
 

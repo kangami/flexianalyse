@@ -13,6 +13,7 @@ class Lead(db.Model):
     work_email = db.Column(db.String, nullable=False, unique=True)
     company_size = db.Column(db.String, nullable=True)
     country = db.Column(db.String, nullable=True)
+    message = db.Column(db.Text, nullable=True)
     status = db.Column(db.String, nullable=False, default='new')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

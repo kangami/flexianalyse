@@ -18,6 +18,7 @@ def register(api_bp):
         work_email = data.get("workEmail")
         company_size = data.get("companySize")
         country = data.get("country")
+        message = data.get("message")
 
         try:
             result = lead_service.submit(
@@ -26,6 +27,7 @@ def register(api_bp):
                 work_email=work_email,
                 company_size=company_size,
                 country=country,
+                message=message,
             )
             status_code = 200 if result['exists'] else 201
             return jsonify(result), status_code

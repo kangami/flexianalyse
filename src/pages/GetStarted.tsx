@@ -22,6 +22,7 @@ const GetStarted: React.FC = () => {
   const [workEmail, setWorkEmail] = useState('');
   const [companySize, setCompanySize] = useState('');
   const [country, setCountry] = useState('');
+  const [message, setMessage] = useState('');
 
   const [submitted, setSubmitted] = useState(false);
   const [alreadyExists, setAlreadyExists] = useState(false);
@@ -31,7 +32,7 @@ const GetStarted: React.FC = () => {
   const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
   const goNext = () => {
-    if (!firstName.trim() || !lastName.trim()) return;
+    if (!country || !firstName.trim() || !lastName.trim()) return;
     setDirection('forward');
     setAnimating(true);
     setTimeout(() => {
@@ -51,7 +52,7 @@ const GetStarted: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (!workEmail.trim() || !companySize || !country) return;
+    if (!workEmail.trim() || !companySize) return;
     setApiError('');
     setLoading(true);
 
@@ -65,6 +66,7 @@ const GetStarted: React.FC = () => {
           workEmail: workEmail.trim(),
           companySize,
           country,
+          message: message.trim(),
         }),
       });
 
@@ -205,6 +207,21 @@ const GetStarted: React.FC = () => {
 
                   <div className="space-y-4">
                     <div>
+                      <label className={labelClass}>Country</label>
+                      <select
+                        className={inputClass}
+                        value={country}
+                        onChange={(e) => setCountry(e.target.value)}
+                        required
+                        autoFocus
+                      >
+                        <option value="" disabled>Select your country</option>
+                        {countries.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
                       <label className={labelClass}>First Name</label>
                       <input
                         type="text"
@@ -213,7 +230,6 @@ const GetStarted: React.FC = () => {
                         value={firstName}
                         onChange={(e) => setFirstName(e.target.value)}
                         required
-                        autoFocus
                       />
                     </div>
                     <div>
@@ -233,7 +249,7 @@ const GetStarted: React.FC = () => {
                     <button
                       type="button"
                       onClick={goNext}
-                      disabled={!firstName.trim() || !lastName.trim()}
+                      disabled={!country || !firstName.trim() || !lastName.trim()}
                       className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full font-semibold text-sm inline-flex items-center gap-2 hover:shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                       Next
@@ -288,18 +304,14 @@ const GetStarted: React.FC = () => {
                       </select>
                     </div>
                     <div>
-                      <label className={labelClass}>Country</label>
-                      <select
-                        className={inputClass}
-                        value={country}
-                        onChange={(e) => setCountry(e.target.value)}
-                        required
-                      >
-                        <option value="" disabled>Select your country</option>
-                        {countries.map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
+                      <label className={labelClass}>Message <span className="text-gray-400 font-normal">(optional)</span></label>
+                      <textarea
+                        className={`${inputClass} resize-none`}
+                        rows={4}
+                        placeholder="Tell us a bit about what you're looking to achieve…"
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                      />
                     </div>
                   </div>
 
@@ -323,7 +335,7 @@ const GetStarted: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleSubmit}
-                      disabled={!workEmail.trim() || !companySize || !country || loading}
+                      disabled={!workEmail.trim() || !companySize || loading}
                       className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full font-semibold text-sm inline-flex items-center gap-2 hover:shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
                     >
                       {loading ? 'Submitting...' : 'Submit'}
@@ -333,6 +345,17 @@ const GetStarted: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Contact line */}
+            <p className="mt-6 pt-6 border-t border-gray-100 text-center text-xs text-gray-500">
+              Prefer email? Reach us at{' '}
+              <a
+                href="mailto:contact@flexianalyse.com"
+                className="text-blue-600 hover:underline font-medium"
+              >
+                contact@flexianalyse.com
+              </a>
+            </p>
           </div>
         </div>
       </div>
