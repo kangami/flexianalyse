@@ -1,9 +1,8 @@
 # Render Blueprint — FlexiAnalyse backend
 # Deploys: PostgreSQL (pgvector), Key Value (Redis), Flask API, Celery worker.
 #
-# After the first deploy you MUST enable pgvector once, on the database:
-#   CREATE EXTENSION IF NOT EXISTS vector;
-# (Dashboard → flexianalyse-db → Connect → PSQL command)
+# pgvector is enabled by migration 9139bf022744 (CREATE EXTENSION IF NOT EXISTS
+# vector), so no manual step is needed on a fresh database.
 #
 # Adjust `region` and `plan` values to your account/needs before applying.
 
