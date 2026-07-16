@@ -88,6 +88,12 @@ envVarGroups:
 
       - key: JWT_SECRET
         generateValue: true          # generated once, shared by both services
+      # Fernet key encrypting connector credentials in the DB.
+      # Must be a valid Fernet key (44-char url-safe base64) — generate with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # NEVER rotate it once connectors exist: stored credentials become undecryptable.
+      - key: ENCRYPTION_KEY
+        sync: false
       - key: RESEND_FROM_EMAIL
         value: FlexiAnalyse <contact@flexianalyse.com>
       - key: LEAD_NOTIFICATION_EMAIL

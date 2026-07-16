@@ -22,12 +22,10 @@ from config.extensions import db
 from models.knowledge_graph import KGNode, KGEdge
 from models.resource import Resource, ResourceChunk
 from models.connector import Connector
-from services.encryption_service import EncryptionService
 from ai.observability import make_openai_client
 
 logger = logging.getLogger(__name__)
 openai_client = make_openai_client()
-encryption_service = EncryptionService()
 
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 

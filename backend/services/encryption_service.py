@@ -27,3 +27,19 @@ class EncryptionService:
         if ciphertext is None:
             return None
         return self._fernet.decrypt(ciphertext.encode()).decode()
+
+
+_encryption_service: EncryptionService | None = None
+
+
+def get_encryption_service() -> EncryptionService:
+    """Lazy singleton accessor.
+
+    Building the service at import time makes a missing ENCRYPTION_KEY break the
+    whole app import — including `flask db upgrade`, which never encrypts anything.
+    Callers resolve it here so the failure surfaces on the request that needs it.
+    """
+    global _encryption_service
+    if _encryption_service is None:
+        _encryption_service = EncryptionService()
+    return _encryption_service

@@ -9,7 +9,7 @@ import requests
 from connectors.base.models import ConnectorConfig
 from connectors.dropbox.mcp_client import DropboxMCPClient
 from models.connector import Connector
-from services.encryption_service import EncryptionService
+from services.encryption_service import get_encryption_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class DropboxService:
 
     def __init__(self, locator) -> None:
         self._loc = locator
-        self._encryption = EncryptionService()
+        self._encryption = get_encryption_service()
 
     def _decrypt(self, value: str | None) -> str | None:
         if not value:

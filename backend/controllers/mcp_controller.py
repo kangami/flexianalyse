@@ -9,10 +9,9 @@ from flask import request, jsonify, Blueprint
 from services.mcp_http_client import get_mcp_client, MCP_SERVERS, MCPHttpClient
 from models.connector import Connector, ConnectorCredentials
 from config.extensions import db
-from services.encryption_service import EncryptionService
+from services.encryption_service import get_encryption_service
 
 logger = logging.getLogger(__name__)
-encryption_service = EncryptionService()
 
 mcp_bp = Blueprint('mcp', __name__, url_prefix='/api/mcp')
 
@@ -46,7 +45,7 @@ def _get_database_url_for_org(org_id: str) -> str | None:
     if not creds:
         return None
 
-    return encryption_service.decrypt(creds.encrypted_token)
+    return get_encryption_service().decrypt(creds.encrypted_token)
 
 
 def _get_drive_connector_for_org(org_id: str) -> ConnectorCredentials | None:
@@ -243,7 +242,7 @@ async def list_dropbox_files():
         if not creds:
             return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
 
-        access_token = encryption_service.decrypt(creds.encrypted_token)
+        access_token = get_encryption_service().decrypt(creds.encrypted_token)
         client = get_mcp_client('dropbox')
         result = await client.list_dropbox_files(
             path=request.args.get('path', ''),
@@ -269,7 +268,7 @@ async def search_dropbox():
         creds = _get_connector_credentials(org_id, 'dropbox')
         if not creds:
             return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
-        access_token = encryption_service.decrypt(creds.encrypted_token)
+        access_token = get_encryption_service().decrypt(creds.encrypted_token)
         client = get_mcp_client('dropbox')
         result = await client.search_dropbox_files(
             query,
@@ -297,7 +296,7 @@ async def download_dropbox_file_text():
         if not creds:
             return jsonify({'error': 'No Dropbox connector configured for this organization'}), 404
 
-        access_token = encryption_service.decrypt(creds.encrypted_token)
+        access_token = get_encryption_service().decrypt(creds.encrypted_token)
         client = get_mcp_client('dropbox')
         result = await client.download_dropbox_file_text(path, bearer_token=access_token)
         return jsonify({'status': 'success', 'data': result})

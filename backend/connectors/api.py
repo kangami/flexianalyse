@@ -46,10 +46,9 @@ from sqlalchemy import func
 from services import locator
 from models.connector import Connector, ConnectorCredentials
 import connectors as connector_registry
-from services.encryption_service import EncryptionService
+from services.encryption_service import get_encryption_service
 
 logger = logging.getLogger(__name__)
-encryption_service = EncryptionService()
 
 # OAuth connectors only have usable credentials AFTER their OAuth callback,
 # so their ingestion is started there — not at connector-creation time.
@@ -197,7 +196,7 @@ def register(api_bp) -> None:  # noqa: C901
         if token:
             creds = ConnectorCredentials(
                 connector_id=connector.id,
-                encrypted_token=encryption_service.encrypt(token),
+                encrypted_token=get_encryption_service().encrypt(token),
             )
             locator.connector_credentials.create(creds)
 
@@ -235,13 +234,13 @@ def register(api_bp) -> None:  # noqa: C901
         if token:
             creds = locator.connector_credentials.get_by_connector(UUID(connector_id))
             if creds:
-                creds.encrypted_token = encryption_service.encrypt(token)
+                creds.encrypted_token = get_encryption_service().encrypt(token)
                 locator.connector_credentials.update(creds)
             else:
                 locator.connector_credentials.create(
                     ConnectorCredentials(
                         connector_id=UUID(connector_id),
-                        encrypted_token=encryption_service.encrypt(token),
+                        encrypted_token=get_encryption_service().encrypt(token),
                     )
                 )
 
