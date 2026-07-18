@@ -78,24 +78,33 @@ class AuthService:
 
         email = email.strip().lower()
 
-        # 1. Déjà provisionné.
-        existing = self._loc.users.get_by_firebase_uid(firebase_uid)
+        # 1. Compte déjà connu — par uid ou par email, y compris soft-deleted.
+        #    On inclut les supprimés parce que les contraintes d'unicité (email,
+        #    firebase_uid) s'appliquent AUSSI aux lignes soft-deleted : sans ça,
+        #    un INSERT échouerait sur une ligne que des lectures filtrées ne
+        #    voient pas — exactement le blocage observé en production.
+        existing = (
+            self._loc.users.get_by_firebase_uid(firebase_uid, include_deleted=True)
+            or self._loc.users.get_by_email(email, include_deleted=True)
+        )
         if existing:
+            changed = False
+            if existing.deleted_at is not None:
+                existing.deleted_at = None
+                changed = True
+                logger.info("Réactivation d'un compte supprimé : %s", email)
+            if existing.firebase_uid != firebase_uid:
+                existing.firebase_uid = firebase_uid
+                changed = True
+            if full_name and not existing.full_name:
+                existing.full_name = full_name
+                changed = True
+            if changed:
+                self._loc.users.update(existing)
             self._ensure_default_organization(existing)
             return self.context_for(existing), False
 
-        # 2. Compte pré-existant (créé avant Firebase, ou via POST /users) —
-        #    on le rattache au lieu de violer la contrainte d'unicité sur l'email.
-        by_email = self._loc.users.get_by_email(email)
-        if by_email:
-            by_email.firebase_uid = firebase_uid
-            if full_name and not by_email.full_name:
-                by_email.full_name = full_name
-            self._loc.users.update(by_email)
-            self._ensure_default_organization(by_email)
-            return self.context_for(by_email), False
-
-        # 3. Nouveau compte : user + org + rôle owner + membership en une transaction.
+        # 2. Nouveau compte : user + org + rôle owner + membership en une transaction.
         user = self._create_with_organization(firebase_uid, email, full_name)
         return self.context_for(user), True
 
@@ -128,14 +137,21 @@ class AuthService:
                 db.session.commit()
                 logger.info("Compte provisionné : %s → organisation %s", email, org_name)
                 return user
-            except IntegrityError:
+            except IntegrityError as exc:
                 db.session.rollback()
-                # Course entre deux inscriptions sur le même nom d'organisation :
-                # on retente avec un suffixe. Si c'est l'email/uid qui a doublé,
-                # la lecture ci-dessous le résout.
-                clash = self._loc.users.get_by_firebase_uid(firebase_uid) or self._loc.users.get_by_email(email)
+                # On logge la contrainte réellement violée : sans ça, l'échec
+                # remontait en « Impossible de créer une organisation » opaque.
+                logger.warning("Provisionnement %s — tentative %d échouée : %s", email, attempt + 1, exc)
+                # Course avec une inscription concurrente sur le même email/uid :
+                # la ligne peut avoir été committée entre-temps (soft-deleted inclus).
+                clash = (
+                    self._loc.users.get_by_firebase_uid(firebase_uid, include_deleted=True)
+                    or self._loc.users.get_by_email(email, include_deleted=True)
+                )
                 if clash:
                     return clash
+                # Sinon c'est le nom d'organisation qui a collisionné : la boucle
+                # retente avec un suffixe aléatoire.
 
         raise RuntimeError(f"Impossible de créer une organisation pour {email}")
 

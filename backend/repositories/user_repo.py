@@ -15,15 +15,17 @@ class UserRepository(BaseRepository[User]):
             select(User).where(User.id == id, User.deleted_at.is_(None))
         ).first()
 
-    def get_by_email(self, email: str) -> Optional[User]:
-        return db.session.scalars(
-            select(User).where(User.email == email, User.deleted_at.is_(None))
-        ).first()
+    def get_by_email(self, email: str, include_deleted: bool = False) -> Optional[User]:
+        conds = [User.email == email]
+        if not include_deleted:
+            conds.append(User.deleted_at.is_(None))
+        return db.session.scalars(select(User).where(*conds)).first()
 
-    def get_by_firebase_uid(self, firebase_uid: str) -> Optional[User]:
-        return db.session.scalars(
-            select(User).where(User.firebase_uid == firebase_uid, User.deleted_at.is_(None))
-        ).first()
+    def get_by_firebase_uid(self, firebase_uid: str, include_deleted: bool = False) -> Optional[User]:
+        conds = [User.firebase_uid == firebase_uid]
+        if not include_deleted:
+            conds.append(User.deleted_at.is_(None))
+        return db.session.scalars(select(User).where(*conds)).first()
 
     def list_all(self, limit: int = 100, offset: int = 0) -> List[User]:
         return list(db.session.scalars(
