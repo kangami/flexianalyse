@@ -113,8 +113,13 @@ class AuthService:
 
         Les repositories committent chacun de leur côté, ce qui laisserait un
         utilisateur sans organisation si une étape échouait. On passe donc par la
-        session directement, avec des UUID assignés d'avance pour câbler les FK
-        sans flush intermédiaire.
+        session directement, avec des UUID assignés d'avance pour câbler les FK.
+
+        L'ordre d'insertion est forcé par un flush : Membership.role_id étant
+        nullable, SQLAlchemy ne garantit pas d'insérer le rôle avant le membership,
+        et Postgres rejette alors la FK (memberships_role_id_fkey). On persiste donc
+        org + role + user d'abord (org→role est ordonné car role.organization_id
+        est NOT NULL), puis le membership.
         """
         base_name = self._default_org_name(email, full_name)
 
@@ -132,8 +137,10 @@ class AuthService:
                 status="active",
             )
 
-            db.session.add_all([org, role, user, membership])
             try:
+                db.session.add_all([org, role, user])
+                db.session.flush()          # rôle inséré avant le membership qui le référence
+                db.session.add(membership)
                 db.session.commit()
                 logger.info("Compte provisionné : %s → organisation %s", email, org_name)
                 return user
@@ -175,13 +182,15 @@ class AuthService:
             role_id=role.id,
             status="active",
         )
-        db.session.add_all([org, role, membership])
         try:
+            db.session.add_all([org, role])
+            db.session.flush()              # même contrainte d'ordre que _create_with_organization
+            db.session.add(membership)
             db.session.commit()
             logger.info("Organisation par défaut rattachée à %s", user.email)
-        except IntegrityError:
+        except IntegrityError as exc:
             db.session.rollback()
-            logger.warning("Échec du rattachement d'une organisation par défaut à %s", user.email)
+            logger.warning("Échec du rattachement d'une organisation par défaut à %s : %s", user.email, exc)
 
     def _default_org_name(self, email: str, full_name: str | None) -> str:
         base = (full_name or "").strip() or email.split("@")[0]
