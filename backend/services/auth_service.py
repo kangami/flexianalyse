@@ -64,6 +64,29 @@ class AuthService:
             if m.status == "active"
         }
 
+    def attach_owner(self, user_id, org_id) -> None:
+        """Rattache un utilisateur comme owner d'une organisation existante.
+
+        Utilisé quand une org est créée via le panneau : sans membership, elle
+        disparaîtrait aussitôt de la liste scopée par appartenance. On flushe le
+        rôle avant le membership (Membership.role_id nullable → Postgres exige que
+        le rôle existe déjà — cf. _create_with_organization).
+        """
+        if isinstance(user_id, str):
+            user_id = UUID(user_id)
+        if isinstance(org_id, str):
+            org_id = UUID(org_id)
+        if self._loc.memberships.get_active_for_user_org(user_id, org_id):
+            return
+        role = Role(id=uuid4(), organization_id=org_id, name=OWNER_ROLE_NAME, is_system=True)
+        db.session.add(role)
+        db.session.flush()
+        membership = Membership(
+            id=uuid4(), user_id=user_id, organization_id=org_id, role_id=role.id, status="active"
+        )
+        db.session.add(membership)
+        db.session.commit()
+
     # ------------------------------------------------------------------
     # Provisionnement
     # ------------------------------------------------------------------

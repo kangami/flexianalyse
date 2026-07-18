@@ -31,7 +31,11 @@ def register(api_bp):
 
     @api_bp.route("/users", methods=["GET"])
     def list_users():
-        return jsonify({"data": user_service.list_all()})
+        # Scopé aux membres de l'organisation courante — plus de fuite globale.
+        org_id = current_organization_id()
+        if not org_id:
+            return jsonify({"data": []})
+        return jsonify({"data": user_service.list_by_organization(org_id)})
 
     @api_bp.route("/users/me", methods=["GET"])
     def get_current_user():

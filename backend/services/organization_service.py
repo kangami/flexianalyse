@@ -11,6 +11,15 @@ class OrganizationService:
     def list_all(self) -> list[dict]:
         return [org_to_dict(o) for o in self._loc.organizations.list_all()]
 
+    def list_for_ids(self, org_ids) -> list[dict]:
+        """Organisations dont l'utilisateur est membre — isolation multi-tenant."""
+        out = []
+        for oid in org_ids:
+            org = self._loc.organizations.get_by_id(UUID(oid))
+            if org:
+                out.append(org_to_dict(org))
+        return out
+
     def create(self, name: str) -> dict:
         if self._loc.organizations.get_by_name(name):
             raise ValueError(f"Organisation '{name}' already exists.")

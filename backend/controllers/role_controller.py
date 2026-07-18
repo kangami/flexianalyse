@@ -1,15 +1,26 @@
 """Routes — Rôles et Permissions."""
 from flask import request, jsonify
 from services import locator, RoleService, PermissionService
+from services.request_context import current_organization_id, is_member_of
 
 role_service = RoleService(locator)
 perm_service = PermissionService(locator)
 
 
+def _scoped_org(requested: str | None) -> str | None:
+    """Résout l'org à utiliser : le paramètre s'il appartient à l'utilisateur,
+    sinon l'org courante. Empêche de lire/écrire le tenant d'autrui."""
+    if requested:
+        return requested if is_member_of(requested) else None
+    return current_organization_id()
+
+
 def register(api_bp):
     @api_bp.route("/roles", methods=["GET"])
     def list_roles():
-        org_id = request.args.get("organization_id")
+        org_id = _scoped_org(request.args.get("organization_id"))
+        if not org_id:
+            return jsonify({"data": []})
         return jsonify({"data": role_service.list_all(org_id)})
 
     @api_bp.route("/roles", methods=["POST"])
@@ -19,6 +30,8 @@ def register(api_bp):
         organization_id = data.get("organization_id")
         if not name or not organization_id:
             return jsonify({"error": "name and organization_id are required"}), 400
+        if not is_member_of(organization_id):
+            return jsonify({"error": "Accès refusé à cette organisation"}), 403
         return jsonify(role_service.create(name, organization_id)), 201
 
     @api_bp.route("/roles/<role_id>", methods=["PUT"])
@@ -28,6 +41,9 @@ def register(api_bp):
         organization_id = data.get("organization_id")
         if not name or not organization_id:
             return jsonify({"error": "name and organization_id are required"}), 400
+        # Le rôle visé ET l'org cible doivent appartenir à l'utilisateur.
+        if not is_member_of(role_service.get_org_id(role_id)) or not is_member_of(organization_id):
+            return jsonify({"error": "Role not found"}), 404
         updated = role_service.update(role_id, name, organization_id)
         if not updated:
             return jsonify({"error": "Role not found"}), 404
@@ -35,6 +51,8 @@ def register(api_bp):
 
     @api_bp.route("/roles/<role_id>", methods=["DELETE"])
     def delete_role(role_id):
+        if not is_member_of(role_service.get_org_id(role_id)):
+            return jsonify({"error": "Role not found"}), 404
         if role_service.delete(role_id):
             return jsonify({"ok": True})
         return jsonify({"error": "Role not found"}), 404
@@ -43,10 +61,14 @@ def register(api_bp):
     def list_permissions():
         role_id = request.args.get("role_id")
         if role_id:
+            if not is_member_of(role_service.get_org_id(role_id)):
+                return jsonify({"data": []})
             return jsonify({"data": perm_service.list_all(role_id)})
-        else:
-            # Return all permissions with role information
-            return jsonify({"data": perm_service.list_all_with_roles()})
+        # Sinon : toutes les permissions des rôles de l'org courante uniquement.
+        org_id = current_organization_id()
+        if not org_id:
+            return jsonify({"data": []})
+        return jsonify({"data": perm_service.list_all_with_roles(org_id)})
 
     @api_bp.route("/permissions", methods=["POST"])
     def create_permission():
@@ -63,7 +85,10 @@ def register(api_bp):
         
         if not isinstance(actions, list) or len(actions) == 0:
             return jsonify({"error": "actions must be a non-empty array"}), 400
-        
+
+        if not is_member_of(role_service.get_org_id(role_id)):
+            return jsonify({"error": "Accès refusé à ce rôle"}), 403
+
         result = perm_service.create_bulk(
             role_id=role_id,
             actions=actions,

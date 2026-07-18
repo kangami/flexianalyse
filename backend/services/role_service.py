@@ -18,6 +18,11 @@ class RoleService:
             roles = self._loc.roles.list_all()
         return [role_to_dict(r) for r in roles]
 
+    def get_org_id(self, role_id: str) -> str | None:
+        """Organisation d'un rôle — sert à valider l'appartenance avant mutation."""
+        role = self._loc.roles.get_by_id(UUID(role_id))
+        return str(role.organization_id) if role else None
+
     def create(self, name: str, org_id: str) -> dict:
         role = Role(organization_id=UUID(org_id), name=name)
         created = self._loc.roles.create(role)
@@ -47,12 +52,16 @@ class PermissionService:
             perms = self._loc.permissions.list_all()
         return [perm_to_dict(p) for p in perms]
 
-    def list_all_with_roles(self) -> list[dict]:
-        """List all permissions with their associated roles."""
+    def list_all_with_roles(self, org_id: str | None = None) -> list[dict]:
+        """List permissions with their roles, optionally scoped to one organisation."""
         role_perms = self._loc.role_permissions.list_all()
         results = []
         for rp in role_perms:
             role = self._loc.roles.get_by_id(rp.role_id)
+            if not role:
+                continue
+            if org_id and str(role.organization_id) != org_id:
+                continue
             perm = self._loc.permissions.get_by_id(rp.permission_id)
             if role and perm:
                 results.append({

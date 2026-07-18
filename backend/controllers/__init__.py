@@ -82,6 +82,7 @@ def _authenticate():
 
     # L'organisation vient de l'appartenance réelle, jamais d'un en-tête de confiance.
     member_orgs = auth_service.organization_ids_for(user)
+    g.member_org_ids = member_orgs
     requested_org = request.headers.get("X-Organization-Id")
 
     if requested_org:

@@ -14,6 +14,19 @@ class UserService:
     def list_all(self) -> list[dict]:
         return [user_to_dict(u) for u in self._loc.users.list_all()]
 
+    def list_by_organization(self, org_id: str) -> list[dict]:
+        """Utilisateurs membres actifs d'une organisation — isolation multi-tenant."""
+        memberships = self._loc.memberships.list_by_organization(UUID(org_id))
+        out, seen = [], set()
+        for m in memberships:
+            if m.status != "active" or m.user_id in seen:
+                continue
+            seen.add(m.user_id)
+            user = self._loc.users.get_by_id(m.user_id)
+            if user:
+                out.append(user_to_dict(user))
+        return out
+
     def create(self, email: str, password: str, full_name: str | None = None) -> dict:
         existing = self._loc.users.get_by_email(email)
         if existing:

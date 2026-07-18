@@ -50,6 +50,7 @@ def _authenticate_mcp():
     g.current_user = user
 
     member_orgs = auth_service.organization_ids_for(user)
+    g.member_org_ids = member_orgs
     requested_org = request.headers.get('X-Organization-Id')
     if requested_org:
         if requested_org not in member_orgs:

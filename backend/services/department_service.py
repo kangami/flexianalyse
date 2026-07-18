@@ -15,6 +15,11 @@ class DepartmentService:
             depts = self._loc.departments.list_all()
         return [dept_to_dict(d) for d in depts]
 
+    def get_org_id(self, dept_id: str) -> str | None:
+        """Organisation d'un département — validation d'appartenance avant mutation."""
+        dept = self._loc.departments.get_by_id(UUID(dept_id))
+        return str(dept.organization_id) if dept else None
+
     def create(self, name: str, org_id: str) -> dict:
         if self._loc.departments.get_by_name_in_org(UUID(org_id), name):
             raise ValueError(f"Department '{name}' already exists in this organisation.")
