@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../../contexts/ThemeContext';
+import { authFetch } from '../../lib/apiClient';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -104,7 +105,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setEnterpriseResult(null);
         setEnterpriseError('');
         try {
-            const res = await fetch(`${API_BASE}/api/mcp/search`, {
+            const res = await authFetch(`${API_BASE}/api/mcp/search`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -289,7 +290,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             } else if (def.id === 'google_drive') {
                 body.token = connectorForm.folder_id || undefined;
             }
-            const r = await fetch(`${API_BASE}/api/v2/connectors`, {
+            const r = await authFetch(`${API_BASE}/api/v2/connectors`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthProvider';
 import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
 import { auth } from '../../lib/firebase';
+import { authFetch } from '../../lib/apiClient';
 
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
@@ -655,16 +656,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Load org data when panel opens
   useEffect(() => {
     if (activePanel === 'organisation') {
-      fetch(`${API}/api/v2/organizations`).then(r => r.json()).then(d => { setOrgs(d.data || []); if (d.data?.[0]) setSelectedOrgId(d.data[0].id); }).catch(() => {});
-      fetch(`${API}/api/v2/users`).then(r => r.json()).then(d => setUsers(d.data || [])).catch(() => {});
-      fetch(`${API}/api/v2/roles`).then(r => r.json()).then(d => setRoles(d.data || [])).catch(() => {});
+      authFetch(`${API}/api/v2/organizations`).then(r => r.json()).then(d => { setOrgs(d.data || []); if (d.data?.[0]) setSelectedOrgId(d.data[0].id); }).catch(() => {});
+      authFetch(`${API}/api/v2/users`).then(r => r.json()).then(d => setUsers(d.data || [])).catch(() => {});
+      authFetch(`${API}/api/v2/roles`).then(r => r.json()).then(d => setRoles(d.data || [])).catch(() => {});
     }
   }, [activePanel]);
 
   // Load permissions when permission tab opens
   useEffect(() => {
     if (activePanel === 'organisation' && organisationTab === 'permission') {
-      fetch(`${API}/api/v2/permissions`).then(r => r.json()).then(d => setPermissions(d.data || [])).catch(() => {});
+      authFetch(`${API}/api/v2/permissions`).then(r => r.json()).then(d => setPermissions(d.data || [])).catch(() => {});
     }
   }, [activePanel, organisationTab, API]);
 
@@ -678,7 +679,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Load departments when org changes
   useEffect(() => {
     if (selectedOrgId) {
-      fetch(`${API}/api/v2/departments?organization_id=${selectedOrgId}`).then(r => r.json()).then(d => setDepartments(d.data || [])).catch(() => {});
+      authFetch(`${API}/api/v2/departments?organization_id=${selectedOrgId}`).then(r => r.json()).then(d => setDepartments(d.data || [])).catch(() => {});
     }
   }, [selectedOrgId]);
   useEffect(() => {
@@ -1360,7 +1361,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     if (!selectedOrgId) { setSavedConnectors([]); return; }
     setConnectorsLoading(true);
     try {
-      const r = await fetch(`${API}/api/v2/connectors`, {
+      const r = await authFetch(`${API}/api/v2/connectors`, {
         headers: { 'X-Organization-Id': selectedOrgId },
       });
       const d = await r.json();
@@ -1409,7 +1410,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setConnectorBusyId(id);
     setConnectorMsg(null);
     try {
-      const r = await fetch(`${API}/api/v2/connectors/${id}/ingest`, {
+      const r = await authFetch(`${API}/api/v2/connectors/${id}/ingest`, {
         method: 'POST',
         headers: { 'X-Organization-Id': selectedOrgId },
       });
@@ -1425,7 +1426,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const handleDeleteConnector = useCallback(async (id: string) => {
     setConnectorBusyId(id);
     try {
-      const r = await fetch(`${API}/api/v2/connectors/${id}`, {
+      const r = await authFetch(`${API}/api/v2/connectors/${id}`, {
         method: 'DELETE',
         headers: { 'X-Organization-Id': selectedOrgId },
       });
@@ -1494,7 +1495,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       // ── Édition : met à jour le connecteur existant
       if (isEdit) {
-        const r = await fetch(`${API}/api/v2/connectors/${connectorEditId}`, {
+        const r = await authFetch(`${API}/api/v2/connectors/${connectorEditId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', 'X-Organization-Id': selectedOrgId },
           body: JSON.stringify(body),
@@ -1507,7 +1508,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
 
       // ── Création
-      const r = await fetch(`${API}/api/v2/connectors`, {
+      const r = await authFetch(`${API}/api/v2/connectors`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1897,7 +1898,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
                       <button onClick={async () => {
                         if (!orgName) return;
-                        const r = await fetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
+                        const r = await authFetch(`${API}/api/v2/organizations`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgName}) });
                         const d = await r.json();
                         if (r.ok) { setOrgs(prev => [...prev, d]); setSelectedOrgId(d.id); setOrgName(''); setOrgMsg({text:t('org.created'),ok:true}); }
                         else setOrgMsg({text:d.error||'Error',ok:false});
@@ -1917,7 +1918,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <input value={orgEditName} onChange={e => setOrgEditName(e.target.value)}
                                     className="flex-1 text-xs border border-purple-300 rounded px-2 py-1" />
                                   <button onClick={async () => {
-                                    const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgEditName}) });
+                                    const r = await authFetch(`${API}/api/v2/organizations/${o.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:orgEditName}) });
                                     const d = await r.json();
                                     if (r.ok) { setOrgs(prev => prev.map(x => x.id === o.id ? {...x, name:orgEditName} : x)); setOrgEditId(null); setOrgMsg({text:t('org.updated'),ok:true}); }
                                     else setOrgMsg({text:d.error||t('org.deleteError'),ok:false});
@@ -1930,7 +1931,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={() => { setOrgEditId(o.id); setOrgEditName(o.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
                                     <button onClick={async () => {
-                                      const r = await fetch(`${API}/api/v2/organizations/${o.id}`, { method:'DELETE' });
+                                      const r = await authFetch(`${API}/api/v2/organizations/${o.id}`, { method:'DELETE' });
                                       if (r.ok) { setOrgs(prev => prev.filter(x => x.id !== o.id)); if (selectedOrgId === o.id) setSelectedOrgId(''); setOrgMsg({text:t('org.deleted'),ok:true}); }
                                       else setOrgMsg({text:t('org.deleteError'),ok:false});
                                     }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
@@ -1951,7 +1952,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         className="flex-1 text-xs border border-gray-300 rounded-md px-2 py-1.5" />
                       <button onClick={async () => {
                         if (!deptName || !selectedOrgId) return;
-                        const r = await fetch(`${API}/api/v2/departments`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptName, organization_id:selectedOrgId}) });
+                        const r = await authFetch(`${API}/api/v2/departments`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptName, organization_id:selectedOrgId}) });
                         const d = await r.json();
                         if (r.ok) { setDepartments(prev => [...prev, d]); setDeptName(''); setOrgMsg({text:t('org.created'),ok:true}); }
                         else setOrgMsg({text:d.error||'Error',ok:false});
@@ -1971,7 +1972,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <input value={deptEditName} onChange={e => setDeptEditName(e.target.value)}
                                     className="flex-1 text-xs border border-purple-300 rounded px-2 py-1" />
                                   <button onClick={async () => {
-                                    const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptEditName}) });
+                                    const r = await authFetch(`${API}/api/v2/departments/${d.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name:deptEditName}) });
                                     if (r.ok) { setDepartments(prev => prev.map(x => x.id === d.id ? {...x, name:deptEditName} : x)); setDeptEditId(null); setOrgMsg({text:t('org.deptUpdated'),ok:true}); }
                                     else setOrgMsg({text:t('org.deleteError'),ok:false});
                                   }} className="text-green-600 hover:text-green-700 px-1"><i className="bi bi-check-lg text-xs"></i></button>
@@ -1983,7 +1984,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button onClick={() => { setDeptEditId(d.id); setDeptEditName(d.name); }} className="text-gray-400 hover:text-purple-600"><i className="bi bi-pencil text-[10px]"></i></button>
                                     <button onClick={async () => {
-                                      const r = await fetch(`${API}/api/v2/departments/${d.id}`, { method:'DELETE' });
+                                      const r = await authFetch(`${API}/api/v2/departments/${d.id}`, { method:'DELETE' });
                                       if (r.ok) { setDepartments(prev => prev.filter(x => x.id !== d.id)); setOrgMsg({text:t('org.deptDeleted'),ok:true}); }
                                       else setOrgMsg({text:t('org.deleteError'),ok:false});
                                     }} className="text-gray-400 hover:text-red-600"><i className="bi bi-trash text-[10px]"></i></button>
@@ -2016,7 +2017,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2" />
                     <button onClick={async () => {
                       if (!userEmail || !userPassword || !userRoleId) return;
-                      const r = await fetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName, role_id:userRoleId}) });
+                      const r = await authFetch(`${API}/api/v2/users`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({email:userEmail, password:userPassword, full_name:userFullName, role_id:userRoleId}) });
                       const d = await r.json();
                       if (r.ok) { setUsers(prev => [...prev, d]); setUserEmail(''); setUserPassword(''); setUserFullName('');setUserRoleId(''); setOrgMsg({text:t('org.userCreated'),ok:true}); }
                       else setOrgMsg({text:d.error||'Error',ok:false});
@@ -2059,26 +2060,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                     data={roles}
                     emptyState={{ organization_id: orgs[0]?.id || '', name: '' }}
                     onCreate={async (item) => {
-                      const r = await fetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
+                      const r = await authFetch(`${API}/api/v2/roles`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
                       const d = await r.json();
                       if (r.ok) { setRoles(prev => [...prev, d]); setOrgMsg({text:'Role created!',ok:true}); return d; }
                       else { setOrgMsg({text:d.error||'Error',ok:false}); return null; }
                     }}
                     onUpdate={async (id, item) => {
-                      const r = await fetch(`${API}/api/v2/roles/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
+                      const r = await authFetch(`${API}/api/v2/roles/${id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(item) });
                       const d = await r.json();
                       if (r.ok) { setRoles(prev => prev.map(rl => rl.id === id ? d : rl)); setOrgMsg({text:'Role updated!',ok:true}); return d; }
                       else { setOrgMsg({text:d.error||'Error',ok:false}); return null; }
                     }}
                     onDelete={async (id) => {
-                      const res = await fetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
+                      const res = await authFetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
                       if (res.ok) { setRoles(prev => prev.filter(rl => rl.id !== id)); setOrgMsg({text:'Role deleted!',ok:true}); return true; }
                       else { const d = await res.json(); setOrgMsg({text:d.error||'Error',ok:false}); return false; }
                     }}
                     onBulkDelete={async (ids) => {
                       let ok = true;
                       for (const id of ids) {
-                        const res = await fetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
+                        const res = await authFetch(`${API}/api/v2/roles/${id}`, { method:'DELETE' });
                         if (res.ok) setRoles(prev => prev.filter(rl => rl.id !== id));
                         else ok = false;
                       }
@@ -2120,7 +2121,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       className="mt-1 w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 mb-2 bg-white" />
                     <button onClick={async () => {
                       if (!permRoleId || !permResource || permActions.length === 0) return;
-                      const r = await fetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, actions:permActions, resource:permResource, valid_from:permValidFrom||null, valid_to:permValidTo||null}) });
+                      const r = await authFetch(`${API}/api/v2/permissions`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role_id:permRoleId, actions:permActions, resource:permResource, valid_from:permValidFrom||null, valid_to:permValidTo||null}) });
                       const d = await r.json();
                       if (r.ok) {
                         let msg = '';
@@ -2133,7 +2134,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         }
                         setOrgMsg({text: msg, ok: true});
                         // Refresh permissions list
-                        fetch(`${API}/api/v2/permissions`).then(res => res.json()).then(data => setPermissions(data.data || [])).catch(() => {});
+                        authFetch(`${API}/api/v2/permissions`).then(res => res.json()).then(data => setPermissions(data.data || [])).catch(() => {});
                         // Clear form fields
                         setPermRoleId('');
                         setPermActions([]);
@@ -2157,7 +2158,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onCreate={async () => null}
                       onUpdate={async () => null}
                       onDelete={async (id) => {
-                        const r = await fetch(`${API}/api/v2/permissions/${id}`, { method: 'DELETE' });
+                        const r = await authFetch(`${API}/api/v2/permissions/${id}`, { method: 'DELETE' });
                         if (r.ok) {
                           setPermissions(prev => prev.filter(p => p.id !== id));
                           setOrgMsg({text: t('permission.deleted'), ok: true});

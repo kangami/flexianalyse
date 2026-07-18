@@ -33,6 +33,26 @@ const authHeaders = async (): Promise<Record<string, string>> => {
   return { Authorization: `Bearer ${token}` };
 };
 
+/**
+ * fetch() avec le token Firebase injecté, renvoyant la Response brute.
+ *
+ * Contrairement à apiFetch (qui parse et lève sur !ok), authFetch garde la
+ * signature exacte de fetch — même URL absolue, même Response. Pensé pour les
+ * appels existants qui font déjà leur propre `r.ok` / `r.json()` : on remplace
+ * `fetch(` par `authFetch(` sans toucher au reste. Les en-têtes déjà présents
+ * (X-Organization-Id, Content-Type) sont préservés ; le Bearer s'ajoute par-dessus.
+ */
+export const authFetch = async (
+  input: string,
+  init: RequestInit = {},
+): Promise<Response> => {
+  const headers: Record<string, string> = {
+    ...(await authHeaders()),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  return fetch(input, { ...init, headers });
+};
+
 export const apiFetch = async <T = unknown>(
   path: string,
   options: RequestInit = {},
