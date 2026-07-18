@@ -47,6 +47,7 @@ from services import locator
 from models.connector import Connector, ConnectorCredentials
 import connectors as connector_registry
 from services.encryption_service import get_encryption_service
+from services.request_context import current_organization_id as get_current_organization_id
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +155,9 @@ def register(api_bp) -> None:  # noqa: C901
 
     @api_bp.route("/connectors", methods=["GET"])
     def list_connectors():
-        org_id = request.headers.get("X-Organization-Id")
+        org_id = get_current_organization_id()
         if not org_id:
-            return _err("X-Organization-Id header required")
+            return _err("Aucune organisation associée à ce compte")
         items = locator.connectors.list_by_organization(UUID(org_id))
         data = []
         for c in items:
@@ -172,13 +173,16 @@ def register(api_bp) -> None:  # noqa: C901
     @api_bp.route("/connectors", methods=["POST"])
     def create_connector():
         data = request.get_json() or {}
-        org_id = data.get("organization_id") or request.headers.get("X-Organization-Id")
+        # L'organisation vient du contexte authentifié. Auparavant le corps de la
+        # requête pouvait imposer n'importe quel organization_id — soit un connecteur
+        # créable dans le tenant d'autrui.
+        org_id = get_current_organization_id()
         connector_type = data.get("type")
         name = data.get("name")
         token = data.get("token")
 
         if not org_id:
-            return _err("organization_id required")
+            return _err("Aucune organisation associée à ce compte")
         if connector_type not in connector_registry.CONNECTOR_TYPES:
             return _err(f"type must be one of {connector_registry.CONNECTOR_TYPES}")
         if not name:

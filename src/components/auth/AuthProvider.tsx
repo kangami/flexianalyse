@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import { AuthContextType, User, LoginCredentials, AuthState, SignUpCredentials } from '../../types/auth';
 import { auth, googleProvider } from '../../lib/firebase';
+import { provisionAccount } from '../../lib/apiClient';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -20,6 +21,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>({
     isAuthenticated: false,
     user: null,
+    account: null,
     isLoading: true,
     error: null,
   });
@@ -30,6 +32,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setAuthState({
           isAuthenticated: false,
           user: null,
+          account: null,
           isLoading: false,
           error: null,
         });
@@ -47,22 +50,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         createdAt: firebaseUser.metadata.creationTime || undefined,
       };
 
+      // Provisionne le compte backend (User + organisation par défaut) et récupère
+      // son contexte. Idempotent : rejoué à chaque connexion sans rien dupliquer.
+      // Remplace l'ancien appel à /users/me, qui visait une route legacy non montée
+      // et échouait donc silencieusement à chaque fois.
+      // displayName brut, pas mappedUser.name : ce dernier retombe sur la partie
+      // locale de l'email, ce qui masquerait le nom mis en attente par le
+      // formulaire d'inscription (cf. setPendingFullName).
+      let account = null;
       try {
-        const token = await firebaseUser.getIdToken();
-        const backendUrl = import.meta.env.VITE_API_URL || 'https://flexianalyse.com';
-        await fetch(`${backendUrl}/users/me`, {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        account = await provisionAccount(firebaseUser.displayName || undefined);
       } catch (error) {
-        console.warn('Backend user sync failed:', error);
+        console.warn('Provisionnement du compte échoué:', error);
       }
 
       setAuthState({
         isAuthenticated: true,
         user: mappedUser,
+        account,
         isLoading: false,
         error: null,
       });
@@ -125,6 +130,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setAuthState({
         isAuthenticated: false,
         user: null,
+        account: null,
         isLoading: false,
         error: null,
       });

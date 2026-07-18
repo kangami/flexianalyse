@@ -20,6 +20,11 @@ class UserRepository(BaseRepository[User]):
             select(User).where(User.email == email, User.deleted_at.is_(None))
         ).first()
 
+    def get_by_firebase_uid(self, firebase_uid: str) -> Optional[User]:
+        return db.session.scalars(
+            select(User).where(User.firebase_uid == firebase_uid, User.deleted_at.is_(None))
+        ).first()
+
     def list_all(self, limit: int = 100, offset: int = 0) -> List[User]:
         return list(db.session.scalars(
             select(User).where(User.deleted_at.is_(None))

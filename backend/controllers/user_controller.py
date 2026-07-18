@@ -1,13 +1,22 @@
 """Routes — Utilisateurs."""
-from flask import request, jsonify
-from services import locator, UserService
+from flask import jsonify, request
+
+from services import AuthService, UserService, locator
+from services.request_context import current_organization_id, current_user
 
 user_service = UserService(locator)
+auth_service = AuthService(locator)
 
 
 def register(api_bp):
     @api_bp.route("/users", methods=["POST"])
     def create_user():
+        """Crée un utilisateur dans l'organisation courante.
+
+        Ce n'est PAS un endpoint d'inscription — l'inscription passe par Firebase
+        puis POST /api/v2/auth/signup. Il sert à ajouter un membre depuis l'admin,
+        et exige donc d'être authentifié (cf. before_request de api_bp).
+        """
         data = request.get_json() or {}
         email = data.get("email")
         password = data.get("password")
@@ -26,4 +35,7 @@ def register(api_bp):
 
     @api_bp.route("/users/me", methods=["GET"])
     def get_current_user():
-        return jsonify({"message": "GET /users/me — à implémenter"})
+        """Utilisateur authentifié + ses organisations."""
+        payload = auth_service.context_for(current_user())
+        payload["current_organization_id"] = current_organization_id()
+        return jsonify(payload)

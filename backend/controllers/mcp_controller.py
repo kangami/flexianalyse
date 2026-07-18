@@ -5,15 +5,60 @@ Supports multi-org connector management.
 """
 
 import logging
-from flask import request, jsonify, Blueprint
+from flask import g, request, jsonify, Blueprint
 from services.mcp_http_client import get_mcp_client, MCP_SERVERS, MCPHttpClient
 from models.connector import Connector, ConnectorCredentials
 from config.extensions import db
 from services.encryption_service import get_encryption_service
+from services.request_context import current_organization_id
 
 logger = logging.getLogger(__name__)
 
 mcp_bp = Blueprint('mcp', __name__, url_prefix='/api/mcp')
+
+
+@mcp_bp.before_request
+def _authenticate_mcp():
+    """Même exigence que /api/v2 : ce blueprint expose les credentials connecteurs.
+
+    mcp_bp est enregistré séparément (routes/__init__.py), donc le before_request
+    de api_bp ne le couvre pas — sans ceci il resterait entièrement ouvert.
+    """
+    from services.auth_service import AuthService
+    from services.firebase_auth import FirebaseAuthError, extract_bearer_token, verify_token
+    from services import locator
+
+    if request.method == 'OPTIONS':
+        return None
+
+    token = extract_bearer_token(request.headers.get('Authorization'))
+    if not token:
+        return jsonify({'error': 'Authentification requise'}), 401
+
+    try:
+        claims = verify_token(token)
+    except FirebaseAuthError as exc:
+        logger.warning('Token /api/mcp rejeté : %s', exc)
+        return jsonify({'error': 'Token invalide ou expiré'}), 401
+
+    auth_service = AuthService(locator)
+    user = auth_service.get_by_firebase_uid(claims.get('uid'))
+    if not user:
+        return jsonify({'error': 'Compte non provisionné', 'code': 'user_not_provisioned'}), 403
+
+    g.firebase_claims = claims
+    g.current_user = user
+
+    member_orgs = auth_service.organization_ids_for(user)
+    requested_org = request.headers.get('X-Organization-Id')
+    if requested_org:
+        if requested_org not in member_orgs:
+            return jsonify({'error': 'Accès refusé à cette organisation'}), 403
+        g.current_organization_id = requested_org
+    else:
+        g.current_organization_id = next(iter(member_orgs), None)
+
+    return None
 
 
 # ============================================================================
@@ -21,8 +66,8 @@ mcp_bp = Blueprint('mcp', __name__, url_prefix='/api/mcp')
 # ============================================================================
 
 def _get_org_id() -> str | None:
-    """Récupère l'org_id depuis le header."""
-    return request.headers.get('X-Organization-Id')
+    """Organisation courante, validée contre les memberships par _authenticate_mcp."""
+    return current_organization_id()
 
 
 def _get_database_url_for_org(org_id: str) -> str | None:

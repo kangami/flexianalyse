@@ -6,6 +6,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import LandingPage from './components/landing/LandingPage';
 import FlexiAnalyseApp from './FlexiAnalyseApp';
+import ProtectedRoute from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
@@ -38,8 +39,15 @@ const AppContent: React.FC = () => {
       {/* Page publique */}
       <Route path="/" element={isAuthenticated ? <Navigate to="/app" replace /> : <LandingPage />} />
       
-      {/* App principale (accessible sans authentification mais avec limitations) */}
-      <Route path="/app" element={<FlexiAnalyseApp />} />
+      {/* App principale — réservée aux utilisateurs authentifiés */}
+      <Route
+        path="/app"
+        element={
+          <ProtectedRoute>
+            <FlexiAnalyseApp />
+          </ProtectedRoute>
+        }
+      />
       
       {/* Pages légales */}
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
