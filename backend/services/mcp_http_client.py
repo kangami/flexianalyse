@@ -11,11 +11,25 @@ logger = logging.getLogger(__name__)
 # Larger timeout for file downloads (base64 of potentially big files).
 DOWNLOAD_TIMEOUT = float(os.getenv("MCP_DOWNLOAD_TIMEOUT", "180"))
 
+def _mcp_url(env_var: str, default: str) -> str:
+    """Resolve an MCP base URL, tolerating a scheme-less host:port.
+
+    Render's `fromService: hostport` yields e.g. `flexianalyse-mcp-sql:3001`
+    (no scheme); prepend http:// so httpx accepts it.
+    """
+    url = os.getenv(env_var, default).strip()
+    if url and "://" not in url:
+        url = f"http://{url}"
+    return url
+
+
+# URLs overridable per environment: in production the MCP servers run as their
+# own (private) services, not on localhost. Defaults match docker-compose ports.
 MCP_SERVERS = {
-    "sql":          "http://localhost:3001",
-    "google_drive": "http://localhost:3002",
-    "sharepoint":   "http://localhost:3003",
-    "dropbox":      "http://localhost:3004",
+    "sql":          _mcp_url("SQL_MCP_URL",          "http://localhost:3001"),
+    "google_drive": _mcp_url("GOOGLE_DRIVE_MCP_URL", "http://localhost:3002"),
+    "sharepoint":   _mcp_url("SHAREPOINT_MCP_URL",   "http://localhost:3003"),
+    "dropbox":      _mcp_url("DROPBOX_MCP_URL",      "http://localhost:3004"),
 }
 
 

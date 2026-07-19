@@ -21,23 +21,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/dbname")
-HTTP_PORT = int(os.getenv("HTTP_PORT", "3001"))
+# Optional default DB. In production there is none — every /execute call carries
+# its own `database_url` — so this stays unset and that's fine.
+DATABASE_URL = os.getenv("DATABASE_URL")
+# Render injects PORT; docker-compose uses HTTP_PORT. Honour either.
+HTTP_PORT = int(os.getenv("PORT") or os.getenv("HTTP_PORT", "3001"))
 HTTP_HOST = os.getenv("HTTP_HOST", "0.0.0.0")
 
 # Initialize SQL tools globally
 sql_tools = None
 
 def init_tools():
-    """Initialize SQL tools"""
+    """Optionally build the default-DB client.
+
+    Non-fatal: with no (or an unreachable) DATABASE_URL the server still starts
+    and serves per-request connections. Exiting here would crash-loop the service
+    in production, where connections are always passed per request.
+    """
     global sql_tools
+    if not DATABASE_URL:
+        logger.info("No default DATABASE_URL — server ready for per-request connections")
+        return
     try:
         sql_tools = SQLTools(DATABASE_URL)
-        logger.info("✓ SQL Server tools initialized successfully")
+        logger.info("✓ Default SQL connection initialized")
     except Exception as e:
-        logger.error(f"✗ Failed to initialize SQL Server tools: {e}")
-        sys.exit(1)
+        logger.warning("Default DB unavailable (%s) — continuing per-request only", e)
 
 # Initialize FastMCP with HTTP transport
 @asynccontextmanager
@@ -97,7 +106,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "SQL MCP Server",
-        "database_url": DATABASE_URL.split("@")[0] + "@***"
+        "default_database": DATABASE_URL.split("@")[0] + "@***" if DATABASE_URL else None,
     }
 
 @app.get("/info")
@@ -106,7 +115,7 @@ async def server_info():
     return {
         "service": "SQL MCP Server",
         "transport": "HTTP Streaming",
-        "database": DATABASE_URL.split("://")[0],
+        "database": DATABASE_URL.split("://")[0] if DATABASE_URL else None,
         "tools": [
             "show_tables",
             "show_table_schema",

@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 _client = make_openai_client()
 
 # Must match services.mcp_http_client.MCP_SERVERS["sql"] / docker-compose port.
-SQL_MCP_URL = os.getenv("SQL_MCP_URL", "http://localhost:3001")
+# Tolerate a scheme-less host:port (Render's `fromService: hostport`).
+SQL_MCP_URL = os.getenv("SQL_MCP_URL", "http://localhost:3001").strip()
+if SQL_MCP_URL and "://" not in SQL_MCP_URL:
+    SQL_MCP_URL = f"http://{SQL_MCP_URL}"
 
 MAX_TABLES_IN_PROMPT = 30    # include enough tables so JOIN targets aren't cut off
 MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context

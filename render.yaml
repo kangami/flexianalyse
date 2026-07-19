@@ -45,6 +45,9 @@ services:
       # Redis (auto-filled from flexianalyse-redis)
       - key: REDIS_URL
         fromService: { type: keyvalue, name: flexianalyse-redis, property: connectionString }
+      # SQL MCP server — internal address (host:port), used by Text-to-SQL
+      - key: SQL_MCP_URL
+        fromService: { type: pserv, name: flexianalyse-mcp-sql, property: hostport }
       # Shared config/secrets
       - fromGroup: flexianalyse-shared
 
@@ -70,7 +73,24 @@ services:
         fromDatabase: { name: flexianalyse-db, property: password }
       - key: REDIS_URL
         fromService: { type: keyvalue, name: flexianalyse-redis, property: connectionString }
+      # SQL MCP server — internal address (host:port), used by SQL ingestion
+      - key: SQL_MCP_URL
+        fromService: { type: pserv, name: flexianalyse-mcp-sql, property: hostport }
       - fromGroup: flexianalyse-shared
+
+  # ── SQL MCP server (private Docker service) ──────────────────────────────
+  # Text-to-SQL (API) and SQL ingestion (worker) call this to reach customer
+  # databases. Image built from backend/ai/mcp/servers/sql-server. Private = no
+  # public URL; reachable internally as flexianalyse-mcp-sql:<port>. It executes
+  # SQL, so it must NOT be public.
+  - type: pserv
+    name: flexianalyse-mcp-sql
+    runtime: docker
+    region: oregon
+    plan: starter
+    rootDir: backend/ai/mcp/servers/sql-server
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
 
 # ── Shared env vars (same values injected into API + worker) ───────────────
 # Values marked `sync: false` are NOT stored in git — Render prompts you for
