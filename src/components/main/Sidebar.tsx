@@ -14,13 +14,37 @@ import { authFetch } from '../../lib/apiClient';
 
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
-type ConnectorType = 'database' | 'google_drive' | 'sharepoint' | 'dropbox' | null;
+type ConnectorType =
+  | 'postgresql' | 'mysql' | 'mariadb' | 'oracle'
+  | 'google_drive' | 'sharepoint' | 'dropbox'
+  | null;
+
+// Database engines FlexiAnalyse can connect to. All share backend type 'sql' —
+// the engine is carried by the connection-URL scheme, so no backend change is
+// needed. More engines (SQL Server, DB2, SQLite…) will be added later.
+const DB_ENGINES = ['postgresql', 'mysql', 'mariadb', 'oracle'] as const;
+const DB_CONNECTORS: ReadonlySet<string> = new Set(DB_ENGINES);
+
+const DB_ENGINE_META: Record<
+  (typeof DB_ENGINES)[number],
+  { title: string; color: string; urlPlaceholder: string }
+> = {
+  postgresql: { title: 'PostgreSQL', color: '#336791', urlPlaceholder: 'postgresql://user:pass@host:5432/dbname' },
+  mysql:      { title: 'MySQL',      color: '#00758F', urlPlaceholder: 'mysql+mysqlconnector://user:pass@host:3306/dbname' },
+  mariadb:    { title: 'MariaDB',    color: '#013545', urlPlaceholder: 'mysql+mysqlconnector://user:pass@host:3306/dbname' },
+  oracle:     { title: 'Oracle',     color: '#C74634', urlPlaceholder: 'oracle+oracledb://user:pass@host:1521/?service_name=XEPDB1' },
+};
+
+const dbFields = (engine: (typeof DB_ENGINES)[number]) => [
+  { key: 'name',           label: 'Connection Name', placeholder: `My ${DB_ENGINE_META[engine].title}` },
+  { key: 'connection_url', label: 'Connection URL',   placeholder: DB_ENGINE_META[engine].urlPlaceholder },
+];
 
 const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: string; placeholder?: string }[]> = {
-  database: [
-    { key: 'name',           label: 'Connection Name', placeholder: 'My Database' },
-    { key: 'connection_url', label: 'Connection URL',   placeholder: 'postgresql://user:pass@host:5432/db' },
-  ],
+  postgresql: dbFields('postgresql'),
+  mysql:      dbFields('mysql'),
+  mariadb:    dbFields('mariadb'),
+  oracle:     dbFields('oracle'),
   google_drive: [
     { key: 'name',      label: 'Connection Name',          placeholder: 'My Google Drive' },
     { key: 'folder_id', label: 'Root Folder ID (optional)', placeholder: '1BxiMVs0XRA5…' },
@@ -35,18 +59,35 @@ const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: stri
   ],
 };
 
+// Brand-coloured database cylinder, shared by every engine tile. Real vendor
+// logos can replace this per engine later; the label already disambiguates.
+const DbEngineIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 26 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <ellipse cx="12" cy="5" rx="7" ry="2.6" fill={color} />
+    <path d="M5 5v14c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6V5" fill={color} opacity="0.18" />
+    <path d="M5 5v14c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6V5" stroke={color} strokeWidth="1.4" />
+    <path d="M5 12c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6" stroke={color} strokeWidth="1.4" />
+  </svg>
+);
+
 const OAUTH_CONNECTORS: ReadonlySet<string> = new Set(['google_drive', 'sharepoint', 'dropbox']);
 
 const CONNECTOR_META: Record<string, { title: string; apiType: string }> = {
-  database:     { title: 'Database (SQL)', apiType: 'sql' },
-  google_drive: { title: 'Google Drive',   apiType: 'google_drive' },
-  sharepoint:   { title: 'SharePoint',     apiType: 'sharepoint' },
-  dropbox:      { title: 'Dropbox',        apiType: 'dropbox' },
+  postgresql:   { title: 'PostgreSQL', apiType: 'sql' },
+  mysql:        { title: 'MySQL',      apiType: 'sql' },
+  mariadb:      { title: 'MariaDB',    apiType: 'sql' },
+  oracle:       { title: 'Oracle',     apiType: 'sql' },
+  google_drive: { title: 'Google Drive', apiType: 'google_drive' },
+  sharepoint:   { title: 'SharePoint',   apiType: 'sharepoint' },
+  dropbox:      { title: 'Dropbox',      apiType: 'dropbox' },
 };
 
-// Backend connector.type → frontend ConnectorType (reverse of CONNECTOR_META.apiType)
+// Backend connector.type → frontend ConnectorType, used when editing a saved row.
+// The backend stores only 'sql' (not the engine), so an existing DB connector
+// opens on the generic PostgreSQL form; the connection URL can be left blank to
+// keep its stored credentials regardless of engine.
 const API_TYPE_TO_CONNECTOR: Record<string, ConnectorType> = {
-  sql:          'database',
+  sql:          'postgresql',
   google_drive: 'google_drive',
   sharepoint:   'sharepoint',
   dropbox:      'dropbox',
@@ -1474,7 +1515,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       };
 
       // Token selon le type (requis en création, optionnel en édition)
-      if (activeConnectorType === 'database') {
+      if (DB_CONNECTORS.has(activeConnectorType)) {
         if (!isEdit && !connectorForm.connection_url) throw new Error('Connection URL is required');
         if (connectorForm.connection_url) body.token = connectorForm.connection_url;
 
@@ -1657,74 +1698,33 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="p-4 flex flex-col gap-4">
             {/* ── Part 1 — Add a new connection ───────────────────────── */}
             <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold text-gray-800">Connectors</h3>
-            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Add new</p>
-            <div className="flex flex-wrap gap-1">
-              {([
-                {
-                  type: 'database' as ConnectorType,
-                  label: 'Database',
-                  icon: (
-                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-blue-100">
-                      <i className="bi bi-database text-blue-600 text-sm"></i>
-                    </div>
-                  ),
-                },
-                {
-                  type: 'google_drive' as ConnectorType,
-                  label: 'Google Drive',
-                  icon: (
-                    <svg viewBox="0 0 87.3 78" className="w-7 h-7 p-0.5">
-                      <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0a15.6 15.6 0 003.3 8.05l3.3-5.7v11.5z" fill="#0066da"/>
-                      <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L.95 52.3A15.6 15.6 0 000 57H27.5L43.65 25z" fill="#00ac47"/>
-                      <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25A15.6 15.6 0 0087.3 57H59.75l5.85 11.5L73.55 76.8z" fill="#ea4335"/>
-                      <path d="M43.65 25L57.4 1.2A15.4 15.4 0 0052.1 0H35.2a15.4 15.4 0 00-5.3.95L43.65 25z" fill="#00832d"/>
-                      <path d="M59.75 57H27.5L13.75 80.8c1.35.8 2.9 1.2 4.5 1.2h50.6a15.4 15.4 0 004.5-1.2L59.75 57z" fill="#2684fc"/>
-                      <path d="M73.4 28.5l-13.1-22.7c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25 59.75 57h27.45a15.7 15.7 0 00-1.5-6.35L73.4 28.5z" fill="#ffba00"/>
-                    </svg>
-                  ),
-                },
-                {
-                  type: 'sharepoint' as ConnectorType,
-                  label: 'SharePoint',
-                  icon: (
-                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-[#038387]">
-                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
-                        <path d="M10 2a6 6 0 100 12 6 6 0 000-12zm0 10a4 4 0 110-8 4 4 0 010 8zm7 2a4 4 0 100 8 4 4 0 000-8zm-7 2H4a2 2 0 00-2 2v2h10v-2a2 2 0 00-2-2z"/>
-                      </svg>
-                    </div>
-                  ),
-                },
-                {
-                  type: 'dropbox' as ConnectorType,
-                  label: 'Dropbox',
-                  icon: (
-                    <div className="w-7 h-7 rounded-md flex items-center justify-center bg-[#0061FF]">
-                      <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
-                        <path d="M6 2L0 6l6 4-6 4 6 4 6-4-6-4 6-4-6-4zM18 2l-6 4 6 4-6 4 6 4 6-4-6-4 6-4-6-4zM6 16.5L12 20l6-3.5-6-4-6 4z"/>
-                      </svg>
-                    </div>
-                  ),
-                },
-              ] as { type: ConnectorType; label: string; icon: React.ReactNode }[]).map(({ type, label, icon }) => (
-                <button
-                  key={type!}
-                  title={label}
-                  onClick={() => {
-                    setActiveConnectorType(prev => prev === type ? null : type);
-                    setConnectorForm({});
-                    setConnectorMsg(null);
-                    setConnectorEditId(null);
-                  }}
-                  className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
-                    activeConnectorType === type
-                      ? 'bg-purple-100 ring-2 ring-purple-400 ring-offset-1'
-                      : 'hover:bg-gray-100'
-                  }`}
-                >
-                  {icon}
-                </button>
-              ))}
+            <h3 className="text-sm font-semibold text-gray-800">Database connectors</h3>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Choose an engine</p>
+            <div className="grid grid-cols-2 gap-2">
+              {DB_ENGINES.map(engine => {
+                const meta = DB_ENGINE_META[engine];
+                const selected = activeConnectorType === engine;
+                return (
+                  <button
+                    key={engine}
+                    title={meta.title}
+                    onClick={() => {
+                      setActiveConnectorType(prev => prev === engine ? null : engine);
+                      setConnectorForm({});
+                      setConnectorMsg(null);
+                      setConnectorEditId(null);
+                    }}
+                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border transition-all ${
+                      selected
+                        ? 'border-purple-400 bg-purple-50 ring-1 ring-purple-200'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <DbEngineIcon color={meta.color} />
+                    <span className="text-[11px] font-medium text-gray-700">{meta.title}</span>
+                  </button>
+                );
+              })}
             </div>
             </div>
 
