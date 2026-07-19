@@ -212,31 +212,37 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-    // Database engines only (FlexiAnalyse is a database agent). All map to backend
-    // type 'sql'; the engine is carried by the connection-URL scheme. Shared with
-    // the Sidebar via ../../lib/dbEngines.
+    // Database engines only (FlexiAnalyse is a database agent). Each exposes
+    // DBeaver-style connection fields (host/port/database/user/password); the
+    // backend assembles the URL. Shared with the Sidebar via ../../lib/dbEngines.
     const CONNECTOR_DEFS = DB_ENGINES.map(e => ({
         id: e.id,
         label: e.title,
-        oauth: false,
         fields: [
             { key: 'name', label: t('connector.fields.name'), placeholder: `My ${e.title}` },
-            { key: 'connection_url', label: t('connector.fields.connectionUrl'), placeholder: e.urlPlaceholder },
+            ...e.fields,
         ],
         icon: <DbEngineLogo engine={e.id} size={20} />,
     }));
 
     const handleSaveConnector = async () => {
+        const engine = DB_ENGINES.find(e => e.id === activeConnector);
         const def = CONNECTOR_DEFS.find(d => d.id === activeConnector);
-        if (!def) return;
+        if (!engine || !def) return;
         setConnectorSaving(true);
         setConnectorMsg(null);
         try {
-            if (!connectorForm.connection_url) throw new Error(t('connector.errors.connectionUrlRequired'));
-            const body: Record<string, string | undefined> = {
+            const connection: Record<string, string> = {};
+            engine.fields.forEach(f => { if (connectorForm[f.key]) connection[f.key] = connectorForm[f.key]; });
+            if (!connection.host) throw new Error('Host is required');
+            const dbKey = engine.id === 'oracle' ? 'service_name' : 'database';
+            if (!connection[dbKey]) throw new Error(engine.id === 'oracle' ? 'Service name is required' : 'Database is required');
+
+            const body = {
                 type: 'sql',
+                engine: engine.id,
                 name: connectorForm.name || t('connector.newConnectionName', { service: def.label }),
-                token: connectorForm.connection_url,
+                connection,
             };
             const r = await authFetch(`${API_BASE}/api/v2/connectors`, {
                 method: 'POST',
@@ -314,7 +320,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                 <div key={field.key}>
                                     <label className="block text-[11px] mb-1.5 font-semibold uppercase tracking-wider" style={{ color: tc.modalLabel }}>{field.label}</label>
                                     <input
-                                        type="text"
+                                        type={(field as { type?: string }).type || 'text'}
                                         placeholder={field.placeholder}
                                         value={connectorForm[field.key] || ''}
                                         onChange={e => setConnectorForm(f => ({ ...f, [field.key]: e.target.value }))}

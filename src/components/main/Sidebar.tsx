@@ -11,25 +11,27 @@ import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
 import { auth } from '../../lib/firebase';
 import { authFetch } from '../../lib/apiClient';
-import { DB_ENGINES, DB_ENGINE_IDS, DbEngineLogo } from '../../lib/dbEngines';
+import { DB_ENGINES, DB_ENGINE_IDS, getDbEngine, DbEngineLogo } from '../../lib/dbEngines';
 
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
 type ConnectorType =
-  | 'postgresql' | 'mysql' | 'mariadb' | 'oracle'
+  | 'postgresql' | 'mysql' | 'mariadb' | 'oracle' | 'mssql'
   | 'google_drive' | 'sharepoint' | 'dropbox'
   | null;
 
-// Database engines (metadata + real logos) live in ../../lib/dbEngines, shared
-// with AppHomeComponent. All share backend type 'sql' — the engine is carried by
-// the connection-URL scheme, so no backend change is needed. More engines
-// (SQL Server, DB2, SQLite…) will be added there later.
+// Database engines (metadata, connection fields, real logos) live in
+// ../../lib/dbEngines, shared with AppHomeComponent. All share backend type
+// 'sql'; the precise engine is sent alongside so the backend can store it (for
+// the saved-row logo) and build the connection URL.
 const DB_CONNECTORS: ReadonlySet<string> = new Set(DB_ENGINE_IDS);
 
 const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: string; placeholder?: string }[]> = {
+  // DB engines: a connection name + the engine's structured fields (host, port,
+  // database/service, user, password) — DBeaver-style, not a raw URL.
   ...Object.fromEntries(DB_ENGINES.map(e => [e.id, [
-    { key: 'name',           label: 'Connection Name', placeholder: `My ${e.title}` },
-    { key: 'connection_url', label: 'Connection URL',   placeholder: e.urlPlaceholder },
+    { key: 'name', label: 'Connection Name', placeholder: `My ${e.title}` },
+    ...e.fields,
   ]])),
   google_drive: [
     { key: 'name',      label: 'Connection Name',          placeholder: 'My Google Drive' },
@@ -52,6 +54,7 @@ const CONNECTOR_META: Record<string, { title: string; apiType: string }> = {
   mysql:        { title: 'MySQL',      apiType: 'sql' },
   mariadb:      { title: 'MariaDB',    apiType: 'sql' },
   oracle:       { title: 'Oracle',     apiType: 'sql' },
+  mssql:        { title: 'SQL Server', apiType: 'sql' },
   google_drive: { title: 'Google Drive', apiType: 'google_drive' },
   sharepoint:   { title: 'SharePoint',   apiType: 'sharepoint' },
   dropbox:      { title: 'Dropbox',      apiType: 'dropbox' },
@@ -589,7 +592,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [connectorSaving, setConnectorSaving] = useState(false);
   // Saved connectors list + edit/action state
   const [savedConnectors, setSavedConnectors] = useState<{
-    id: string; type: string; name: string; status: string;
+    id: string; type: string; engine?: string | null; name: string; status: string;
     progress?: { percent: number; status: string; total: number; done: number; failed: number; skipped: number } | null;
   }[]>([]);
   const [connectorsLoading, setConnectorsLoading] = useState(false);
@@ -1457,8 +1460,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [API, selectedOrgId, connectorEditId, resetConnectorForm]);
 
-  const handleEditConnector = useCallback((c: { id: string; type: string; name: string }) => {
-    setActiveConnectorType(API_TYPE_TO_CONNECTOR[c.type] || null);
+  const handleEditConnector = useCallback((c: { id: string; type: string; engine?: string | null; name: string }) => {
+    // Prefer the stored engine (postgresql/mysql/…) so edit reopens the right
+    // DB form; fall back to the type mapping for legacy/cloud connectors.
+    const engineType = c.engine && DB_ENGINE_IDS.includes(c.engine as never) ? (c.engine as ConnectorType) : null;
+    setActiveConnectorType(engineType || API_TYPE_TO_CONNECTOR[c.type] || null);
     setConnectorEditId(c.id);
     setConnectorForm({ name: c.name });
     setConnectorMsg(null);
@@ -1483,16 +1489,29 @@ const Sidebar: React.FC<SidebarProps> = ({
       const apiType = CONNECTOR_META[activeConnectorType].apiType;
 
       // Construit le body selon le type de connector
-      const body: Record<string, string | undefined> = {
+      const body: Record<string, unknown> = {
         type: apiType,
-        organization_id: selectedOrgId,
         name: connectorForm.name || `New ${activeConnectorType}`,
       };
 
-      // Token selon le type (requis en création, optionnel en édition)
+      // DB engines: send engine + structured connection fields; the backend
+      // assembles the SQLAlchemy URL and stores the engine (for the saved logo).
       if (DB_CONNECTORS.has(activeConnectorType)) {
-        if (!isEdit && !connectorForm.connection_url) throw new Error('Connection URL is required');
-        if (connectorForm.connection_url) body.token = connectorForm.connection_url;
+        const engine = getDbEngine(activeConnectorType);
+        body.engine = activeConnectorType;
+        const connection: Record<string, string> = {};
+        engine?.fields.forEach(f => {
+          const v = connectorForm[f.key];
+          if (v) connection[f.key] = v;
+        });
+        if (!isEdit) {
+          if (!connection.host) throw new Error('Host is required');
+          const dbKey = activeConnectorType === 'oracle' ? 'service_name' : 'database';
+          if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? 'Service name is required' : 'Database is required');
+        }
+        // Only send credentials when the user actually filled the connection in
+        // (on edit, leaving it blank keeps the stored credentials).
+        if (Object.keys(connection).length) body.connection = connection;
 
       } else if (activeConnectorType === 'sharepoint') {
         if (!isEdit && (!connectorForm.tenant_id || !connectorForm.site_url))
@@ -1726,6 +1745,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {savedConnectors.map(c => {
+                    const engineMeta = c.engine ? getDbEngine(c.engine) : undefined;
                     const b = CONNECTOR_BADGE[c.type] || { label: c.type, cls: 'bg-gray-100 text-gray-600', icon: 'bi-plug' };
                     const busy = connectorBusyId === c.id;
                     const editing = connectorEditId === c.id;
@@ -1748,13 +1768,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                         }`}
                       >
                         <ConnectorProgressRing percent={pr?.percent ?? 0} status={pr?.status ?? 'idle'}>
-                          <div className={`w-7 h-7 rounded-md flex items-center justify-center ${b.cls}`}>
-                            <i className={`bi ${b.icon} text-sm`}></i>
+                          <div className="w-7 h-7 rounded-md flex items-center justify-center bg-gray-50 border border-gray-100">
+                            {engineMeta ? (
+                              <DbEngineLogo engine={engineMeta.id} size={16} />
+                            ) : (
+                              <i className={`bi ${b.icon} text-sm`}></i>
+                            )}
                           </div>
                         </ConnectorProgressRing>
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-gray-800 truncate">{c.name}</p>
-                          <span className="text-[9px] text-gray-400 uppercase tracking-wide">{b.label} · {subtitle}</span>
+                          <span className="text-[9px] text-gray-400 uppercase tracking-wide">{engineMeta ? engineMeta.title : b.label} · {subtitle}</span>
                         </div>
                         <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
                           <button
