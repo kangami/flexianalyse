@@ -1,5 +1,8 @@
 ﻿# Web
-flask==3.0.3
+# [async] pulls in asgiref so Flask can run the many `async def` routes in
+# controllers/mcp_controller.py (database query/introspection, ingestion, KG).
+# Without it those routes 500 with "Install Flask with the 'async' extra".
+flask[async]==3.0.3
 flask-cors==4.0.1
 python-dotenv==1.0.1
 requests==2.32.3

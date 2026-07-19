@@ -421,8 +421,13 @@ def enterprise_search():
         return jsonify({'error': str(e)}), 500"""
 
 @mcp_bp.route('/search', methods=['POST'])
-async def enterprise_search():
-    """Enterprise Search Agent endpoint."""
+def enterprise_search():
+    """Enterprise Search Agent endpoint.
+
+    Sync view on purpose: run_search (LangGraph) is synchronous, so an async view
+    only pulls in Flask's optional `async` extra for nothing — and its absence was
+    500'ing this route ("Install Flask with the 'async' extra").
+    """
     org_id = _get_org_id()
     if not org_id:
         return jsonify({'error': 'X-Organization-Id header required'}), 400
