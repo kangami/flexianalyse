@@ -96,6 +96,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [enterpriseLoading, setEnterpriseLoading] = useState(false);
     const [enterpriseResult, setEnterpriseResult]   = useState<{
         answer: string;
+        sql?: string;
         citations: { index: number; source: string; type: string; similarity: number }[];
     } | null>(null);
     const [enterpriseError, setEnterpriseError]     = useState('');
@@ -116,7 +117,21 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || res.statusText);
-            setEnterpriseResult({ answer: data.answer, citations: data.citations || [] });
+            // The search agent returns `sources` ({title,type,connector,score}) and
+            // `generated_sql`; the old endpoint returned `citations`. Map to the UI
+            // shape so results (and any live SQL that ran) actually show.
+            const sources: Array<{ title?: string; type?: string; connector?: string; score?: number }> =
+                Array.isArray(data.sources) ? data.sources : [];
+            setEnterpriseResult({
+                answer: data.answer,
+                sql: data.generated_sql || '',
+                citations: sources.map((s, i) => ({
+                    index: i + 1,
+                    source: s.title || s.connector || 'source',
+                    type: s.type || s.connector || '',
+                    similarity: typeof s.score === 'number' ? s.score / 10 : 0,
+                })),
+            });
             setQuery('');
         } catch (e: unknown) {
             setEnterpriseError((e as Error).message);
@@ -682,6 +697,14 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     <p className="leading-relaxed whitespace-pre-wrap mb-3" style={{ color: tc.textPrimary }}>
                                         {enterpriseResult.answer}
                                     </p>
+                                    {enterpriseResult.sql && (
+                                        <div className="mb-3">
+                                            <p className="text-xs font-semibold mb-1" style={{ color: tc.textMuted }}>Live SQL</p>
+                                            <pre className="text-[11px] rounded-lg px-3 py-2 overflow-x-auto" style={{ background: tc.inputBg, border: `1px solid ${tc.inputBorder}`, color: tc.textPrimary }}>
+                                                <code>{enterpriseResult.sql}</code>
+                                            </pre>
+                                        </div>
+                                    )}
                                     {enterpriseResult.citations.length > 0 && (
                                         <>
                                             <p className="text-xs font-semibold mb-1.5" style={{ color: tc.textMuted }}>Sources</p>
