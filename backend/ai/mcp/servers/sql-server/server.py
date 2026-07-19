@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Universal SQL Database MCP Server with HTTP Streaming Transport
-Supports PostgreSQL, MySQL, and Oracle databases via fastMcp with HTTP
+Supports PostgreSQL, MySQL/MariaDB, Oracle and SQL Server via fastMcp over HTTP.
 """
 import os
 import sys

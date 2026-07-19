@@ -64,6 +64,7 @@ def _connector_to_dict(c: Connector) -> dict:
         "id": str(c.id),
         "organization_id": str(c.organization_id),
         "type": c.type,
+        "engine": c.engine,
         "name": c.name,
         "status": c.status,
         "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -72,6 +73,29 @@ def _connector_to_dict(c: Connector) -> dict:
 
 def _err(msg: str, code: int = 400):
     return jsonify({"error": msg}), code
+
+
+def _resolve_sql_token(data: dict) -> str | None:
+    """Assemble l'URL de connexion d'un connecteur SQL.
+
+    Priorité aux champs structurés (host/port/user/password…) façon DBeaver ; à
+    défaut, un `token` (URL brute) est accepté pour compatibilité. Renvoie None si
+    rien n'est fourni (édition qui ne change pas les identifiants).
+    """
+    connection = data.get("connection")
+    engine = data.get("engine")
+    if connection and engine:
+        from services.db_url import build_database_url
+        return build_database_url(
+            engine,
+            host=connection.get("host"),
+            port=connection.get("port"),
+            database=connection.get("database"),
+            username=connection.get("username"),
+            password=connection.get("password"),
+            service_name=connection.get("service_name"),
+        )
+    return data.get("token")
 
 
 def _connector_progress(connector_id) -> dict:
@@ -179,7 +203,7 @@ def register(api_bp) -> None:  # noqa: C901
         org_id = get_current_organization_id()
         connector_type = data.get("type")
         name = data.get("name")
-        token = data.get("token")
+        engine = data.get("engine")
 
         if not org_id:
             return _err("Aucune organisation associée à ce compte")
@@ -188,9 +212,15 @@ def register(api_bp) -> None:  # noqa: C901
         if not name:
             return _err("name required")
 
+        try:
+            token = _resolve_sql_token(data)
+        except ValueError as exc:
+            return _err(str(exc))
+
         connector = Connector(
             organization_id=UUID(org_id),
             type=connector_type,
+            engine=engine,
             name=name,
             status="active",
         )
@@ -231,10 +261,15 @@ def register(api_bp) -> None:  # noqa: C901
             connector.name = data["name"]
         if "status" in data:
             connector.status = data["status"]
+        if "engine" in data:
+            connector.engine = data["engine"]
         locator.connectors.update(connector)
 
-        # Optionally rotate the stored credential (e.g. new SQL connection URL).
-        token = data.get("token")
+        # Optionally rotate the stored credential (structured fields or raw URL).
+        try:
+            token = _resolve_sql_token(data)
+        except ValueError as exc:
+            return _err(str(exc))
         if token:
             creds = locator.connector_credentials.get_by_connector(UUID(connector_id))
             if creds:

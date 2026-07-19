@@ -2,10 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies.
+# freetds-dev/-bin let pymssql (MSSQL) build/run if no binary wheel is available.
+# oracledb runs in thin mode, so no Oracle Instant Client is needed.
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
+    freetds-dev \
+    freetds-bin \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

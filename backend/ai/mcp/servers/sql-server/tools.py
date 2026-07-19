@@ -14,29 +14,52 @@ class SQLTools:
     def __init__(self, database_url: str):
         """
         Initialize SQL tools with database connection
-        
+
         Args:
             database_url: SQLAlchemy-compatible connection string
                 Examples:
                 - postgresql://user:password@localhost/dbname
                 - mysql+mysqlconnector://user:password@localhost/dbname
-                - oracle://user:password@localhost:1521/dbname
+                - oracle+oracledb://user:password@host:1521/?service_name=XEPDB1
+                - mssql+pymssql://user:password@host:1433/dbname
         """
         self.database_url = database_url
         self.engine = None
+        self.dialect = ""
         self._connect()
-    
+
     def _connect(self):
-        """Establish database connection"""
+        """Establish database connection (dialect-aware probe)."""
         try:
             self.engine = create_engine(self.database_url, poolclass=NullPool)
-            # Test connection
+            # SQLAlchemy normalises the backend name: 'postgresql', 'mysql'
+            # (also MariaDB), 'oracle', 'mssql', 'sqlite'.
+            self.dialect = self.engine.dialect.name
             with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            logger.info("✓ Database connection established")
+                conn.execute(text(self._probe_query()))
+            logger.info("✓ Database connection established (%s)", self.dialect)
         except Exception as e:
             logger.error(f"✗ Database connection failed: {str(e)}")
             raise
+
+    def _probe_query(self) -> str:
+        """Trivial liveness query — Oracle has no bare `SELECT 1`."""
+        return "SELECT 1 FROM DUAL" if self.dialect == "oracle" else "SELECT 1"
+
+    def _apply_limit(self, sql: str, limit: int) -> str:
+        """Cap a SELECT to `limit` rows using the target dialect's syntax.
+
+        LIMIT is Postgres/MySQL/SQLite only. Oracle uses ROWNUM and MSSQL uses
+        TOP; for those we wrap the query in a subselect (valid even if the inner
+        query already limits itself), so ingestion sampling works everywhere.
+        """
+        if self.dialect == "oracle":
+            return f"SELECT * FROM ({sql}) WHERE ROWNUM <= {int(limit)}"
+        if self.dialect == "mssql":
+            return f"SELECT TOP {int(limit)} * FROM ({sql}) AS _limited"
+        if re.search(r"\blimit\b", sql, re.IGNORECASE):
+            return sql
+        return f"{sql} LIMIT {int(limit)}"
     
     def show_tables(self) -> dict[str, Any]:
         """List all tables in the database"""
@@ -107,12 +130,8 @@ class SQLTools:
                     "message": "Only SELECT queries are allowed"
                 }
 
-            # Only append LIMIT when the query doesn't already define one,
-            # otherwise we'd produce invalid SQL like "... LIMIT 100 LIMIT 1000".
-            if re.search(r"\blimit\b", cleaned, re.IGNORECASE):
-                final_query = cleaned
-            else:
-                final_query = f"{cleaned} LIMIT {limit}"
+            # Cap rows with the target dialect's syntax (LIMIT / ROWNUM / TOP).
+            final_query = self._apply_limit(cleaned, limit)
 
             with self.engine.connect() as conn:
                 result = conn.execute(text(final_query))

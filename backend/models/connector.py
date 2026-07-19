@@ -10,6 +10,10 @@ class Connector(db.Model):
     id = db.Column(db.Uuid, primary_key=True, default=uuid.uuid4)
     organization_id = db.Column(db.Uuid, db.ForeignKey('organizations.id'), nullable=False)
     type = db.Column(db.String, nullable=False)
+    # Pour les connecteurs SQL (type='sql') : moteur précis — postgresql, mysql,
+    # mariadb, oracle, mssql. Le type reste 'sql' ; l'engine sert à l'affichage
+    # (logo) et n'est pas requis par le serveur MCP (qui déduit le dialecte de l'URL).
+    engine = db.Column(db.String, nullable=True)
     name = db.Column(db.String, nullable=False)
     status = db.Column(db.String, default='active')
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
