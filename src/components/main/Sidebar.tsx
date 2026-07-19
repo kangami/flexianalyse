@@ -11,6 +11,7 @@ import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
 import { auth } from '../../lib/firebase';
 import { authFetch } from '../../lib/apiClient';
+import { DB_ENGINES, DB_ENGINE_IDS, DbEngineLogo } from '../../lib/dbEngines';
 
 type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
@@ -19,32 +20,17 @@ type ConnectorType =
   | 'google_drive' | 'sharepoint' | 'dropbox'
   | null;
 
-// Database engines FlexiAnalyse can connect to. All share backend type 'sql' —
-// the engine is carried by the connection-URL scheme, so no backend change is
-// needed. More engines (SQL Server, DB2, SQLite…) will be added later.
-const DB_ENGINES = ['postgresql', 'mysql', 'mariadb', 'oracle'] as const;
-const DB_CONNECTORS: ReadonlySet<string> = new Set(DB_ENGINES);
-
-const DB_ENGINE_META: Record<
-  (typeof DB_ENGINES)[number],
-  { title: string; color: string; urlPlaceholder: string }
-> = {
-  postgresql: { title: 'PostgreSQL', color: '#336791', urlPlaceholder: 'postgresql://user:pass@host:5432/dbname' },
-  mysql:      { title: 'MySQL',      color: '#00758F', urlPlaceholder: 'mysql+mysqlconnector://user:pass@host:3306/dbname' },
-  mariadb:    { title: 'MariaDB',    color: '#013545', urlPlaceholder: 'mysql+mysqlconnector://user:pass@host:3306/dbname' },
-  oracle:     { title: 'Oracle',     color: '#C74634', urlPlaceholder: 'oracle+oracledb://user:pass@host:1521/?service_name=XEPDB1' },
-};
-
-const dbFields = (engine: (typeof DB_ENGINES)[number]) => [
-  { key: 'name',           label: 'Connection Name', placeholder: `My ${DB_ENGINE_META[engine].title}` },
-  { key: 'connection_url', label: 'Connection URL',   placeholder: DB_ENGINE_META[engine].urlPlaceholder },
-];
+// Database engines (metadata + real logos) live in ../../lib/dbEngines, shared
+// with AppHomeComponent. All share backend type 'sql' — the engine is carried by
+// the connection-URL scheme, so no backend change is needed. More engines
+// (SQL Server, DB2, SQLite…) will be added there later.
+const DB_CONNECTORS: ReadonlySet<string> = new Set(DB_ENGINE_IDS);
 
 const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: string; placeholder?: string }[]> = {
-  postgresql: dbFields('postgresql'),
-  mysql:      dbFields('mysql'),
-  mariadb:    dbFields('mariadb'),
-  oracle:     dbFields('oracle'),
+  ...Object.fromEntries(DB_ENGINES.map(e => [e.id, [
+    { key: 'name',           label: 'Connection Name', placeholder: `My ${e.title}` },
+    { key: 'connection_url', label: 'Connection URL',   placeholder: e.urlPlaceholder },
+  ]])),
   google_drive: [
     { key: 'name',      label: 'Connection Name',          placeholder: 'My Google Drive' },
     { key: 'folder_id', label: 'Root Folder ID (optional)', placeholder: '1BxiMVs0XRA5…' },
@@ -58,17 +44,6 @@ const CONNECTOR_FIELDS: Record<string, { key: string; label: string; type?: stri
     { key: 'name', label: 'Connection Name', placeholder: 'My Dropbox' },
   ],
 };
-
-// Brand-coloured database cylinder, shared by every engine tile. Real vendor
-// logos can replace this per engine later; the label already disambiguates.
-const DbEngineIcon: React.FC<{ color: string; size?: number }> = ({ color, size = 26 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <ellipse cx="12" cy="5" rx="7" ry="2.6" fill={color} />
-    <path d="M5 5v14c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6V5" fill={color} opacity="0.18" />
-    <path d="M5 5v14c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6V5" stroke={color} strokeWidth="1.4" />
-    <path d="M5 12c0 1.44 3.13 2.6 7 2.6s7-1.16 7-2.6" stroke={color} strokeWidth="1.4" />
-  </svg>
-);
 
 const OAUTH_CONNECTORS: ReadonlySet<string> = new Set(['google_drive', 'sharepoint', 'dropbox']);
 
@@ -1695,33 +1670,31 @@ const Sidebar: React.FC<SidebarProps> = ({
     switch (activePanel) {
       case 'connector':
         return (
-          <div className="p-4 flex flex-col gap-4">
+          <div className="p-3 flex flex-col gap-3">
             {/* ── Part 1 — Add a new connection ───────────────────────── */}
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
             <h3 className="text-sm font-semibold text-gray-800">Database connectors</h3>
-            <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Choose an engine</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
               {DB_ENGINES.map(engine => {
-                const meta = DB_ENGINE_META[engine];
-                const selected = activeConnectorType === engine;
+                const selected = activeConnectorType === engine.id;
                 return (
                   <button
-                    key={engine}
-                    title={meta.title}
+                    key={engine.id}
+                    title={engine.title}
                     onClick={() => {
-                      setActiveConnectorType(prev => prev === engine ? null : engine);
+                      setActiveConnectorType(prev => prev === engine.id ? null : engine.id);
                       setConnectorForm({});
                       setConnectorMsg(null);
                       setConnectorEditId(null);
                     }}
-                    className={`flex flex-col items-center justify-center gap-1.5 py-3 rounded-xl border transition-all ${
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all ${
                       selected
                         ? 'border-purple-400 bg-purple-50 ring-1 ring-purple-200'
                         : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    <DbEngineIcon color={meta.color} />
-                    <span className="text-[11px] font-medium text-gray-700">{meta.title}</span>
+                    <DbEngineLogo engine={engine.id} size={18} className="flex-shrink-0" />
+                    <span className="text-[11px] font-medium text-gray-700 truncate">{engine.title}</span>
                   </button>
                 );
               })}

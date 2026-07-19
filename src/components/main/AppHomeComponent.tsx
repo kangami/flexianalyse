@@ -3,6 +3,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../../contexts/ThemeContext';
 import { authFetch } from '../../lib/apiClient';
+import { DB_ENGINES, DbEngineLogo } from '../../lib/dbEngines';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -211,64 +212,19 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-    const CONNECTOR_DEFS = [
-        {
-            id: 'google_drive', label: 'Google Drive', oauth: true,
-            fields: [
-                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myGoogleDrive') },
-                { key: 'folder_id', label: t('connector.fields.folderId'), placeholder: t('connector.placeholders.folderId') },
-            ],
-            icon: (
-                <svg viewBox="0 0 87.3 78" className="w-5 h-5">
-                    <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5l5.4 9.35z" fill="#0066DA"/>
-                    <path d="M43.65 25L29.9 1.2c-1.35.8-2.5 1.9-3.3 3.3L1.2 52.5c-.8 1.4-1.2 2.95-1.2 4.5h27.5L43.65 25z" fill="#00AC47"/>
-                    <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.85l6.1 10.6 7.6 13.2z" fill="#EA4335"/>
-                    <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2L43.65 25z" fill="#00832D"/>
-                    <path d="M59.85 57H27.5l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2L59.85 57z" fill="#2684FC"/>
-                    <path d="M73.4 26.5l-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3L43.65 25l16.2 32h27.5c0-1.55-.4-3.1-1.2-4.5L73.4 26.5z" fill="#FFBA00"/>
-                </svg>
-            ),
-        },
-        {
-            id: 'dropbox', label: 'Dropbox', oauth: true,
-            fields: [
-                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myDropbox') },
-            ],
-            icon: (
-                <svg viewBox="0 0 43 40" className="w-5 h-5">
-                    <path d="M12.6 0L0 8.1l8.9 7.1 12.6-7.8L12.6 0zM0 22.3l12.6 8.1 8.9-7.4-12.6-7.8L0 22.3zm21.5.7l8.9 7.4 12.6-8.1-8.9-7.1-12.6 7.8zm21.5-14.9L30.4 0l-8.9 7.4 12.6 7.8 8.9-7.1zM12.7 32.4l8.8 7.4 8.9-7.4-8.9-7.1-8.8 7.1z" fill="#0061FF"/>
-                </svg>
-            ),
-        },
-        {
-            id: 'sharepoint', label: 'SharePoint', oauth: true,
-            fields: [
-                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.mySharePoint') },
-                { key: 'tenant_id', label: t('connector.fields.tenantId'), placeholder: t('connector.placeholders.tenantId') },
-                { key: 'site_url', label: t('connector.fields.siteUrl'), placeholder: t('connector.placeholders.siteUrl') },
-            ],
-            icon: (
-                <svg viewBox="0 0 32 32" className="w-5 h-5">
-                    <circle cx="18" cy="11" r="9" fill="#036C70"/>
-                    <circle cx="13" cy="20" r="7" fill="#1A9BA1"/>
-                    <circle cx="20" cy="23" r="5.5" fill="#37C6D0"/>
-                </svg>
-            ),
-        },
-        {
-            id: 'database', label: 'SQL Database', oauth: false,
-            fields: [
-                { key: 'name', label: t('connector.fields.name'), placeholder: t('connector.placeholders.myDatabase') },
-                { key: 'connection_url', label: t('connector.fields.connectionUrl'), placeholder: t('connector.placeholders.connectionUrl') },
-            ],
-            icon: (
-                <svg viewBox="0 0 32 32" className="w-5 h-5">
-                    <ellipse cx="16" cy="8" rx="12" ry="5" fill="#E48E00"/>
-                    <path d="M4 8v16c0 2.76 5.37 5 12 5s12-2.24 12-5V8c0 2.76-5.37 5-12 5S4 10.76 4 8z" fill="#FFC107"/>
-                </svg>
-            ),
-        },
-    ] as const;
+    // Database engines only (FlexiAnalyse is a database agent). All map to backend
+    // type 'sql'; the engine is carried by the connection-URL scheme. Shared with
+    // the Sidebar via ../../lib/dbEngines.
+    const CONNECTOR_DEFS = DB_ENGINES.map(e => ({
+        id: e.id,
+        label: e.title,
+        oauth: false,
+        fields: [
+            { key: 'name', label: t('connector.fields.name'), placeholder: `My ${e.title}` },
+            { key: 'connection_url', label: t('connector.fields.connectionUrl'), placeholder: e.urlPlaceholder },
+        ],
+        icon: <DbEngineLogo engine={e.id} size={20} />,
+    }));
 
     const handleSaveConnector = async () => {
         const def = CONNECTOR_DEFS.find(d => d.id === activeConnector);
@@ -276,34 +232,21 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setConnectorSaving(true);
         setConnectorMsg(null);
         try {
+            if (!connectorForm.connection_url) throw new Error(t('connector.errors.connectionUrlRequired'));
             const body: Record<string, string | undefined> = {
-                type: def.id === 'database' ? 'sql' : def.id,
+                type: 'sql',
                 name: connectorForm.name || t('connector.newConnectionName', { service: def.label }),
+                token: connectorForm.connection_url,
             };
-            if (def.id === 'database') {
-                if (!connectorForm.connection_url) throw new Error(t('connector.errors.connectionUrlRequired'));
-                body.token = connectorForm.connection_url;
-            } else if (def.id === 'sharepoint') {
-                if (!connectorForm.tenant_id) throw new Error(t('connector.errors.tenantIdRequired'));
-                if (!connectorForm.site_url) throw new Error(t('connector.errors.siteUrlRequired'));
-                body.token = JSON.stringify({ tenant_id: connectorForm.tenant_id, site_url: connectorForm.site_url });
-            } else if (def.id === 'google_drive') {
-                body.token = connectorForm.folder_id || undefined;
-            }
             const r = await authFetch(`${API_BASE}/api/v2/connectors`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
             if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
-            const saved = await r.json();
-            if (def.oauth) {
-                setConnectorMsg({ text: t('connector.savedOpening', { service: def.label }), ok: true });
-                setTimeout(() => window.open(`${API_BASE}/auth/${def.id}?connector_id=${saved.id}`, '_blank'), 400);
-            } else {
-                setConnectorMsg({ text: t('connector.addedSuccessfully'), ok: true });
-                setTimeout(() => { setActiveConnector(null); setConnectorForm({}); setConnectorMsg(null); }, 2000);
-            }
+            await r.json();
+            setConnectorMsg({ text: t('connector.addedSuccessfully'), ok: true });
+            setTimeout(() => { setActiveConnector(null); setConnectorForm({}); setConnectorMsg(null); }, 2000);
         } catch (e: unknown) {
             const errorMessage = (e as Error).message || String(e);
             setConnectorMsg({ text: t('connector.error', { message: errorMessage }), ok: false });
@@ -365,18 +308,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             <button onClick={closeModal} className="w-8 h-8 flex items-center justify-center rounded-full transition-colors text-lg" style={{ color: tc.textMuted }} aria-label={t('app.close')}>✕</button>
                         </div>
 
-                        {/* OAuth banner */}
-                        {activeDef.oauth && (
-                            <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4">
-                                <svg className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                </svg>
-                                <p className="text-xs text-blue-700 leading-snug">
-                                    {t('connector.oauthSecured', { service: activeDef.label })} {activeDef.id === 'sharepoint' ? t('connector.sharepointDetails') : ''} {t('connector.thenClick')} <strong>{t('connector.connect')}</strong>.
-                                </p>
-                            </div>
-                        )}
-
                         {/* Fields */}
                         <div className="flex flex-col gap-3 mb-4">
                             {activeDef.fields.map(field => (
@@ -421,7 +352,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                                     </svg>
                                 )}
-                                {connectorSaving ? t('connector.connecting') : activeDef.oauth ? t('connector.connectService', { service: activeDef.label }) : t('connector.saveConnection')}
+                                {connectorSaving ? t('connector.connecting') : t('connector.saveConnection')}
                             </button>
                         </div>
                     </div>
