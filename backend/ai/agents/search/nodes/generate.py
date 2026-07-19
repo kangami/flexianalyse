@@ -185,7 +185,7 @@ nothing else."""
 
     try:
         response = get_openai_client().chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": (
@@ -193,10 +193,7 @@ nothing else."""
                     f"(Answer in {lang_name or 'the same language as the question'}.)"
                 )},
             ],
-            # Reasoning model: minimal effort leaves room for the actual answer
-            # (avoids empty content) and keeps cost/latency down. SDK-safe.
-            max_completion_tokens=2000,
-            extra_body={"reasoning_effort": "minimal"},
+            max_tokens=2000,
         )
 
         answer = response.choices[0].message.content

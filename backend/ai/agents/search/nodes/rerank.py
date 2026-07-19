@@ -103,7 +103,7 @@ Passages:
 
     try:
         response = get_openai_client().chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             response_format={"type": "json_object"},
             messages=[
                 {
@@ -116,10 +116,7 @@ Passages:
                 },
                 {"role": "user", "content": prompt},
             ],
-            # Reasoning model: keep effort minimal so the budget goes to output
-            # (otherwise content is empty → JSON parse fails). SDK-version-safe.
-            max_completion_tokens=500,
-            extra_body={"reasoning_effort": "minimal"},
+            max_tokens=500,
         )
 
         data    = json.loads(response.choices[0].message.content)

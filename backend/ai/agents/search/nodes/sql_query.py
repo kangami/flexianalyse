@@ -41,7 +41,7 @@ if SQL_MCP_URL and "://" not in SQL_MCP_URL:
 
 MAX_TABLES_IN_PROMPT = 30    # include enough tables so JOIN targets aren't cut off
 MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context
-SQL_GEN_MODEL        = "gpt-5-mini"
+SQL_GEN_MODEL        = "gpt-4o-mini"
 
 # In-process schema cache (per database URL) — avoids 1+N introspection HTTP
 # calls on every DB query. Short TTL so schema changes are picked up.
@@ -269,10 +269,7 @@ Return JSON exactly as: {{"sql": "..."}}"""
             {"role": "system", "content": "You are an expert text-to-SQL engine. Return only valid JSON."},
             {"role": "user", "content": prompt},
         ],
-        # Reasoning model: minimal effort so the budget yields output, not empty
-        # content. extra_body keeps this independent of the SDK version.
-        max_completion_tokens=800,
-        extra_body={"reasoning_effort": "minimal"},
+        max_tokens=800,
     )
 
     data = json.loads(response.choices[0].message.content)

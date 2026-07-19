@@ -71,17 +71,13 @@ def understand_query(state: SearchState) -> SearchState:
 
     try:
         response = get_openai_client().chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            # gpt-5-mini is a reasoning model: without minimal effort the
-            # reasoning tokens consume the whole budget and content comes back
-            # empty (→ JSON parse error). extra_body keeps it SDK-version-safe.
-            max_completion_tokens=800,
-            extra_body={"reasoning_effort": "minimal"},
+            max_tokens=800,
         )
 
         data = json.loads(response.choices[0].message.content)
