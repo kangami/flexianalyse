@@ -1706,9 +1706,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       setConnectorMsg(null);
                       setConnectorEditId(null);
                     }}
-                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-all ${
+                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-colors ${
                       selected
-                        ? 'border-purple-400 bg-purple-50 ring-1 ring-purple-200'
+                        ? 'border-purple-400 bg-purple-500/15 ring-1 ring-purple-300/40'
                         : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }`}
                   >
@@ -2393,30 +2393,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                 { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
                 { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
               ].map((item) => {
-                const isInactive = activePanel !== item.id;
                 const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-                const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+                const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
                 return (
                 <button
                   key={item.id}
                   onClick={() => handleIconClick(item.id)}
                   className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors group ${
-                    activePanel === item.id
-                      ? 'text-purple-600 bg-purple-50'
-                      : ''
+                    activePanel === item.id ? 'bg-purple-500/15' : hoverClass
                   }`}
                   style={{
                     color: activePanel === item.id ? '#a855f7' : inactiveColor,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (isInactive) {
-                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (isInactive) {
-                      (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                    }
                   }}
                 >
                   {activePanel === item.id && (
@@ -2432,27 +2419,15 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* Settings icon */}
             {(() => {
               const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-              const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+              const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
               return (
               <button
                 onClick={() => handleIconClick('settings')}
                 className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${
-                  activePanel === 'settings'
-                    ? 'text-purple-600 bg-purple-50'
-                    : ''
+                  activePanel === 'settings' ? 'bg-purple-500/15' : hoverClass
                 }`}
                 style={{
                   color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
-                }}
-                onMouseEnter={(e) => {
-                  if (activePanel !== 'settings') {
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activePanel !== 'settings') {
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                  }
                 }}
               >
                 {activePanel === 'settings' && (
@@ -2466,27 +2441,15 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* User icon at bottom */}
             {(() => {
               const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-              const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+              const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
               return (
               <button
                 onClick={() => handleIconClick('user')}
                 className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors ${
-                  activePanel === 'user'
-                    ? 'text-purple-600 bg-purple-50'
-                    : ''
+                  activePanel === 'user' ? 'bg-purple-500/15' : hoverClass
                 }`}
                 style={{
                   color: activePanel === 'user' ? '#a855f7' : inactiveColor,
-                }}
-                onMouseEnter={(e) => {
-                  if (activePanel !== 'user') {
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activePanel !== 'user') {
-                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                  }
                 }}
               >
                 {activePanel === 'user' && (
@@ -2534,31 +2497,21 @@ const Sidebar: React.FC<SidebarProps> = ({
             { id: 'organisation' as SidebarPanel, icon: 'bi-buildings', label: t('sidebar.organisation') },
             { id: 'history' as SidebarPanel, icon: 'bi-chat-right', label: t('sidebar.history') },
           ].map((item) => {
-            const isInactive = activePanel !== item.id;
             const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-            const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+            // Hover via a React-managed class, not an imperative DOM style — the
+            // old inline backgroundColor persisted across theme switches, leaving
+            // a pale box on the tabs. Translucent so it reads on any theme.
+            const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
             return (
             <button
               key={item.id}
               onClick={() => handleIconClick(item.id)}
-              className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 group ${
-                activePanel === item.id
-                  ? 'text-purple-600 bg-purple-50'
-                  : ''
+              className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 group ${
+                activePanel === item.id ? 'bg-purple-500/15' : hoverClass
               }`}
               title={item.label}
               style={{
                 color: activePanel === item.id ? '#a855f7' : inactiveColor,
-              }}
-              onMouseEnter={(e) => {
-                if (isInactive) {
-                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (isInactive) {
-                  (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-                }
               }}
             >
               {/* Purple right border indicator */}
@@ -2575,28 +2528,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* Settings icon */}
         {(() => {
           const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-          const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+          const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
           return (
           <button
             onClick={() => handleIconClick('settings')}
-            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 mb-1 ${
-              activePanel === 'settings'
-                ? 'text-purple-600 bg-purple-50'
-                : ''
+            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 mb-1 ${
+              activePanel === 'settings' ? 'bg-purple-500/15' : hoverClass
             }`}
             title={t('sidebar.settings')}
             style={{
               color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
-            }}
-            onMouseEnter={(e) => {
-              if (activePanel !== 'settings') {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activePanel !== 'settings') {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-              }
             }}
           >
             {activePanel === 'settings' && (
@@ -2610,28 +2551,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* User icon at bottom */}
         {(() => {
           const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-          const hoverBgColor = theme === 'white' ? '#e5e7eb' : (theme === 'dark' ? '#374151' : '#1e40af');
+          const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
           return (
           <button
             onClick={() => handleIconClick('user')}
-            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-all duration-200 ${
-              activePanel === 'user'
-                ? 'text-purple-600 bg-purple-50'
-                : ''
+            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 ${
+              activePanel === 'user' ? 'bg-purple-500/15' : hoverClass
             }`}
             title={t('sidebar.account')}
             style={{
               color: activePanel === 'user' ? '#a855f7' : inactiveColor,
-            }}
-            onMouseEnter={(e) => {
-              if (activePanel !== 'user') {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor = hoverBgColor;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activePanel !== 'user') {
-                (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
-              }
             }}
           >
             {activePanel === 'user' && (
@@ -2641,7 +2570,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {isAuthenticated && user?.avatar ? (
                 <img src={user.avatar} alt="" className="w-full h-full object-cover" />
               ) : (
-                <i className="bi bi-person text-black font-bold"></i>
+                <i className="bi bi-person text-gray-600 font-bold"></i>
               )}
             </div>
           </button>
