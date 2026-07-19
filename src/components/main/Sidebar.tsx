@@ -672,10 +672,17 @@ const Sidebar: React.FC<SidebarProps> = ({
   const flyoutRef = useRef<HTMLDivElement>(null);
   const iconRailRef = useRef<HTMLDivElement>(null);
   
-  // Load org data when panel opens
+  // Load org data when a panel that needs it opens. The connector panel needs an
+  // org too (every connector is attached to one), so we load orgs and default to
+  // the user's first one here as well — no need to visit the Organisation tab first.
   useEffect(() => {
+    if (activePanel === 'organisation' || activePanel === 'connector') {
+      authFetch(`${API}/api/v2/organizations`).then(r => r.json()).then(d => {
+        setOrgs(d.data || []);
+        setSelectedOrgId(prev => prev || d.data?.[0]?.id || '');
+      }).catch(() => {});
+    }
     if (activePanel === 'organisation') {
-      authFetch(`${API}/api/v2/organizations`).then(r => r.json()).then(d => { setOrgs(d.data || []); if (d.data?.[0]) setSelectedOrgId(d.data[0].id); }).catch(() => {});
       authFetch(`${API}/api/v2/users`).then(r => r.json()).then(d => setUsers(d.data || [])).catch(() => {});
       authFetch(`${API}/api/v2/roles`).then(r => r.json()).then(d => setRoles(d.data || [])).catch(() => {});
     }

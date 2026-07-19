@@ -16,16 +16,14 @@ interface AppHomeComponentProps {
 }
 
 const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
-    onQuerySubmit,
     loading,
     selectedModel,
     setSelectedModel,
     researchMode,
     setResearchMode,
-    language = 'en'
 }) => {
     const { t } = useLanguage();
-    const { isAuthenticated } = useAuth();
+    const { account } = useAuth();
     const { theme } = useTheme();
 
     const tc = {
@@ -89,10 +87,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [connectorSaving, setConnectorSaving] = useState(false);
     const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
-    const [isEnterpriseMode, setIsEnterpriseMode]   = useState(false);
-    const [enterpriseOrgId, setEnterpriseOrgId]     = useState(
-        () => localStorage.getItem('flexi_active_org') || ''
-    );
     const [enterpriseLoading, setEnterpriseLoading] = useState(false);
     const [enterpriseResult, setEnterpriseResult]   = useState<{
         answer: string;
@@ -101,18 +95,21 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     } | null>(null);
     const [enterpriseError, setEnterpriseError]     = useState('');
 
+    // Search runs across every connector of the user's first (default)
+    // organisation — resolved from the auth context, no manual org selection.
     const handleEnterpriseSearch = async () => {
-        if (!query.trim() || !enterpriseOrgId) return;
+        if (!query.trim()) return;
         setEnterpriseLoading(true);
         setEnterpriseResult(null);
         setEnterpriseError('');
         try {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            // Explicit when known; otherwise the backend defaults to the user's
+            // first membership org (validated against their memberships).
+            if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
             const res = await authFetch(`${API_BASE}/api/mcp/search`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Organization-Id': enterpriseOrgId,
-                },
+                headers,
                 body: JSON.stringify({ query: query.trim() }),
             });
             const data = await res.json();
@@ -167,25 +164,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             return () => clearTimeout(timer);
         }
     }, [alertMessage]);
-
-    // Check query limit for unauthenticated users
-    const checkQueryLimit = (): boolean => {
-        if (isAuthenticated) return true;
-
-        const today = new Date().toDateString();
-        const stored = localStorage.getItem('daily_queries');
-        if (!stored) return true;
-
-        try {
-            const data = JSON.parse(stored);
-            if (data.date === today) {
-                return (data.count || 0) < 5;
-            }
-        } catch (e) {
-            console.error(t('app.errors.dailyQueries'), e);
-        }
-        return true;
-    };
 
     // Mobile detection
     useEffect(() => {
@@ -278,23 +256,15 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!query.trim() || loading || enterpriseLoading) return;
-        if (isEnterpriseMode) { handleEnterpriseSearch(); return; }
-        if (!isAuthenticated && !checkQueryLimit()) { setAlertMessage(t('query.limitReached')); return; }
-        onQuerySubmit(query, researchMode);
-        setQuery('');
+        if (!query.trim() || enterpriseLoading) return;
+        // The search always runs across the org's connectors (Text-to-SQL +
+        // ingested content). No more Enterprise toggle / manual org selection.
+        handleEnterpriseSearch();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            // Check limit before submitting
-            if (query.trim() && !loading) {
-                if (!isAuthenticated && !checkQueryLimit()) {
-                    setAlertMessage(t('query.limitReached'));
-                    return;
-                }
-            }
             handleSubmit(e);
         }
     };
@@ -554,22 +524,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                     )}
                                 </div>
 
-                                {/* Enterprise search toggle */}
-                                <button
-                                    onClick={() => { setIsEnterpriseMode(m => !m); setEnterpriseResult(null); setEnterpriseError(''); }}
-                                    className="rounded-md px-2 py-1 text-xs flex items-center gap-1 transition-colors border"
-                                    style={isEnterpriseMode
-                                        ? { background: '#7c3aed', color: '#fff', borderColor: '#6d28d9' }
-                                        : tc.modeLocal}
-                                    title="Toggle Enterprise Search mode"
-                                >
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
-                                              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-                                    </svg>
-                                    Enterprise
-                                </button>
-
                                 {/* Research mode toggle */}
                     <button
                         onClick={() => setResearchMode(researchMode === 'online' ? 'local' : 'online')}
@@ -608,10 +562,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             {/* Submit button */}
                     <button
                         onClick={handleSubmit}
-                        disabled={loading || !query.trim()}
+                        disabled={loading || enterpriseLoading || !query.trim()}
                         className={`
                             rounded-xl p-2
-                            ${loading || !query.trim()
+                            ${loading || enterpriseLoading || !query.trim()
                                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                                 : 'bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-blue-500/30 active:scale-90 text-white'
                             }
@@ -619,7 +573,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         `}
                         aria-label={t('query.submit')}
                     >
-                                {loading ? (
+                                {(loading || enterpriseLoading) ? (
                                     <svg
                                         className="animate-spin h-4 w-4"
                                         xmlns="http://www.w3.org/2000/svg"
@@ -644,29 +598,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
                     </div>
 
-                    {/* ─── Enterprise Search: org input + results ─── */}
-                    {isEnterpriseMode && (
+                    {/* ─── Search results (across the org's connectors) ─── */}
+                    {(enterpriseLoading || enterpriseError || enterpriseResult) && (
                         <div className="mt-3 flex flex-col gap-3">
-                            {/* Org ID input */}
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium flex-shrink-0" style={{ color: tc.textMuted }}>Org ID</span>
-                                <input
-                                    type="text"
-                                    value={enterpriseOrgId}
-                                    onChange={e => {
-                                        setEnterpriseOrgId(e.target.value);
-                                        localStorage.setItem('flexi_active_org', e.target.value);
-                                    }}
-                                    placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                                    className="flex-1 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-400"
-                                    style={{
-                                        background: tc.inputBg,
-                                        border: `1px solid ${tc.inputBorder}`,
-                                        color: tc.textPrimary,
-                                    }}
-                                />
-                            </div>
-
                             {/* Loading indicator */}
                             {enterpriseLoading && (
                                 <div className="flex items-center gap-2 text-xs" style={{ color: tc.textMuted }}>
