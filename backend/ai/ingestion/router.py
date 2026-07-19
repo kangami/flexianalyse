@@ -21,10 +21,9 @@ import logging
 import os
 from dataclasses import dataclass
 
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-_client = make_openai_client()
 
 ROUTER_MODEL = os.getenv("INGESTION_ROUTER_MODEL", "gpt-4o-mini")
 ROUTER_LLM_ENABLED = os.getenv("INGESTION_ROUTER_LLM", "true").lower() in ("1", "true", "yes")
@@ -93,7 +92,7 @@ Types:
 
 Return JSON exactly: {{"doc_type":"financial|research|legal|generic","confidence":0.0-1.0,"reason":"short"}}"""
 
-    resp = _client.chat.completions.create(
+    resp = get_openai_client().chat.completions.create(
         model=ROUTER_MODEL,
         response_format={"type": "json_object"},
         messages=[

@@ -8,10 +8,9 @@ import json
 import logging
 
 from ai.agents.search.state import SearchState
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-_client = make_openai_client()
 
 RRF_K         = 60    # RRF constant
 TOP_N_RERANK  = 20    # candidates sent to cross-encoder
@@ -103,7 +102,7 @@ Passages:
 {candidates_text}"""
 
     try:
-        response = _client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model="gpt-5-mini",
             response_format={"type": "json_object"},
             messages=[

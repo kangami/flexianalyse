@@ -22,10 +22,9 @@ from config.extensions import db
 from models.knowledge_graph import KGNode, KGEdge
 from models.resource import Resource, ResourceChunk
 from models.connector import Connector
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-openai_client = make_openai_client()
 
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 
@@ -359,7 +358,7 @@ class KnowledgeGraphBuilder:
         Extract named entities using OpenAI.
         Returns list of {name, type, confidence} dicts.
         """
-        response = openai_client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -549,7 +548,7 @@ class KnowledgeGraphBuilder:
         cached = self._embed_cache.get(key)
         if cached is not None:
             return cached
-        response = openai_client.embeddings.create(
+        response = get_openai_client().embeddings.create(
             model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
             input=key,
             dimensions=EMBEDDING_DIMENSIONS,
@@ -575,7 +574,7 @@ class KnowledgeGraphBuilder:
 
         for i in range(0, len(pending), batch_size):
             batch = pending[i:i + batch_size]
-            response = openai_client.embeddings.create(
+            response = get_openai_client().embeddings.create(
                 model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
                 input=batch,
                 dimensions=EMBEDDING_DIMENSIONS,

@@ -9,10 +9,9 @@ import json
 import logging
 
 from ai.agents.search.state import SearchState
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-_client = make_openai_client()
 
 MAX_CONTEXT_CHARS = 12000
 
@@ -185,7 +184,7 @@ information was found for that subject — written in the answer language — an
 nothing else."""
 
     try:
-        response = _client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -247,7 +246,7 @@ def validate_answer(state: SearchState) -> SearchState:
         return {**state, "grounded": True, "confidence": 0.7}
 
     try:
-        response = _client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model="gpt-4o-mini",
             response_format={"type": "json_object"},
             messages=[

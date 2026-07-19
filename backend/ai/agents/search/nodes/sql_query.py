@@ -29,10 +29,9 @@ import logging
 import httpx
 
 from ai.agents.search.state import SearchState
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-_client = make_openai_client()
 
 # Must match services.mcp_http_client.MCP_SERVERS["sql"] / docker-compose port.
 # Tolerate a scheme-less host:port (Render's `fromService: hostport`).
@@ -263,7 +262,7 @@ Rules:
 
 Return JSON exactly as: {{"sql": "..."}}"""
 
-    response = _client.chat.completions.create(
+    response = get_openai_client().chat.completions.create(
         model=SQL_GEN_MODEL,
         response_format={"type": "json_object"},
         messages=[

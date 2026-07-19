@@ -44,3 +44,21 @@ def make_openai_client() -> OpenAI:
             "OpenAI calls won't be traced (node spans still are).", e
         )
         return client
+
+
+_client = None
+
+
+def get_openai_client() -> OpenAI:
+    """Lazy shared OpenAI client.
+
+    Building the client at import time (module-level `make_openai_client()`) meant
+    a missing OPENAI_API_KEY blew up the whole import chain — e.g. creating a
+    connector, which merely imports the ingestion tasks, failed at import. Resolve
+    it on first use instead, so a config error surfaces on the call that needs
+    OpenAI, not on unrelated imports.
+    """
+    global _client
+    if _client is None:
+        _client = make_openai_client()
+    return _client

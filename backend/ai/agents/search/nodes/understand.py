@@ -9,10 +9,9 @@ import json
 import logging
 
 from ai.agents.search.state import SearchState
-from ai.observability import make_openai_client
+from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
-_client = make_openai_client()
 
 _SYSTEM_PROMPT = """You are a search query analyst for an enterprise AI assistant.
 
@@ -71,7 +70,7 @@ def understand_query(state: SearchState) -> SearchState:
         user_content += "\n\nAvailable database tables: " + ", ".join(tables)
 
     try:
-        response = _client.chat.completions.create(
+        response = get_openai_client().chat.completions.create(
             model="gpt-5-mini",
             response_format={"type": "json_object"},
             messages=[
