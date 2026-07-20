@@ -29,12 +29,13 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
 
   if (questions.length === 0) return null;
 
-  const pill = `rounded-full border border-gray-200 bg-white hover:border-purple-400 hover:bg-purple-50/40 text-gray-700 transition-colors ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`;
+  const pill = `flex-shrink-0 whitespace-nowrap rounded-full border border-gray-200 bg-white hover:border-purple-400 hover:bg-purple-50/40 text-gray-700 transition-colors ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`;
 
   return (
-    <div className="flex flex-wrap gap-1.5 mb-2">
+    // Single horizontally-scrollable row — chips never wrap.
+    <div className="flex flex-nowrap gap-1.5 mb-2 overflow-x-auto scrollbar-thin pb-1 -mb-1">
       {questions.slice(0, 4).map((q, i) => (
-        <button key={i} type="button" onClick={() => onPick(q)} className={`${pill} truncate max-w-[280px]`} title={q}>
+        <button key={i} type="button" onClick={() => onPick(q)} className={`${pill} truncate max-w-[240px]`} title={q}>
           {q}
         </button>
       ))}
