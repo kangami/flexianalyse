@@ -68,6 +68,8 @@ def _connector_to_dict(c: Connector) -> dict:
         "name": c.name,
         "status": c.status,
         "created_at": c.created_at.isoformat() if c.created_at else None,
+        "schema_crawl_status": c.schema_crawl_status,
+        "schema_table_count": c.schema_table_count,
     }
 
 
@@ -268,6 +270,12 @@ def register(api_bp) -> None:  # noqa: C901
                 from ai.agents.office_manager.ingestion.tasks import start_ingestion
                 ingestion_task_id = start_ingestion(connector.id, org_id)
 
+            # SQL connectors: also crawl the schema catalog (Text-to-SQL retrieval),
+            # in the background — independent of the document ingestion above.
+            if connector_type == "sql":
+                from ai.agents.office_manager.ingestion.tasks import start_schema_crawl
+                start_schema_crawl(connector.id, org_id)
+
         payload = _connector_to_dict(connector)
         payload["ingestion_task_id"] = ingestion_task_id
         return jsonify(payload), 201
@@ -401,6 +409,20 @@ def register(api_bp) -> None:  # noqa: C901
             return jsonify(result.to_dict())
         except ValueError as exc:
             return _err(str(exc))
+
+    @api_bp.route("/connectors/<connector_id>/schema/crawl", methods=["POST"])
+    def crawl_connector_schema_route(connector_id: str):
+        """(Re)crawl the SQL schema catalog used by Text-to-SQL retrieval."""
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        if connector.type != "sql":
+            return _err("Connector is not of type sql", 409)
+        from ai.agents.office_manager.ingestion.tasks import start_schema_crawl
+        task_id = start_schema_crawl(connector.id, str(connector.organization_id))
+        if not task_id:
+            return _err("Failed to start schema crawl (is the Celery worker running?)", 503)
+        return jsonify({"status": "started", "task_id": task_id})
 
     @api_bp.route("/connectors/<connector_id>/ingest", methods=["POST"])
     def ingest_connector(connector_id: str):

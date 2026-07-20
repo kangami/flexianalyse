@@ -965,6 +965,32 @@ def start_ingestion(connector_id: str, org_id: str) -> str | None:
         return None
 
 
+@celery_app.task(bind=True, max_retries=2)
+def crawl_connector_schema_task(self, connector_id: str, org_id: str):
+    """Crawl + catalogue le schéma d'un connecteur SQL (tâche de fond)."""
+    from services.schema_catalog import crawl_connector_schema
+    return crawl_connector_schema(connector_id, org_id)
+
+
+def start_schema_crawl(connector_id: str, org_id: str) -> str | None:
+    """Enfile un crawl de schéma. Ne lève jamais (sûr depuis un handler HTTP).
+
+    Marque le connecteur 'pending' tout de suite pour que l'UI le reflète avant
+    que le worker ne prenne la tâche. Renvoie l'id de tâche, ou None si l'enfilage
+    a échoué (broker indisponible)."""
+    try:
+        connector = Connector.query.get(UUID(connector_id))
+        if connector:
+            connector.schema_crawl_status = "pending"
+            db.session.commit()
+        task = crawl_connector_schema_task.delay(str(connector_id), str(org_id))
+        logger.info("Schema crawl enqueued for connector %s (task %s)", connector_id, task.id)
+        return task.id
+    except Exception as e:
+        logger.error("Failed to enqueue schema crawl for %s: %s", connector_id, e, exc_info=True)
+        return None
+
+
 @celery_app.task(bind=True, max_retries=3)
 def build_knowledge_graph(self, org_id: str, sync_id: str = None):
     """Build the knowledge graph for an org after ingestion completes."""

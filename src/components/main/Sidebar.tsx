@@ -594,6 +594,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   // Saved connectors list + edit/action state
   const [savedConnectors, setSavedConnectors] = useState<{
     id: string; type: string; engine?: string | null; name: string; status: string;
+    schema_crawl_status?: string | null; schema_table_count?: number | null;
     progress?: { percent: number; status: string; total: number; done: number; failed: number; skipped: number } | null;
   }[]>([]);
   const [connectorsLoading, setConnectorsLoading] = useState(false);
@@ -1450,6 +1451,25 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, [API, selectedOrgId]);
 
+  // Re-crawl the SQL schema catalog (tables/columns/FK + embeddings) used by
+  // Text-to-SQL retrieval — separate from document ingestion.
+  const handleCrawlSchema = useCallback(async (id: string) => {
+    setConnectorBusyId(id);
+    setConnectorMsg(null);
+    try {
+      const r = await authFetch(`${API}/api/v2/connectors/${id}/schema/crawl`, {
+        method: 'POST',
+        headers: { 'X-Organization-Id': selectedOrgId },
+      });
+      if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
+      setConnectorMsg({ text: 'Schema re-sync started!', ok: true });
+    } catch (e: any) {
+      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+    } finally {
+      setConnectorBusyId(null);
+    }
+  }, [API, selectedOrgId]);
+
   const handleDeleteConnector = useCallback(async (id: string) => {
     setConnectorBusyId(id);
     try {
@@ -1865,6 +1885,26 @@ const Sidebar: React.FC<SidebarProps> = ({
                           <span className="text-[9px] text-gray-400 uppercase tracking-wide">{engineMeta ? engineMeta.title : b.label} · {subtitle}</span>
                         </div>
                         <div className="flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
+                          {engineMeta && (
+                            <button
+                              title={
+                                c.schema_crawl_status === 'done'
+                                  ? `Re-sync schema (${c.schema_table_count ?? 0} tables)`
+                                  : c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending'
+                                  ? 'Schema sync in progress…'
+                                  : c.schema_crawl_status === 'failed'
+                                  ? 'Schema sync failed — retry'
+                                  : 'Sync schema (tables for Text-to-SQL)'
+                              }
+                              disabled={busy}
+                              onClick={() => handleCrawlSchema(c.id)}
+                              className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
+                            >
+                              <i className={`bi bi-diagram-3 text-sm ${
+                                c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending' ? 'animate-pulse text-purple-500' : ''
+                              } ${c.schema_crawl_status === 'failed' ? 'text-red-500' : ''}`}></i>
+                            </button>
+                          )}
                           <button
                             title="Sync / ingest"
                             disabled={busy}
