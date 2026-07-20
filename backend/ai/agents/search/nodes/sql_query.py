@@ -77,16 +77,22 @@ def sql_query(state: SearchState) -> SearchState:
         return state
 
     try:
-        database_url = _get_database_url(org_id, state.get("scope_connector_id"))
-        if not database_url:
+        connector = _resolve_sql_connector(org_id, state.get("scope_connector_id"))
+        if not connector:
             logger.info("SQL node skipped — no active SQL connector for org %s", org_id)
             return state
+        database_url = _decrypt_connector_url(connector)
+        if not database_url:
+            logger.info("SQL node skipped — no usable credentials for connector %s", connector.id)
+            return state
 
-        schema = _fetch_schema(database_url)
+        limits = _org_plan_limits(org_id)
+
+        schema = _fetch_schema_smart(connector, query, database_url, limits)
         if not schema:
             return {**state, "sql_error": "Could not read the database schema"}
 
-        sql = _generate_sql(state["query"], schema)
+        sql = _generate_sql(state["query"], schema, limits["sql_model"])
         if not sql:
             # Not answerable from the DB schema → silently fall back to document
             # search (no error note that would pollute a plain document answer).
@@ -99,7 +105,7 @@ def sql_query(state: SearchState) -> SearchState:
 
         result = _call_sql_tool(
             "query_database",
-            {"sql_query": sql, "limit": MAX_RESULT_ROWS},
+            {"sql_query": sql, "limit": limits.get("max_rows", MAX_RESULT_ROWS)},
             database_url,
         )
         if result.get("status") != "success":
@@ -167,15 +173,23 @@ def _looks_like_db_query(query: str) -> bool:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_database_url(org_id: str, connector_id: str | None = None) -> str | None:
-    """Resolve and decrypt the database URL of the org's SQL connector.
+def _org_plan_limits(org_id: str) -> dict:
+    """Plan-tier limits (catalog/retrieval/model/rows) for the org — see config/plans."""
+    from models.organization import Organization
+    from config.plans import plan_limits
+    from uuid import UUID
+    try:
+        org = Organization.query.get(UUID(org_id)) if org_id else None
+        return plan_limits(org.plan if org else None)
+    except Exception:
+        return plan_limits(None)
 
-    When `connector_id` is given (the search-perimeter selector), use that exact
-    connector — but only if it belongs to the org and is an active SQL connector.
-    Otherwise fall back to the org's first active SQL connector.
-    """
-    from models.connector import Connector, ConnectorCredentials
-    from services.encryption_service import EncryptionService
+
+def _resolve_sql_connector(org_id: str, connector_id: str | None = None):
+    """The org's active SQL connector row (the exact one when `connector_id` is
+    given via the search-perimeter selector, else the first). None if none."""
+    from models.connector import Connector
+    from uuid import UUID
 
     q = Connector.query.filter_by(
         organization_id=org_id,
@@ -184,14 +198,17 @@ def _get_database_url(org_id: str, connector_id: str | None = None) -> str | Non
         deleted_at=None,
     )
     if connector_id:
-        from uuid import UUID
         try:
             q = q.filter(Connector.id == UUID(connector_id))
         except (ValueError, TypeError):
             return None
-    connector = q.first()
-    if not connector:
-        return None
+    return q.first()
+
+
+def _decrypt_connector_url(connector) -> str | None:
+    """Decrypt a connector's stored database URL. None if missing/undecryptable."""
+    from models.connector import ConnectorCredentials
+    from services.encryption_service import EncryptionService
 
     creds = ConnectorCredentials.query.filter_by(
         connector_id=connector.id,
@@ -199,12 +216,24 @@ def _get_database_url(org_id: str, connector_id: str | None = None) -> str | Non
     ).first()
     if not creds or not creds.encrypted_token:
         return None
-
     try:
         return EncryptionService().decrypt(creds.encrypted_token)
     except Exception as e:
-        logger.error("Failed to decrypt SQL credentials for org %s: %s", org_id, e)
+        logger.error("Failed to decrypt SQL credentials for connector %s: %s", connector.id, e)
         return None
+
+
+def _get_database_url(org_id: str, connector_id: str | None = None) -> str | None:
+    """Resolve and decrypt the database URL of the org's SQL connector.
+
+    When `connector_id` is given (the search-perimeter selector), use that exact
+    connector — but only if it belongs to the org and is an active SQL connector.
+    Otherwise fall back to the org's first active SQL connector.
+    """
+    connector = _resolve_sql_connector(org_id, connector_id)
+    if not connector:
+        return None
+    return _decrypt_connector_url(connector)
 
 
 def _call_sql_tool(tool_name: str, params: dict, database_url: str, timeout: int = 30) -> dict:
@@ -294,7 +323,109 @@ def _fetch_schema(database_url: str) -> str:
     return schema_str
 
 
-def _generate_sql(question: str, schema: str) -> str:
+# ─────────────────────────────────────────────────────────────────────────────
+# Schema catalog + per-query table retrieval (schema-linking)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_schema_smart(connector, question: str, database_url: str, limits: dict) -> str:
+    """Schema string for the SQL generator, from the persistent catalog when it
+    exists, with per-query table retrieval on large schemas.
+
+    Degradation:
+      - catalog empty (not crawled yet) → live introspection (_fetch_schema)
+      - n <= plan inline_threshold      → all catalogued tables (everything fits)
+      - else                            → top-K by embedding + 1-hop FK expansion
+    """
+    from models.connector_schema import ConnectorSchemaTable
+
+    try:
+        rows = ConnectorSchemaTable.query.filter_by(connector_id=connector.id).all()
+    except Exception as e:
+        logger.warning("Schema catalog read failed (%s) — live introspection", e)
+        return _fetch_schema(database_url)
+
+    if not rows:
+        # Not crawled yet → live introspection for this question (cached in-process).
+        return _fetch_schema(database_url)
+
+    if len(rows) <= limits["inline_threshold"] or not limits["retrieval_top_k"]:
+        selected = rows
+    else:
+        selected = _retrieve_catalog_tables(rows, question, limits)
+        logger.info("Schema retrieval: %d/%d tables selected for the query",
+                    len(selected), len(rows))
+
+    return _render_catalog_schema(selected)
+
+
+def _cosine(a, b) -> float:
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _retrieve_catalog_tables(rows, question: str, limits: dict) -> list:
+    """Top-K tables by embedding similarity to the question, plus a 1-hop FK
+    expansion so join targets / association tables aren't cut off."""
+    from ai.ingestion.embedder import Embedder
+
+    k = limits["retrieval_top_k"]
+    with_emb = [r for r in rows if r.embedding is not None]
+    if not with_emb:
+        return rows[:k]
+
+    q_emb = Embedder().embed_single(question)
+    if not q_emb:
+        return with_emb[:k]
+
+    scored = sorted(with_emb, key=lambda r: _cosine(q_emb, list(r.embedding)), reverse=True)
+    top = scored[:k]
+    selected = {r.table_name: r for r in top}
+
+    if limits.get("fk_expand"):
+        by_name = {r.table_name: r for r in rows}
+        top_names = set(selected.keys())
+        cap = k * 2
+
+        def _add(r):
+            if r is not None and len(selected) < cap:
+                selected.setdefault(r.table_name, r)
+
+        # tables referenced BY the top hits (parent side of a join)
+        for r in top:
+            for fk in (r.foreign_keys or []):
+                _add(by_name.get(fk.get("referred_table")))
+        # tables that reference a top hit (bridge / association tables)
+        for r in rows:
+            if any(fk.get("referred_table") in top_names for fk in (r.foreign_keys or [])):
+                _add(r)
+
+    return list(selected.values())
+
+
+def _render_catalog_schema(rows) -> str:
+    """Render catalogued tables into the `table(col type, ...) [FK: ...]` format
+    the SQL generator expects (same shape as _fetch_schema)."""
+    lines = []
+    for r in rows:
+        cols = ", ".join(
+            f'{c["name"]} {c.get("type", "")}'.strip() for c in (r.columns or [])
+        )
+        line = f"{r.table_name}({cols})"
+        fk_str = "; ".join(
+            f"{','.join(fk.get('columns', []))} -> "
+            f"{fk.get('referred_table')}({','.join(fk.get('referred_columns', []))})"
+            for fk in (r.foreign_keys or []) if fk.get("referred_table")
+        )
+        if fk_str:
+            line += f"  [FK: {fk_str}]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL) -> str:
     """Translate a natural-language question into a single read-only SELECT."""
     prompt = f"""Database schema. Each line is `table(column type, ...)` and may
 end with `[FK: col -> other_table(col)]` describing foreign-key relationships:
@@ -326,7 +457,7 @@ Rules:
 Return JSON exactly as: {{"sql": "..."}}"""
 
     response = get_openai_client().chat.completions.create(
-        model=SQL_GEN_MODEL,
+        model=model or SQL_GEN_MODEL,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": "You are an expert text-to-SQL engine. Return only valid JSON."},
