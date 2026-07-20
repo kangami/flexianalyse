@@ -130,4 +130,6 @@ def run_search(
         "entities":      final_state["entities"],
         "generated_sql": final_state.get("generated_sql", ""),
         "sql_error":     final_state.get("sql_error"),
+        "sql_columns":   final_state.get("sql_columns", []),
+        "sql_rows":      final_state.get("sql_rows", []),
     }

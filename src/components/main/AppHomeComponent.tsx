@@ -4,6 +4,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../../contexts/ThemeContext';
 import { authFetch } from '../../lib/apiClient';
 import { DB_ENGINES, DbEngineLogo } from '../../lib/dbEngines';
+import DbResultGrid from './DbResultGrid';
+import DbChatPanel, { DbTurn } from './DbChatPanel';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -88,20 +90,21 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
     const [enterpriseLoading, setEnterpriseLoading] = useState(false);
-    const [enterpriseResult, setEnterpriseResult]   = useState<{
-        answer: string;
-        sql?: string;
-        citations: { index: number; source: string; type: string; similarity: number }[];
-    } | null>(null);
-    const [enterpriseError, setEnterpriseError]     = useState('');
+    // Multi-turn discussion (in-memory) + the latest result set shown in the grid.
+    const [conversation, setConversation] = useState<DbTurn[]>([]);
+    const [pendingQuery, setPendingQuery]   = useState<string | null>(null);
+    const [tableColumns, setTableColumns]   = useState<string[]>([]);
+    const [tableRows, setTableRows]         = useState<Record<string, unknown>[]>([]);
+    const [tableSql, setTableSql]           = useState<string>('');
 
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
-    const handleEnterpriseSearch = async () => {
-        if (!query.trim()) return;
+    const runSearch = async (q: string) => {
+        const question = q.trim();
+        if (!question || enterpriseLoading) return;
         setEnterpriseLoading(true);
-        setEnterpriseResult(null);
-        setEnterpriseError('');
+        setPendingQuery(question);
+        setQuery('');
         try {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             // Explicit when known; otherwise the backend defaults to the user's
@@ -110,31 +113,49 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const res = await authFetch(`${API_BASE}/api/mcp/search`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ query: query.trim() }),
+                body: JSON.stringify({ query: question }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || res.statusText);
-            // The search agent returns `sources` ({title,type,connector,score}) and
-            // `generated_sql`; the old endpoint returned `citations`. Map to the UI
-            // shape so results (and any live SQL that ran) actually show.
-            const sources: Array<{ title?: string; type?: string; connector?: string; score?: number }> =
-                Array.isArray(data.sources) ? data.sources : [];
-            setEnterpriseResult({
-                answer: data.answer,
+            const sources: DbTurn['sources'] = Array.isArray(data.sources) ? data.sources : [];
+            const columns: string[] = Array.isArray(data.sql_columns) ? data.sql_columns : [];
+            const rows: Record<string, unknown>[] = Array.isArray(data.sql_rows) ? data.sql_rows : [];
+            setConversation(prev => [...prev, {
+                id: `${Date.now()}`,
+                query: question,
+                answer: data.answer || '',
                 sql: data.generated_sql || '',
-                citations: sources.map((s, i) => ({
-                    index: i + 1,
-                    source: s.title || s.connector || 'source',
-                    type: s.type || s.connector || '',
-                    similarity: typeof s.score === 'number' ? s.score / 10 : 0,
-                })),
-            });
-            setQuery('');
+                sqlError: data.sql_error || null,
+                sources,
+            }]);
+            // Refresh the left grid only when this turn actually returned a table.
+            if (columns.length) {
+                setTableColumns(columns);
+                setTableRows(rows);
+                setTableSql(data.generated_sql || '');
+            }
         } catch (e: unknown) {
-            setEnterpriseError((e as Error).message);
+            setConversation(prev => [...prev, {
+                id: `${Date.now()}`,
+                query: question,
+                answer: `⚠️ Search failed: ${(e as Error).message}`,
+                sources: [],
+            }]);
         } finally {
+            setPendingQuery(null);
             setEnterpriseLoading(false);
         }
+    };
+
+    const handleEnterpriseSearch = () => runSearch(query);
+
+    const resetSearch = () => {
+        setConversation([]);
+        setPendingQuery(null);
+        setTableColumns([]);
+        setTableRows([]);
+        setTableSql('');
+        setQuery('');
     };
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -272,6 +293,34 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const closeModal = () => { setActiveConnector(null); setConnectorForm({}); setConnectorMsg(null); };
 
     const activeDef = CONNECTOR_DEFS.find(d => d.id === activeConnector) ?? null;
+
+    // Once a search is submitted, swap the centered hero for the two-pane view:
+    // DBeaver-style result grid on the LEFT, running discussion on the RIGHT.
+    if (conversation.length > 0 || enterpriseLoading) {
+        return (
+            <div className="h-full w-full flex overflow-hidden">
+                {/* LEFT: DBeaver-style grid — desktop only (needs width) */}
+                <div className="hidden md:block flex-1 min-w-0 border-r border-gray-200 h-full">
+                    <DbResultGrid
+                        columns={tableColumns}
+                        rows={tableRows}
+                        sql={tableSql}
+                        loading={enterpriseLoading && tableColumns.length === 0}
+                    />
+                </div>
+                {/* RIGHT: conversation — always visible, full width on mobile */}
+                <div className="w-full md:w-[440px] flex-shrink-0 h-full">
+                    <DbChatPanel
+                        turns={conversation}
+                        pendingQuery={pendingQuery}
+                        loading={enterpriseLoading}
+                        onSubmit={runSearch}
+                        onNewSearch={resetSearch}
+                    />
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="h-full w-full flex flex-col overflow-y-auto" style={tc.pageBg}>
@@ -597,66 +646,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         </div>
 
                     </div>
-
-                    {/* ─── Search results (across the org's connectors) ─── */}
-                    {(enterpriseLoading || enterpriseError || enterpriseResult) && (
-                        <div className="mt-3 flex flex-col gap-3">
-                            {/* Loading indicator */}
-                            {enterpriseLoading && (
-                                <div className="flex items-center gap-2 text-xs" style={{ color: tc.textMuted }}>
-                                    <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                                        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/>
-                                    </svg>
-                                    Enterprise agent running… (may take 10-20s)
-                                </div>
-                            )}
-
-                            {/* Error */}
-                            {enterpriseError && (
-                                <p className="text-xs px-1" style={{ color: '#ef4444' }}>{enterpriseError}</p>
-                            )}
-
-                            {/* Result panel */}
-                            {enterpriseResult && (
-                                <div className="rounded-xl p-4 text-sm" style={{ background: tc.ctrlBg, border: `1px solid ${tc.ctrlBorder}` }}>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <p className="font-semibold text-xs uppercase tracking-wider" style={{ color: tc.textMuted }}>Answer</p>
-                                        <button
-                                            onClick={() => setEnterpriseResult(null)}
-                                            className="text-xs opacity-50 hover:opacity-100 transition-opacity"
-                                            style={{ color: tc.textMuted }}
-                                        >✕</button>
-                                    </div>
-                                    <p className="leading-relaxed whitespace-pre-wrap mb-3" style={{ color: tc.textPrimary }}>
-                                        {enterpriseResult.answer}
-                                    </p>
-                                    {enterpriseResult.sql && (
-                                        <div className="mb-3">
-                                            <p className="text-xs font-semibold mb-1" style={{ color: tc.textMuted }}>Live SQL</p>
-                                            <pre className="text-[11px] rounded-lg px-3 py-2 overflow-x-auto" style={{ background: tc.inputBg, border: `1px solid ${tc.inputBorder}`, color: tc.textPrimary }}>
-                                                <code>{enterpriseResult.sql}</code>
-                                            </pre>
-                                        </div>
-                                    )}
-                                    {enterpriseResult.citations.length > 0 && (
-                                        <>
-                                            <p className="text-xs font-semibold mb-1.5" style={{ color: tc.textMuted }}>Sources</p>
-                                            <div className="flex flex-col gap-1">
-                                                {enterpriseResult.citations.map(c => (
-                                                    <div key={c.index} className="flex items-center gap-2 text-xs" style={{ color: tc.textMuted }}>
-                                                        <span className="font-bold w-5 flex-shrink-0">[{c.index}]</span>
-                                                        <span className="flex-1 truncate">{c.source}</span>
-                                                        <span className="flex-shrink-0 tabular-nums">{Math.round(c.similarity * 100)}%</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    )}
 
                     {/* ─── Connector icon strip (below form) ─── */}
                     <div className="mt-3 flex items-center justify-center flex-wrap gap-2">
