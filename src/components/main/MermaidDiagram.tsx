@@ -3,16 +3,20 @@ import { useTheme } from '../../contexts/ThemeContext';
 
 /**
  * Renders a Mermaid diagram (the database ER schema) to SVG, with zoom + pan.
- * Mermaid is loaded lazily (dynamic import) so it stays out of the main bundle
- * until the user actually opens the diagram.
+ * Mermaid is loaded lazily (dynamic import) so it stays out of the main bundle.
+ *
+ * Mermaid emits a "responsive" SVG (max-width + 100% width) that shrinks to fit
+ * its container — which makes large schemas unreadably small. We force the SVG
+ * to its intrinsic pixel size (from viewBox) so zoom is absolute (scale 1 = 1:1,
+ * readable) and fit-to-view the whole diagram on load.
  */
 
 interface MermaidDiagramProps {
   chart: string;
 }
 
-const MIN_SCALE = 0.3;
-const MAX_SCALE = 4;
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 6;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 let _seq = 0;
@@ -20,6 +24,7 @@ let _seq = 0;
 const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
   const { theme } = useTheme();
   const [svg, setSvg] = useState('');
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
   const [error, setError] = useState('');
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -27,11 +32,11 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
 
-  // Render the chart to SVG (and reset the view when the chart changes).
+  // Render the chart → SVG, forced to intrinsic pixel size.
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!chart?.trim()) { setSvg(''); setError(''); return; }
+      if (!chart?.trim()) { setSvg(''); setDims(null); setError(''); return; }
       try {
         const mod = await import('mermaid') as unknown as {
           default: {
@@ -44,8 +49,22 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
           theme: theme === 'white' ? 'neutral' : 'dark',
           securityLevel: 'strict',
         });
-        const { svg } = await mod.default.render(idRef.current, chart);
-        if (!cancelled) { setSvg(svg); setError(''); setScale(1); setPos({ x: 0, y: 0 }); }
+        const res = await mod.default.render(idRef.current, chart);
+        if (cancelled) return;
+
+        let out = res.svg;
+        let w = 0, h = 0;
+        const vb = out.match(/viewBox="[\d.\-]+ [\d.\-]+ ([\d.]+) ([\d.]+)"/);
+        if (vb) {
+          w = parseFloat(vb[1]); h = parseFloat(vb[2]);
+          const styleAttr = `style="max-width:none;width:${w}px;height:${h}px;"`;
+          out = /<svg[^>]*\sstyle="/.test(out)
+            ? out.replace(/(<svg[^>]*?)\sstyle="[^"]*"/, `$1 ${styleAttr}`)
+            : out.replace(/<svg /, `<svg ${styleAttr} `);
+        }
+        setSvg(out);
+        setDims(w && h ? { w, h } : null);
+        setError('');
       } catch (e) {
         if (!cancelled) setError((e as Error).message || 'Failed to render diagram');
       }
@@ -53,7 +72,17 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     return () => { cancelled = true; };
   }, [chart, theme]);
 
-  // Wheel zoom around the cursor. Native non-passive listener so preventDefault works.
+  // Fit the whole diagram into the view once it's rendered.
+  useEffect(() => {
+    if (!dims || !containerRef.current) return;
+    const { width: cw, height: ch } = containerRef.current.getBoundingClientRect();
+    if (!cw || !ch) return;
+    const fit = clamp(Math.min((cw - 24) / dims.w, (ch - 24) / dims.h), MIN_SCALE, 1.5);
+    setScale(fit);
+    setPos({ x: Math.max(12, (cw - dims.w * fit) / 2), y: 12 });
+  }, [dims]);
+
+  // Wheel zoom around the cursor (native non-passive listener for preventDefault).
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -63,12 +92,8 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
       setScale((prev) => {
-        const next = clamp(prev * (e.deltaY < 0 ? 1.12 : 0.89), MIN_SCALE, MAX_SCALE);
-        // Keep the point under the cursor stable while zooming.
-        setPos((p) => ({
-          x: cx - (cx - p.x) * (next / prev),
-          y: cy - (cy - p.y) * (next / prev),
-        }));
+        const next = clamp(prev * (e.deltaY < 0 ? 1.15 : 0.87), MIN_SCALE, MAX_SCALE);
+        setPos((p) => ({ x: cx - (cx - p.x) * (next / prev), y: cy - (cy - p.y) * (next / prev) }));
         return next;
       });
     };
@@ -76,9 +101,7 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     return () => el.removeEventListener('wheel', onWheel);
   }, [svg]);
 
-  const onMouseDown = (e: React.MouseEvent) => {
-    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y };
-  };
+  const onMouseDown = (e: React.MouseEvent) => { dragRef.current = { sx: e.clientX, sy: e.clientY, ox: pos.x, oy: pos.y }; };
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const d = dragRef.current;
     if (!d) return;
@@ -87,7 +110,13 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
   const endDrag = () => { dragRef.current = null; };
 
   const zoomBy = (f: number) => setScale((s) => clamp(s * f, MIN_SCALE, MAX_SCALE));
-  const reset = () => { setScale(1); setPos({ x: 0, y: 0 }); };
+  const fitView = () => {
+    if (!dims || !containerRef.current) { setScale(1); setPos({ x: 0, y: 0 }); return; }
+    const { width: cw, height: ch } = containerRef.current.getBoundingClientRect();
+    const fit = clamp(Math.min((cw - 24) / dims.w, (ch - 24) / dims.h), MIN_SCALE, 1.5);
+    setScale(fit);
+    setPos({ x: Math.max(12, (cw - dims.w * fit) / 2), y: 12 });
+  };
 
   if (error) {
     return <div className="p-4 text-xs text-red-500">Diagram error: {error}</div>;
@@ -106,18 +135,16 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-white">
-      {/* Zoom controls */}
       <div className="absolute top-2 right-2 z-10 flex flex-col rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden">
-        <button onClick={() => zoomBy(1.2)} className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 border-b border-gray-100" title="Zoom in">+</button>
-        <button onClick={() => zoomBy(0.83)} className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 border-b border-gray-100" title="Zoom out">−</button>
-        <button onClick={reset} className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Reset view">
+        <button onClick={() => zoomBy(1.25)} className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 border-b border-gray-100" title="Zoom in">+</button>
+        <button onClick={() => zoomBy(0.8)} className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 border-b border-gray-100" title="Zoom out">−</button>
+        <button onClick={fitView} className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100" title="Fit to view">
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
           </svg>
         </button>
       </div>
 
-      {/* Pannable / zoomable canvas */}
       <div
         ref={containerRef}
         className="w-full h-full cursor-grab active:cursor-grabbing select-none"
@@ -127,8 +154,8 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
         onMouseLeave={endDrag}
       >
         <div
-          className="origin-top-left [&_svg]:max-w-none"
-          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0', width: 'max-content' }}
+          className="inline-block"
+          style={{ transform: `translate(${pos.x}px, ${pos.y}px) scale(${scale})`, transformOrigin: '0 0' }}
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
