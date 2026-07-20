@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import MarkdownResponse from './MarkdownResponse';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 import SuggestionChips from './SuggestionChips';
+import SearchProgress from './SearchProgress';
 
 /**
  * Clean conversation panel for the RIGHT pane — driven by /api/mcp/search
@@ -127,13 +128,7 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
         {loading && pendingQuery && (
           <div className="flex flex-col gap-3">
             <UserBubble text={pendingQuery} />
-            <div className="flex items-center gap-2 text-gray-400 text-sm px-1">
-              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
-                <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
-              </svg>
-              Searching across your connectors…
-            </div>
+            <SearchProgress />
           </div>
         )}
       </div>
