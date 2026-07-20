@@ -16,6 +16,11 @@ class Connector(db.Model):
     engine = db.Column(db.String, nullable=True)
     name = db.Column(db.String, nullable=False)
     status = db.Column(db.String, default='active')
+    # Crawl du catalogue de schéma (connecteurs SQL) : état du dernier crawl,
+    # date, et nombre de tables catalogué. Alimente le retrieval de tables.
+    schema_crawl_status = db.Column(db.String, nullable=True)  # pending | running | done | failed
+    schema_crawled_at = db.Column(db.DateTime, nullable=True)
+    schema_table_count = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = db.Column(db.DateTime, nullable=True)
 
