@@ -215,14 +215,23 @@ def _call_sql_tool(tool_name: str, params: dict, database_url: str, timeout: int
     return resp.json()
 
 
-def fetch_tables_meta(database_url: str) -> list[dict]:
+# Schema introspection is far slower than a data query on a large database
+# (dozens of catalog queries), so it gets its own, more generous HTTP timeout.
+SCHEMA_FETCH_TIMEOUT = int(os.getenv("SQL_SCHEMA_TIMEOUT", "90"))
+
+
+def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> list[dict]:
     """Structured schema: [{name, columns:[{name,type,pk}], foreign_keys:[...]}].
 
-    Uses the batched `show_full_schema` (one round-trip); falls back to the old
-    per-table calls if the MCP server predates that tool, so a rolling deploy
-    keeps working. Shared by the Text-to-SQL node and the dbAnalyse agent.
+    Uses the batched `show_full_schema` (one round-trip, bulk reflection); `limit`
+    caps how many tables the server introspects so a large database (hundreds of
+    tables) doesn't time out — the callers only render the first N anyway. Falls
+    back to the old per-table calls if the MCP server predates that tool, so a
+    rolling deploy keeps working. Shared by the Text-to-SQL node and dbAnalyse.
     """
-    res = _call_sql_tool("show_full_schema", {}, database_url)
+    res = _call_sql_tool(
+        "show_full_schema", {"limit": limit}, database_url, timeout=SCHEMA_FETCH_TIMEOUT
+    )
     if res.get("status") == "success" and isinstance(res.get("tables"), list):
         return [
             {
@@ -237,7 +246,7 @@ def fetch_tables_meta(database_url: str) -> list[dict]:
         ]
 
     # Fallback — per-table introspection (older MCP server without show_full_schema).
-    names = (_call_sql_tool("show_tables", {}, database_url).get("tables") or [])[:MAX_TABLES_IN_PROMPT]
+    names = (_call_sql_tool("show_tables", {}, database_url).get("tables") or [])[:limit]
     out = []
     for name in names:
         try:

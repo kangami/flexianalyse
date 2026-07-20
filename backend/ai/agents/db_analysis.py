@@ -69,7 +69,7 @@ def _introspect(db_url: str) -> list[dict]:
     """[{name, columns:[{name,type,pk}], fks:[{columns,referred_table}]}] per table.
     One batched round-trip via the shared fetch_tables_meta."""
     out = []
-    for t in fetch_tables_meta(db_url)[:MAX_TABLES]:
+    for t in fetch_tables_meta(db_url, limit=MAX_TABLES)[:MAX_TABLES]:
         out.append({
             "name": t["name"],
             "columns": t["columns"],

@@ -77,9 +77,10 @@ async def show_tables() -> dict:
     return sql_tools.show_tables()
 
 @mcp.tool()
-async def show_full_schema() -> dict:
-    """All tables' columns, primary keys and foreign keys in one call"""
-    return sql_tools.show_full_schema()
+async def show_full_schema(limit: int | None = None) -> dict:
+    """All tables' columns, primary keys and foreign keys in one call.
+    `limit` caps how many tables are introspected (large schemas)."""
+    return sql_tools.show_full_schema(limit)
 
 @mcp.tool()
 async def show_table_schema(table_name: str) -> dict:
@@ -150,7 +151,7 @@ async def execute_tool(request: Request):
         if tool_name == "show_tables":
             return tools.show_tables()
         elif tool_name == "show_full_schema":
-            return tools.show_full_schema()
+            return tools.show_full_schema(params.get("limit"))
         elif tool_name == "query_database":
             return tools.query_database(
                 params.get("sql_query", ""),

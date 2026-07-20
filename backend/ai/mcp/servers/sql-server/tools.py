@@ -74,25 +74,59 @@ class SQLTools:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    def show_full_schema(self) -> dict[str, Any]:
-        """Every table's columns + PK + FK in ONE round-trip.
+    @staticmethod
+    def _by_table(multi_result, name_set: set) -> dict:
+        """Normalise get_multi_* output ({(schema, table): value}) to {table: value},
+        keeping only the tables we asked for (default schema)."""
+        out: dict = {}
+        for key, value in dict(multi_result).items():
+            table = key[1] if isinstance(key, tuple) else key
+            if table in name_set and table not in out:
+                out[table] = value
+        return out
 
-        Replaces N per-table calls (one HTTP request + one engine/connection each)
-        with a single request that reuses one connection — the main latency win for
-        Text-to-SQL and the schema diagram.
+    def show_full_schema(self, limit: int | None = None) -> dict[str, Any]:
+        """Every table's columns + PK + FK.
+
+        On large schemas the old per-table reflection issued 3×N catalog queries
+        (get_columns / get_pk_constraint / get_foreign_keys per table) and blew
+        past the client HTTP timeout. This uses SQLAlchemy 2.0 **bulk reflection**
+        (get_multi_*) — a handful of catalog queries for ALL tables at once — and
+        honours `limit` so a huge database (thousands of tables) still answers
+        quickly, since the caller only renders the first N. Falls back to per-table
+        reflection when the bulk API is unavailable.
         """
         try:
             inspector = inspect(self.engine)
+            names = inspector.get_table_names()
+            if limit is not None and limit >= 0:
+                names = names[:limit]
+            name_set = set(names)
+
+            # Bulk path — one query per metadata kind for all requested tables.
+            cols_by = pk_by = fk_by = None
+            try:
+                cols_by = self._by_table(inspector.get_multi_columns(filter_names=names), name_set)
+                pk_by   = self._by_table(inspector.get_multi_pk_constraint(filter_names=names), name_set)
+                fk_by   = self._by_table(inspector.get_multi_foreign_keys(filter_names=names), name_set)
+            except Exception as e:
+                logger.warning("bulk reflection unavailable (%s) — per-table fallback", e)
+                cols_by = None
+
             out = []
-            for table_name in inspector.get_table_names():
+            for table_name in names:
                 try:
-                    columns = inspector.get_columns(table_name)
-                    pk = inspector.get_pk_constraint(table_name)
-                    try:
-                        fks = inspector.get_foreign_keys(table_name)
-                    except Exception:
-                        fks = []
-                    pk_cols = pk.get("constrained_columns", [])
+                    if cols_by is not None:
+                        columns = cols_by.get(table_name, [])
+                        pk_cols = (pk_by.get(table_name) or {}).get("constrained_columns", []) if pk_by else []
+                        fks     = fk_by.get(table_name, []) if fk_by else []
+                    else:
+                        columns = inspector.get_columns(table_name)
+                        pk_cols = inspector.get_pk_constraint(table_name).get("constrained_columns", [])
+                        try:
+                            fks = inspector.get_foreign_keys(table_name)
+                        except Exception:
+                            fks = []
                     out.append({
                         "table": table_name,
                         "columns": [
@@ -104,7 +138,7 @@ class SQLTools:
                             }
                             for c in columns
                         ],
-                        "primary_keys": pk_cols,
+                        "primary_keys": list(pk_cols),
                         "foreign_keys": [
                             {
                                 "columns": fk.get("constrained_columns", []),
