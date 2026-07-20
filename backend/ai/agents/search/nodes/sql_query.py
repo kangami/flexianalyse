@@ -41,7 +41,9 @@ if SQL_MCP_URL and "://" not in SQL_MCP_URL:
 
 MAX_TABLES_IN_PROMPT = 30    # include enough tables so JOIN targets aren't cut off
 MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context
-SQL_GEN_MODEL        = "gpt-4o-mini"
+# gpt-4o (not -mini) is markedly more reliable at multi-table joins, esp. joining
+# through association tables — worth the cost for correctness. Override via env.
+SQL_GEN_MODEL        = os.getenv("SQL_GEN_MODEL", "gpt-4o")
 
 # In-process schema cache (per database URL) — avoids 1+N introspection HTTP
 # calls on every DB query. Short TTL so schema changes are picked up.
@@ -254,8 +256,19 @@ Write a single read-only SQL SELECT query (PostgreSQL dialect) that answers it.
 Rules:
 - SELECT statements ONLY — never INSERT/UPDATE/DELETE/DROP/ALTER/etc.
 - Use only tables and columns that appear in the schema above.
-- When the question spans related tables, JOIN them using the [FK: ...]
-  relationships shown in the schema.
+- JOIN tables ONLY along the [FK: ...] relationships shown. NEVER join two tables
+  on columns that are not linked by a foreign key — in particular do NOT join two
+  tables on their `id` columns unless an FK explicitly says so.
+- Many-to-many relationships go through an association/junction table. If the two
+  tables the question needs have no direct FK between them, find the table whose
+  foreign keys reference BOTH and join through it. Example: users and
+  organizations are linked via memberships — users.id ← memberships.user_id and
+  memberships.organization_id → organizations.id — so join
+  users JOIN memberships ON ... JOIN organizations ON ...
+- Trace the FK path before writing joins. If no FK path connects the needed
+  tables, return an empty string.
+- When grouping "X by Y" (e.g. users by organization), select a Y label column
+  (e.g. organizations.name) alongside the X rows and ORDER BY it.
 - Do not append a trailing semicolon.
 - Do not add a LIMIT clause; a row limit is applied automatically.
 - If the question cannot be answered from this schema, return an empty string.
