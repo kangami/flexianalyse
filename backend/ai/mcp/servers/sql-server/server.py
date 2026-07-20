@@ -72,6 +72,11 @@ mcp = FastMCP("sql-server")
 # ============================================================================
 
 @mcp.tool()
+async def test_connection() -> dict:
+    """Fast connectivity check: connect, probe, count tables"""
+    return sql_tools.test_connection()
+
+@mcp.tool()
 async def show_tables() -> dict:
     """List all tables in the database"""
     return sql_tools.show_tables()
@@ -148,7 +153,9 @@ async def execute_tool(request: Request):
         else:
             tools = sql_tools  # défaut global
 
-        if tool_name == "show_tables":
+        if tool_name == "test_connection":
+            return tools.test_connection()
+        elif tool_name == "show_tables":
             return tools.show_tables()
         elif tool_name == "show_full_schema":
             return tools.show_full_schema(params.get("limit"))

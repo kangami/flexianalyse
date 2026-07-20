@@ -30,6 +30,11 @@ DEFAULT_PORTS = {
 SUPPORTED_ENGINES = tuple(DB_SCHEMES.keys())
 
 
+def _truthy(value) -> bool:
+    """Interprète une valeur de formulaire (« true », « 1 », on…) comme booléen."""
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_database_url(
     engine: str,
     host: str,
@@ -38,11 +43,14 @@ def build_database_url(
     username: str | None = None,
     password: str | None = None,
     service_name: str | None = None,
+    ssl: bool | str | None = None,
 ) -> str:
     """Assemble une URL SQLAlchemy pour le moteur donné.
 
-    Oracle utilise `?service_name=` (le champ `database` sert de repli). Lève
-    ValueError si le moteur est inconnu ou l'hôte manquant.
+    Oracle utilise `?service_name=` (le champ `database` sert de repli). `ssl`
+    force le chiffrement pour les bases cloud managées qui l'exigent (Postgres →
+    `sslmode=require`, MySQL/MariaDB → SSL activé). Lève ValueError si le moteur
+    est inconnu ou l'hôte manquant.
     """
     scheme = DB_SCHEMES.get(engine)
     if not scheme:
@@ -54,6 +62,7 @@ def build_database_url(
     pwd = quote_plus(password) if password else ""
     auth = f"{user}:{pwd}@" if (user or pwd) else ""
     port = port or DEFAULT_PORTS[engine]
+    use_ssl = _truthy(ssl)
 
     if engine == "oracle":
         svc = service_name or database
@@ -62,4 +71,14 @@ def build_database_url(
         return f"{scheme}://{auth}{host}:{port}/?service_name={quote_plus(str(svc))}"
 
     db_part = database or ""
-    return f"{scheme}://{auth}{host}:{port}/{db_part}"
+    url = f"{scheme}://{auth}{host}:{port}/{db_part}"
+
+    if use_ssl:
+        # Chaque pilote a son paramètre : Postgres/psycopg2 → sslmode, mysql-connector
+        # → ssl_disabled=false. (Oracle thin et pymssql négocient TLS autrement.)
+        if engine == "postgresql":
+            url += "?sslmode=require"
+        elif engine in ("mysql", "mariadb"):
+            url += "?ssl_disabled=false"
+
+    return url

@@ -1,11 +1,18 @@
 """SQL Database Tools for fastMcp"""
+import os
 import re
 from typing import Any
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Seconds to wait for the initial TCP/handshake before giving up. Keeps an
+# unreachable host (firewall not whitelisting us, wrong port, DB down) from
+# hanging until the caller's HTTP timeout — it fails fast with a real error.
+CONNECT_TIMEOUT = int(os.getenv("SQL_CONNECT_TIMEOUT", "8"))
 
 
 class SQLTools:
@@ -28,10 +35,27 @@ class SQLTools:
         self.dialect = ""
         self._connect()
 
+    def _connect_args(self) -> dict:
+        """Per-driver connect-timeout kwargs so a dead host fails in ~CONNECT_TIMEOUT
+        seconds instead of hanging. Each DBAPI names the option differently."""
+        try:
+            backend = make_url(self.database_url).get_backend_name()
+        except Exception:
+            backend = ""
+        t = CONNECT_TIMEOUT
+        return {
+            "postgresql": {"connect_timeout": t},
+            "mysql":      {"connection_timeout": t},   # mysql-connector-python
+            "oracle":     {"tcp_connect_timeout": t},  # python-oracledb (thin)
+            "mssql":      {"login_timeout": t, "timeout": t},  # pymssql
+        }.get(backend, {})
+
     def _connect(self):
         """Establish database connection (dialect-aware probe)."""
         try:
-            self.engine = create_engine(self.database_url, poolclass=NullPool)
+            self.engine = create_engine(
+                self.database_url, poolclass=NullPool, connect_args=self._connect_args()
+            )
             # SQLAlchemy normalises the backend name: 'postgresql', 'mysql'
             # (also MariaDB), 'oracle', 'mssql', 'sqlite'.
             self.dialect = self.engine.dialect.name
@@ -41,6 +65,19 @@ class SQLTools:
         except Exception as e:
             logger.error(f"✗ Database connection failed: {str(e)}")
             raise
+
+    def test_connection(self) -> dict[str, Any]:
+        """Fast connectivity check for the pre-save 'Test connection' button.
+
+        The constructor already opened the connection and ran the liveness probe,
+        so if we got here the DB is reachable and the credentials work; we just
+        report the dialect and how many tables were found.
+        """
+        try:
+            tables = inspect(self.engine).get_table_names()
+            return {"status": "success", "dialect": self.dialect, "table_count": len(tables)}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     def _probe_query(self) -> str:
         """Trivial liveness query — Oracle has no bare `SELECT 1`."""

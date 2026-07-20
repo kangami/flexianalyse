@@ -94,8 +94,36 @@ def _resolve_sql_token(data: dict) -> str | None:
             username=connection.get("username"),
             password=connection.get("password"),
             service_name=connection.get("service_name"),
+            ssl=connection.get("ssl"),
         )
     return data.get("token")
+
+
+def _friendly_db_error(raw: str) -> str:
+    """Traduit une erreur brute de pilote SQL en message actionnable.
+
+    Les erreurs de connexion cloud tournent presque toujours autour de 3 causes :
+    joignabilité (pare-feu / IP non whitelistées), SSL, ou identifiants. On mappe
+    les signatures connues vers un conseil clair et on renvoie le brut sinon.
+    """
+    r = (raw or "").lower()
+    reach = ("timed out", "timeout", "could not connect", "connection refused",
+             "can't connect", "name or service not known", "could not translate host")
+    ssl_sigs = ("ssl", "no encryption", "server does not support ssl")
+    auth_sigs = ("password authentication failed", "access denied",
+                 "login failed", "authentication failed")
+    db_sigs = ("does not exist", "unknown database", "database not found")
+
+    if not r or any(s in r for s in reach):
+        return ("Base injoignable (timeout/refus). Vérifie l'hôte et le port, et "
+                "autorise les IP de sortie de Render dans le pare-feu de la base.")
+    if any(s in r for s in ssl_sigs):
+        return "La base exige SSL. Coche l'option « Connexion SSL » et réessaie."
+    if any(s in r for s in auth_sigs):
+        return "Identifiants refusés — vérifie l'utilisateur et le mot de passe."
+    if any(s in r for s in db_sigs):
+        return "Base ou schéma introuvable — vérifie le nom de la base."
+    return raw.strip() or "Connexion échouée."
 
 
 def _connector_progress(connector_id) -> dict:
@@ -295,6 +323,56 @@ def register(api_bp) -> None:  # noqa: C901
     # ------------------------------------------------------------------
     # Connection test
     # ------------------------------------------------------------------
+
+    @api_bp.route("/connectors/test-connection", methods=["POST"])
+    def test_connection_presave():
+        """Test a SQL connection BEFORE creating the connector.
+
+        Takes the same structured `connection` fields as create (engine + host/
+        port/database/user/password[/ssl]), assembles the URL and probes it via
+        the SQL MCP server with a short timeout — so the user gets an immediate,
+        clear verdict instead of discovering a bad connection 30s later in the
+        ingestion logs. Nothing is persisted.
+        """
+        data = request.get_json() or {}
+        try:
+            token = _resolve_sql_token(data)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)})
+        if not token:
+            return jsonify({"ok": False, "error": "Renseigne les champs de connexion."})
+
+        import httpx
+        from services.mcp_http_client import MCP_SERVERS
+
+        mcp_url = MCP_SERVERS.get("sql")
+        try:
+            resp = httpx.post(
+                f"{mcp_url}/execute",
+                json={"tool_name": "test_connection", "params": {}, "database_url": token},
+                timeout=20,
+            )
+            if resp.status_code >= 400:
+                # The MCP wraps connection failures as {"detail": "..."} (HTTP 500).
+                try:
+                    detail = resp.json().get("detail") or resp.text
+                except Exception:
+                    detail = resp.text
+                return jsonify({"ok": False, "error": _friendly_db_error(detail)})
+
+            result = resp.json()
+            if result.get("status") == "success":
+                return jsonify({
+                    "ok": True,
+                    "dialect": result.get("dialect"),
+                    "table_count": result.get("table_count"),
+                })
+            return jsonify({"ok": False, "error": _friendly_db_error(result.get("message", ""))})
+        except httpx.TimeoutException:
+            return jsonify({"ok": False, "error": _friendly_db_error("timed out")})
+        except Exception as exc:
+            logger.error("test-connection failed: %s", exc, exc_info=True)
+            return jsonify({"ok": False, "error": _friendly_db_error(str(exc))})
 
     @api_bp.route("/connectors/<connector_id>/test", methods=["POST"])
     def test_connector(connector_id: str):

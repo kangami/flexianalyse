@@ -590,6 +590,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [connectorForm, setConnectorForm] = useState<Record<string, string>>({});
   const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [connectorSaving, setConnectorSaving] = useState(false);
+  const [connectorTesting, setConnectorTesting] = useState(false);
   // Saved connectors list + edit/action state
   const [savedConnectors, setSavedConnectors] = useState<{
     id: string; type: string; engine?: string | null; name: string; status: string;
@@ -1477,6 +1478,44 @@ const Sidebar: React.FC<SidebarProps> = ({
     setConnectorMsg(null);
   }, []);
 
+  // Probe a DB connection BEFORE saving so the user gets an immediate verdict
+  // (reachable? SSL? credentials?) instead of a silent failure during ingestion.
+  const handleTestConnection = useCallback(async () => {
+    if (!activeConnectorType || !DB_CONNECTORS.has(activeConnectorType)) return;
+    setConnectorTesting(true);
+    setConnectorMsg(null);
+    try {
+      if (!selectedOrgId) throw new Error('Select an organisation first (Organisation tab)');
+      const engine = getDbEngine(activeConnectorType);
+      const connection: Record<string, string> = {};
+      engine?.fields.forEach(f => {
+        const v = connectorForm[f.key];
+        if (v) connection[f.key] = v;
+      });
+      if (connectorForm.ssl === 'true') connection.ssl = 'true';
+      if (!connection.host) throw new Error('Host is required');
+      const dbKey = activeConnectorType === 'oracle' ? 'service_name' : 'database';
+      if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? 'Service name is required' : 'Database is required');
+
+      const r = await authFetch(`${API}/api/v2/connectors/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Organization-Id': selectedOrgId },
+        body: JSON.stringify({ engine: activeConnectorType, connection }),
+      });
+      const res = await r.json();
+      if (res.ok) {
+        const n = res.table_count ?? 0;
+        setConnectorMsg({ text: `Connecté (${res.dialect}) — ${n} table${n === 1 ? '' : 's'} détectée${n === 1 ? '' : 's'}.`, ok: true });
+      } else {
+        setConnectorMsg({ text: res.error || 'Connexion échouée.', ok: false });
+      }
+    } catch (e: any) {
+      setConnectorMsg({ text: `${e.message || e}`, ok: false });
+    } finally {
+      setConnectorTesting(false);
+    }
+  }, [activeConnectorType, connectorForm, API, selectedOrgId]);
+
   const handleSaveConnector = useCallback(async () => {
     if (!activeConnectorType) return;
     setConnectorSaving(true);
@@ -1511,6 +1550,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           const v = connectorForm[f.key];
           if (v) connection[f.key] = v;
         });
+        if (connectorForm.ssl === 'true') connection.ssl = 'true';
         if (!isEdit) {
           if (!connection.host) throw new Error('Host is required');
           const dbKey = activeConnectorType === 'oracle' ? 'service_name' : 'database';
@@ -1661,6 +1701,20 @@ const Sidebar: React.FC<SidebarProps> = ({
               />
             </div>
           ))}
+
+          {/* SSL toggle — cloud-managed DBs (RDS, Cloud SQL, Supabase, Neon…)
+              often require it. Only wired for engines whose driver we set it on. */}
+          {['postgresql', 'mysql', 'mariadb'].includes(activeConnectorType) && (
+            <label className="flex items-center gap-2 mt-0.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={connectorForm.ssl === 'true'}
+                onChange={e => setConnectorForm(f => ({ ...f, ssl: e.target.checked ? 'true' : '' }))}
+                className="rounded border-gray-300 text-purple-600 focus:ring-purple-400"
+              />
+              <span className="text-[11px] text-gray-600">Connexion SSL (requis par certaines bases cloud)</span>
+            </label>
+          )}
         </div>
 
         {connectorMsg && (
@@ -1669,24 +1723,41 @@ const Sidebar: React.FC<SidebarProps> = ({
           </p>
         )}
 
-        <button
-          disabled={connectorSaving}
-          onClick={handleSaveConnector}
-          className="w-full text-xs px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
-        >
-          {connectorSaving ? (
-            'Saving…'
-          ) : isEdit ? (
-            'Save Changes'
-          ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
-            <>
-              <i className="bi bi-box-arrow-up-right text-[11px]"></i>
-              Connect with {activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft'}
-            </>
-          ) : (
-            'Save Connection'
+        <div className="flex flex-col gap-2">
+          {/* Test connection — DB connectors only, before saving. */}
+          {DB_CONNECTORS.has(activeConnectorType) && (
+            <button
+              disabled={connectorTesting || connectorSaving}
+              onClick={handleTestConnection}
+              className="w-full text-xs px-3 py-2 rounded-lg border border-purple-300 text-purple-700 hover:bg-purple-50 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
+            >
+              {connectorTesting ? (
+                <><i className="bi bi-arrow-repeat animate-spin text-[11px]"></i> Test en cours…</>
+              ) : (
+                <><i className="bi bi-plug text-[11px]"></i> Tester la connexion</>
+              )}
+            </button>
           )}
-        </button>
+
+          <button
+            disabled={connectorSaving}
+            onClick={handleSaveConnector}
+            className="w-full text-xs px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
+          >
+            {connectorSaving ? (
+              'Saving…'
+            ) : isEdit ? (
+              'Save Changes'
+            ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
+              <>
+                <i className="bi bi-box-arrow-up-right text-[11px]"></i>
+                Connect with {activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft'}
+              </>
+            ) : (
+              'Save Connection'
+            )}
+          </button>
+        </div>
       </div>
     );
   };

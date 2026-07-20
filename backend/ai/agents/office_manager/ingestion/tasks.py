@@ -824,7 +824,9 @@ def _list_sql_resources(connector: Connector, org_id: str) -> list[dict]:
             for table in result.get('tables', [])
         ]
     except Exception as e:
-        logger.error("Failed to list SQL tables for connector %s: %s", connector.id, e)
+        # repr(e) — several driver/timeout exceptions have an empty str(e), which
+        # made this log unhelpfully blank; repr keeps the type and any detail.
+        logger.error("Failed to list SQL tables for connector %s: %r", connector.id, e)
         return []
 
 
