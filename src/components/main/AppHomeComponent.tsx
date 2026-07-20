@@ -6,6 +6,7 @@ import { authFetch } from '../../lib/apiClient';
 import { DB_ENGINES, DbEngineLogo } from '../../lib/dbEngines';
 import DbResultGrid from './DbResultGrid';
 import DbChatPanel, { DbTurn } from './DbChatPanel';
+import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -19,8 +20,6 @@ interface AppHomeComponentProps {
 
 const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     loading,
-    selectedModel,
-    setSelectedModel,
     researchMode,
     setResearchMode,
 }) => {
@@ -82,7 +81,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [query, setQuery] = useState<string>('');
     const [isMobile, setIsMobile] = useState(false);
     const [alertMessage, setAlertMessage] = useState<string>('');
-    const [isModelPopupOpen, setIsModelPopupOpen] = useState(false);
     const [currentFeature, setCurrentFeature] = useState(0);
     const [activeConnector, setActiveConnector] = useState<string | null>(null);
     const [connectorForm, setConnectorForm] = useState<Record<string, string>>({});
@@ -96,6 +94,23 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [tableColumns, setTableColumns]   = useState<string[]>([]);
     const [tableRows, setTableRows]         = useState<Record<string, unknown>[]>([]);
     const [tableSql, setTableSql]           = useState<string>('');
+
+    // Connectors of the org — feed the perimeter selector and the engine badges.
+    const [connectors, setConnectors]       = useState<ScopeConnector[]>([]);
+    const [searchScope, setSearchScope]     = useState<string | null>(null); // null = all context
+
+    useEffect(() => {
+        const headers: Record<string, string> = {};
+        if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
+        authFetch(`${API_BASE}/api/v2/connectors`, { headers })
+            .then(r => r.json())
+            .then(d => setConnectors(Array.isArray(d.data) ? d.data : []))
+            .catch(() => {});
+    }, [account?.organization_id]);
+
+    // Number of connectors per engine (for the notification-style badges).
+    const engineCounts: Record<string, number> = {};
+    for (const c of connectors) if (c.engine) engineCounts[c.engine] = (engineCounts[c.engine] || 0) + 1;
 
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
@@ -113,7 +128,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const res = await authFetch(`${API_BASE}/api/mcp/search`, {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ query: question }),
+                // connector_id scopes the live SQL to one database; null = all context.
+                body: JSON.stringify({ query: question, connector_id: searchScope }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || res.statusText);
@@ -159,22 +175,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     };
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const modelPopupRef = useRef<HTMLDivElement>(null);
-    const modelBadgeRef = useRef<HTMLDivElement>(null);
-
-    // Close model popup on outside click
-    useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (
-                modelPopupRef.current && !modelPopupRef.current.contains(e.target as Node) &&
-                modelBadgeRef.current && !modelBadgeRef.current.contains(e.target as Node)
-            ) {
-                setIsModelPopupOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
 
     // Auto-dismiss alert after 5 seconds
     useEffect(() => {
@@ -316,6 +316,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         loading={enterpriseLoading}
                         onSubmit={runSearch}
                         onNewSearch={resetSearch}
+                        connectors={connectors}
+                        scope={searchScope}
+                        onScopeChange={setSearchScope}
                     />
                 </div>
             </div>
@@ -505,73 +508,12 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         <div className="border-t px-3 py-2 flex flex-wrap items-center justify-between gap-2" style={{ background: tc.ctrlBg, borderColor: tc.ctrlBorder }}>
                             {/* Left controls */}
                             <div className="flex flex-wrap gap-2">
-                                {/* Model selection */}
-                                <div className="relative" ref={modelBadgeRef}>
-                                    <button
-                                        onClick={() => setIsModelPopupOpen(prev => !prev)}
-                                        className={`rounded-md px-2 py-1 text-xs flex items-center gap-1.5 transition-colors cursor-pointer border ${isMobile ? 'font-medium' : 'font-normal'}`}
-                                        style={tc.modelBtn}
-                                        aria-label={t('query.selectModel')}
-                                    >
-                                        <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                        </svg>
-                                        {selectedModel === 'auto' ? t('query.autoModel') : selectedModel}
-                                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                                        </svg>
-                                    </button>
-
-                                    {/* Model selection popup */}
-                                    {isModelPopupOpen && (
-                    <div
-                        ref={modelPopupRef}
-                        className="absolute bottom-full left-0 mb-2 w-64 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden"
-                    >
-                                            <div className="px-3 py-2 border-b border-gray-100">
-                                                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('model.selectModel')}</p>
-                                            </div>
-                                            <div className="max-h-64 overflow-y-auto">
-                                                {[
-                                                    { id: 'auto', name: t('model.auto'), provider: t('model.provider.smartSelector') },
-                                                    { id: 'gpt-3.5-turbo', name: t('model.gpt-3.5-turbo'), provider: t('model.provider.OpenAI') },
-                                                    { id: 'gpt-4o', name: t('model.gpt-4o'), provider: t('model.provider.OpenAI') },
-                                                    { id: 'gpt-5', name: t('model.gpt-5'), provider: t('model.provider.OpenAI') },
-                                                    { id: 'mistral', name: t('model.mistral'), provider: t('model.provider.MistralAI') },
-                                                    { id: 'llama3', name: t('model.llama3'), provider: t('model.provider.Local') }
-                                                ].map((model) => (
-                                                    <button
-                                                        key={model.id}
-                                                        onClick={() => {
-                                                            setSelectedModel(model.id);
-                                                            setIsModelPopupOpen(false);
-                                                        }}
-                                                        className={`w-full text-left px-3 py-2 flex items-center gap-2.5 hover:bg-gray-50 transition-colors border-b border-gray-50 last:border-0 ${
-                                                            selectedModel === model.id ? 'bg-blue-50' : ''
-                                                        }`}
-                                                    >
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className={`text-xs font-medium break-words whitespace-normal ${
-                                                                selectedModel === model.id ? 'text-blue-700' : 'text-gray-800'
-                                                            }`}>
-                                                                {model.name}
-                                                                {model.id === 'gpt-5' && (
-                                                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-green-100 text-green-700">{t('model.latest')}</span>
-                                                                )}
-                                                            </div>
-                                                            <div className="text-[10px] text-gray-400 break-words whitespace-normal">{model.provider}</div>
-                                                        </div>
-                                                        {selectedModel === model.id && (
-                                                            <svg className="w-4 h-4 text-blue-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                            </svg>
-                                                        )}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                {/* Search perimeter — which database (or all context) to search */}
+                                <ScopeSelector
+                                    connectors={connectors}
+                                    value={searchScope}
+                                    onChange={setSearchScope}
+                                />
 
                                 {/* Research mode toggle */}
                     <button
@@ -649,19 +591,27 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
                     {/* ─── Connector icon strip (below form) ─── */}
                     <div className="mt-3 flex items-center justify-center flex-wrap gap-2">
-                        {CONNECTOR_DEFS.map(({ id, label, icon }) => (
+                        {CONNECTOR_DEFS.map(({ id, label, icon }) => {
+                            const count = engineCounts[id] || 0;
+                            return (
                             <button
                                 key={id}
-                                title={t('connector.connectService', { service: label })}
+                                title={count > 0 ? `${count} ${label} connector${count === 1 ? '' : 's'}` : t('connector.connectService', { service: label })}
                                 onClick={() => { setActiveConnector(id); setConnectorForm({}); setConnectorMsg(null); }}
-                                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border hover:border-purple-400 hover:scale-105 hover:shadow-sm transition-all duration-200"
+                                className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border hover:border-purple-400 hover:scale-105 hover:shadow-sm transition-all duration-200"
                                 style={tc.connBtn}
                                 aria-label={t('connector.connect', { service: label })}
                             >
                                 <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center">{icon}</span>
                                 <span className="text-xs font-medium whitespace-nowrap" style={{ color: tc.textMuted }}>{label}</span>
+                                {count > 0 && (
+                                    <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-purple-600 text-white text-[9px] font-bold tabular-nums shadow">
+                                        {count}
+                                    </span>
+                                )}
                             </button>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             </div>

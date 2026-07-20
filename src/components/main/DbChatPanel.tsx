@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownResponse from './MarkdownResponse';
+import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 
 /**
  * Clean conversation panel for the RIGHT pane — driven by /api/mcp/search
@@ -24,6 +25,9 @@ interface DbChatPanelProps {
   loading: boolean;
   onSubmit: (query: string) => void;
   onNewSearch: () => void;
+  connectors: ScopeConnector[];
+  scope: string | null;
+  onScopeChange: (id: string | null) => void;
 }
 
 const UserBubble: React.FC<{ text: string }> = ({ text }) => (
@@ -72,7 +76,7 @@ const AssistantTurn: React.FC<{ turn: DbTurn }> = ({ turn }) => {
   );
 };
 
-const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch }) => {
+const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange }) => {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -130,27 +134,38 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
         )}
       </div>
 
-      {/* Input */}
+      {/* Input — mirrors the main AppHome query box: textarea on top, a control
+          row with the search-perimeter selector and the send button below. */}
       <div className="border-t border-gray-200 p-3 flex-shrink-0 bg-white">
-        <div className="flex items-end gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-400 transition-all">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-400 transition-all">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="Ask a follow-up…"
-            rows={1}
-            className="flex-1 bg-transparent resize-none text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none max-h-32"
+            rows={2}
+            className="w-full bg-transparent resize-none text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none px-3 pt-2.5 max-h-40"
           />
-          <button
-            onClick={submit}
-            disabled={!input.trim() || loading}
-            className="flex-shrink-0 rounded-lg p-1.5 bg-gradient-to-br from-blue-600 to-purple-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md transition-all"
-            aria-label="Send"
-          >
-            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
+          <div className="flex items-center justify-between gap-2 px-2 pb-2">
+            <ScopeSelector connectors={connectors} value={scope} onChange={onScopeChange} compact />
+            <button
+              onClick={submit}
+              disabled={!input.trim() || loading}
+              className="flex-shrink-0 rounded-lg p-1.5 bg-gradient-to-br from-blue-600 to-purple-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md active:scale-90 transition-all"
+              aria-label="Send"
+            >
+              {loading ? (
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                  <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

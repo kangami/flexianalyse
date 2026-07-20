@@ -77,7 +77,7 @@ def sql_query(state: SearchState) -> SearchState:
         return state
 
     try:
-        database_url = _get_database_url(org_id)
+        database_url = _get_database_url(org_id, state.get("scope_connector_id"))
         if not database_url:
             logger.info("SQL node skipped — no active SQL connector for org %s", org_id)
             return state
@@ -167,17 +167,29 @@ def _looks_like_db_query(query: str) -> bool:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_database_url(org_id: str) -> str | None:
-    """Resolve and decrypt the database URL of the org's active SQL connector."""
+def _get_database_url(org_id: str, connector_id: str | None = None) -> str | None:
+    """Resolve and decrypt the database URL of the org's SQL connector.
+
+    When `connector_id` is given (the search-perimeter selector), use that exact
+    connector — but only if it belongs to the org and is an active SQL connector.
+    Otherwise fall back to the org's first active SQL connector.
+    """
     from models.connector import Connector, ConnectorCredentials
     from services.encryption_service import EncryptionService
 
-    connector = Connector.query.filter_by(
+    q = Connector.query.filter_by(
         organization_id=org_id,
         type="sql",
         status="active",
         deleted_at=None,
-    ).first()
+    )
+    if connector_id:
+        from uuid import UUID
+        try:
+            q = q.filter(Connector.id == UUID(connector_id))
+        except (ValueError, TypeError):
+            return None
+    connector = q.first()
     if not connector:
         return None
 

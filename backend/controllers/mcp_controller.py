@@ -444,6 +444,7 @@ def enterprise_search():
             org_id=org_id,
             user_role=data.get('user_role', 'employee'),
             allowed_connectors=data.get('allowed_connectors'),
+            scope_connector_id=data.get('connector_id'),
         )
         return jsonify({'status': 'success', **result})
     except Exception as e:

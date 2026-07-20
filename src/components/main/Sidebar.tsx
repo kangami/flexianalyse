@@ -1703,17 +1703,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="grid grid-cols-2 gap-1.5">
               {DB_ENGINES.map(engine => {
                 const selected = activeConnectorType === engine.id;
+                const count = savedConnectors.filter(c => c.engine === engine.id).length;
                 return (
                   <button
                     key={engine.id}
-                    title={engine.title}
+                    title={count > 0 ? `${count} ${engine.title} connection${count === 1 ? '' : 's'}` : engine.title}
                     onClick={() => {
                       setActiveConnectorType(prev => prev === engine.id ? null : engine.id);
                       setConnectorForm({});
                       setConnectorMsg(null);
                       setConnectorEditId(null);
                     }}
-                    className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-colors ${
+                    className={`relative flex items-center gap-2 px-2.5 py-2 rounded-lg border transition-colors ${
                       selected
                         ? 'border-purple-400 bg-purple-500/15 ring-1 ring-purple-300/40'
                         : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
@@ -1721,6 +1722,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <DbEngineLogo engine={engine.id} size={18} className="flex-shrink-0" />
                     <span className="text-[11px] font-medium text-gray-700 truncate">{engine.title}</span>
+                    {count > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-purple-600 text-white text-[9px] font-bold tabular-nums shadow">
+                        {count}
+                      </span>
+                    )}
                   </button>
                 );
               })}

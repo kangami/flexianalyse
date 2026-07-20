@@ -8,6 +8,7 @@ class SearchState(TypedDict):
     org_id: str
     user_role: str
     allowed_connectors: list[str]
+    scope_connector_id: Optional[str]   # limit the live SQL to one connector; None = default
 
     # ── Query understanding
     intent: str                  # 'factual' | 'analytical' | 'exploratory'

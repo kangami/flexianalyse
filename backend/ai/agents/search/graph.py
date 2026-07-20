@@ -90,16 +90,19 @@ def run_search(
     org_id: str,
     user_role: str = "employee",
     allowed_connectors: list[str] = None,
+    scope_connector_id: str = None,
 ) -> dict:
     """
     Run the search agent and return the result.
     Entry point for Flask endpoints and other agents.
+    `scope_connector_id` limits the live SQL to one connector (search perimeter).
     """
     initial_state: SearchState = {
         "query":               query,
         "org_id":              org_id,
         "user_role":           user_role,
         "allowed_connectors":  allowed_connectors or ["sql", "google_drive", "dropbox"],
+        "scope_connector_id":  scope_connector_id,
         "intent":              "",
         "entities":            [],
         "sub_queries":         [],
