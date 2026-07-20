@@ -140,3 +140,69 @@ def run_search(
         "sql_columns":   final_state.get("sql_columns", []),
         "sql_rows":      final_state.get("sql_rows", []),
     }
+
+
+def _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id) -> SearchState:
+    return {
+        "query": query, "org_id": org_id, "user_role": user_role,
+        "allowed_connectors": allowed_connectors or ["sql", "google_drive", "dropbox"],
+        "scope_connector_id": scope_connector_id,
+        "intent": "", "entities": [], "sub_queries": [], "needs_database": False,
+        "kg_nodes": [], "chunks": [], "reranked_chunks": [],
+        "generated_sql": "", "sql_columns": [], "sql_rows": [], "sql_error": None,
+        "context": "", "answer": "", "sources": [], "confidence": 0.0,
+        "grounded": False, "retry_count": 0, "error": None,
+    }
+
+
+def run_search_stream(
+    query: str,
+    org_id: str,
+    user_role: str = "employee",
+    allowed_connectors: list[str] = None,
+    scope_connector_id: str = None,
+):
+    """Streaming variant — yields (event, payload) tuples for SSE.
+
+    Runs the pipeline node-by-node (reusing the graph's node functions) so the
+    structured result (SQL + rows + sources) can be sent up front, then streams
+    the answer token-by-token. Skips the validate/retry loop (we commit to the
+    first grounded answer while streaming).
+
+    Events: ("meta", {...}) → ("token", str) … → ("done", {}) | ("error", str)
+    """
+    from ai.agents.search.nodes.understand import understand_query
+    from ai.agents.search.nodes.retrieve import retrieve
+    from ai.agents.search.nodes.rerank import rerank
+    from ai.agents.search.nodes.sql_query import sql_query
+    from ai.agents.search.nodes.generate import assemble_context, stream_answer_tokens
+
+    try:
+        state = _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id)
+        state = understand_query(state)
+        if state.get("needs_database"):
+            state = {**state, "kg_nodes": [], "chunks": []}
+        else:
+            state = retrieve(state)
+            state = rerank(state)
+        state = sql_query(state)
+        state = assemble_context(state)
+
+        # Send the structured result first so the UI grid fills while the answer
+        # streams into the chat.
+        yield ("meta", {
+            "generated_sql": state.get("generated_sql", ""),
+            "sql_error":     state.get("sql_error"),
+            "sql_columns":   state.get("sql_columns", []),
+            "sql_rows":      state.get("sql_rows", []),
+            "sources":       state.get("sources", []),
+            "intent":        state.get("intent", ""),
+        })
+
+        for delta in stream_answer_tokens(state):
+            yield ("token", delta)
+
+        yield ("done", {})
+    except Exception as e:
+        logger.error("run_search_stream failed: %s", e, exc_info=True)
+        yield ("error", str(e))

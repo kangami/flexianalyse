@@ -141,6 +141,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
+    // Streams the answer over SSE (/api/mcp/search-stream): the `meta` event
+    // carries the SQL + rows + sources (fills the left grid up front), then
+    // `token` events append the answer text into the turn as it is generated.
     const runSearch = async (q: string) => {
         const question = q.trim();
         if (!question || enterpriseLoading) return;
@@ -148,43 +151,103 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setPendingQuery(question);
         setQuery('');
         setShowDiagram(false);   // a data query shows the grid, not the schema
+
+        const turnId = `${Date.now()}`;
+        // Once the turn exists in the conversation, stream tokens into it.
+        const appendToken = (delta: string) =>
+            setConversation(prev => prev.map(t =>
+                t.id === turnId ? { ...t, answer: t.answer + delta } : t));
+
         try {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             // Explicit when known; otherwise the backend defaults to the user's
             // first membership org (validated against their memberships).
             if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
-            const res = await authFetch(`${API_BASE}/api/mcp/search`, {
+            const res = await authFetch(`${API_BASE}/api/mcp/search-stream`, {
                 method: 'POST',
                 headers,
                 // connector_id scopes the live SQL to one database; null = all context.
                 body: JSON.stringify({ query: question, connector_id: searchScope }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || res.statusText);
-            const sources: DbTurn['sources'] = Array.isArray(data.sources) ? data.sources : [];
-            const columns: string[] = Array.isArray(data.sql_columns) ? data.sql_columns : [];
-            const rows: Record<string, unknown>[] = Array.isArray(data.sql_rows) ? data.sql_rows : [];
-            setConversation(prev => [...prev, {
-                id: `${Date.now()}`,
-                query: question,
-                answer: data.answer || '',
-                sql: data.generated_sql || '',
-                sqlError: data.sql_error || null,
-                sources,
-            }]);
-            // Refresh the left grid only when this turn actually returned a table.
-            if (columns.length) {
-                setTableColumns(columns);
-                setTableRows(rows);
-                setTableSql(data.generated_sql || '');
+            if (!res.ok || !res.body) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || res.statusText);
             }
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let turnStarted = false;
+
+            const startTurn = (meta: Record<string, unknown>) => {
+                turnStarted = true;
+                setPendingQuery(null);
+                setConversation(prev => [...prev, {
+                    id: turnId,
+                    query: question,
+                    answer: '',
+                    sql: (meta.generated_sql as string) || '',
+                    sqlError: (meta.sql_error as string) || null,
+                    sources: Array.isArray(meta.sources) ? meta.sources as DbTurn['sources'] : [],
+                }]);
+                const columns = Array.isArray(meta.sql_columns) ? meta.sql_columns as string[] : [];
+                // Refresh the left grid only when this turn returned a table.
+                if (columns.length) {
+                    setTableColumns(columns);
+                    setTableRows(Array.isArray(meta.sql_rows) ? meta.sql_rows as Record<string, unknown>[] : []);
+                    setTableSql((meta.generated_sql as string) || '');
+                }
+            };
+
+            const handleEvent = (event: string, data: string) => {
+                if (event === 'meta') {
+                    startTurn(JSON.parse(data));
+                } else if (event === 'token') {
+                    if (!turnStarted) startTurn({});
+                    appendToken(JSON.parse(data));
+                } else if (event === 'error') {
+                    const msg = (JSON.parse(data).error as string) || 'unknown error';
+                    if (!turnStarted) startTurn({});
+                    appendToken(`\n\n⚠️ Search failed: ${msg}`);
+                }
+            };
+
+            // Parse the SSE frames (blank-line separated "event:"/"data:" blocks).
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let sep;
+                while ((sep = buffer.indexOf('\n\n')) !== -1) {
+                    const frame = buffer.slice(0, sep);
+                    buffer = buffer.slice(sep + 2);
+                    let event = 'message';
+                    const dataLines: string[] = [];
+                    for (const line of frame.split('\n')) {
+                        if (line.startsWith('event:')) event = line.slice(6).trim();
+                        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+                    }
+                    if (dataLines.length) handleEvent(event, dataLines.join('\n'));
+                }
+            }
+            if (!turnStarted) startTurn({});
         } catch (e: unknown) {
-            setConversation(prev => [...prev, {
-                id: `${Date.now()}`,
-                query: question,
-                answer: `⚠️ Search failed: ${(e as Error).message}`,
-                sources: [],
-            }]);
+            setPendingQuery(null);
+            setConversation(prev => {
+                // Surface the failure — extend the streaming turn if it exists,
+                // otherwise add a fresh error turn.
+                if (prev.some(t => t.id === turnId)) {
+                    return prev.map(t => t.id === turnId
+                        ? { ...t, answer: t.answer || `⚠️ Search failed: ${(e as Error).message}` }
+                        : t);
+                }
+                return [...prev, {
+                    id: turnId,
+                    query: question,
+                    answer: `⚠️ Search failed: ${(e as Error).message}`,
+                    sources: [],
+                }];
+            });
         } finally {
             setPendingQuery(null);
             setEnterpriseLoading(false);

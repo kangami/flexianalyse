@@ -128,8 +128,13 @@ def _format_sql_rows(columns: list, rows: list[dict], max_rows: int = 50) -> str
     return table
 
 
-def generate_answer(state: SearchState) -> SearchState:
-    """Generate a grounded answer using GPT-4o."""
+def _answer_messages(state: SearchState):
+    """Build the (system, user) chat messages for the answer.
+
+    Returns (messages, ""). On empty context returns (None, fallback) so callers
+    use the fallback string without an LLM call. Shared by generate_answer
+    (non-stream) and stream_answer_tokens (SSE).
+    """
     query   = state["query"]
     context = state.get("context", "")
     intent  = state.get("intent", "factual")
@@ -137,17 +142,11 @@ def generate_answer(state: SearchState) -> SearchState:
     lang_name = _detect_language_name(query)
 
     if not context.strip():
-        msg = (
+        return None, (
             "Je n'ai trouvé aucune information pertinente pour votre requête."
             if lang_name == "French"
             else "I couldn't find any relevant information for your query."
         )
-        return {
-            **state,
-            "answer":     msg,
-            "confidence": 0.0,
-            "grounded":   True,  # honest "no results" is grounded
-        }
 
     lang_line = (
         f"You MUST write your ENTIRE answer in {lang_name}, regardless of the "
@@ -183,28 +182,31 @@ If the context contains nothing about the requested subject, say briefly that no
 information was found for that subject — written in the answer language — and
 nothing else."""
 
+    user = (
+        f"Context:\n{context}\n\nQuery: {query}\n\n"
+        f"(Answer in {lang_name or 'the same language as the question'}.)"
+    )
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user},
+    ], ""
+
+
+def generate_answer(state: SearchState) -> SearchState:
+    """Generate a grounded answer (non-streaming)."""
+    messages, fallback = _answer_messages(state)
+    if messages is None:
+        return {**state, "answer": fallback, "confidence": 0.0, "grounded": True}
     try:
         response = get_openai_client().chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": (
-                    f"Context:\n{context}\n\nQuery: {query}\n\n"
-                    f"(Answer in {lang_name or 'the same language as the question'}.)"
-                )},
-            ],
-            max_tokens=2000,
+            model="gpt-4o-mini", messages=messages, max_tokens=2000,
         )
-
-        answer = response.choices[0].message.content
-
         return {
             **state,
-            "answer":     answer,
-            "confidence": 0.9,  # updated by validator
-            "grounded":   False, # set by validator
+            "answer":     response.choices[0].message.content,
+            "confidence": 0.9,
+            "grounded":   False,
         }
-
     except Exception as e:
         logger.error(f"Answer generation failed: {e}")
         return {
@@ -214,6 +216,28 @@ nothing else."""
             "grounded":   True,
             "error":      str(e),
         }
+
+
+def stream_answer_tokens(state: SearchState):
+    """Yield the answer as text deltas (for SSE). Same prompt as generate_answer."""
+    messages, fallback = _answer_messages(state)
+    if messages is None:
+        yield fallback
+        return
+    try:
+        stream = get_openai_client().chat.completions.create(
+            model="gpt-4o-mini", messages=messages, max_tokens=2000, stream=True,
+        )
+        for chunk in stream:
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            delta = getattr(choices[0].delta, "content", None)
+            if delta:
+                yield delta
+    except Exception as e:
+        logger.error(f"Answer streaming failed: {e}")
+        yield f"Search failed: {str(e)}"
 
 
 def validate_answer(state: SearchState) -> SearchState:

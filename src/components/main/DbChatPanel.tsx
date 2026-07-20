@@ -137,10 +137,12 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
-        {turns.map((turn, i) => (
+        {turns.map((turn) => (
           <div key={turn.id} className="flex flex-col gap-3">
             <UserBubble text={turn.query} />
-            <AssistantTurn turn={turn} animate={i === turns.length - 1 && !loading} />
+            {/* Answer text arrives live via SSE now, so the client-side typewriter
+                is disabled — animating on top would fight the streaming updates. */}
+            <AssistantTurn turn={turn} animate={false} />
           </div>
         ))}
 

@@ -4,8 +4,9 @@ Connects Flask to shared MCP Docker servers via HTTP.
 Supports multi-org connector management.
 """
 
+import json
 import logging
-from flask import g, request, jsonify, Blueprint
+from flask import g, request, jsonify, Blueprint, Response, stream_with_context
 from services.mcp_http_client import get_mcp_client, MCP_SERVERS, MCPHttpClient
 from models.connector import Connector, ConnectorCredentials
 from config.extensions import db
@@ -450,6 +451,49 @@ def enterprise_search():
     except Exception as e:
         logger.error(f"Search error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+@mcp_bp.route('/search-stream', methods=['POST'])
+def enterprise_search_stream():
+    """SSE variant of /search — streams the answer token-by-token.
+
+    Emits `meta` (SQL + rows + sources) first so the grid fills, then `token`
+    events for the answer, then `done`. stream_with_context keeps the request/app
+    context alive so the pipeline's DB access works during iteration.
+    """
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    query = data.get('query')
+    if not query:
+        return jsonify({'error': 'query required'}), 400
+
+    from ai.agents.search.graph import run_search_stream
+
+    def sse():
+        try:
+            for event, payload in run_search_stream(
+                query=query,
+                org_id=org_id,
+                user_role=data.get('user_role', 'employee'),
+                allowed_connectors=data.get('allowed_connectors'),
+                scope_connector_id=data.get('connector_id'),
+            ):
+                yield f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+        except Exception as e:
+            logger.error("search-stream failed: %s", e, exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return Response(
+        stream_with_context(sse()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',   # disable proxy buffering (nginx/Render)
+            'Connection': 'keep-alive',
+        },
+    )
 
 
 @mcp_bp.route('/db-insights', methods=['POST'])
