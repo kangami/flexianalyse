@@ -58,6 +58,13 @@ def _fts_regconfig(query: str) -> str:
 
 def retrieve(state: SearchState) -> SearchState:
     """Run all retrieval methods in parallel and combine results."""
+    # Pure database question → skip document retrieval entirely (the embedding
+    # call + KG/vector/FTS searches). The live SQL node answers it, so doc search
+    # over ingested chunks only adds latency. rerank then no-ops on empty chunks.
+    if state.get("needs_database"):
+        logger.info("Retrieve skipped — query targets the database")
+        return {**state, "kg_nodes": [], "chunks": []}
+
     org_id = state["org_id"]
     sub_queries = state.get("sub_queries") or [state["query"]]
     allowed = set(state.get("allowed_connectors") or

@@ -73,6 +73,52 @@ class SQLTools:
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    def show_full_schema(self) -> dict[str, Any]:
+        """Every table's columns + PK + FK in ONE round-trip.
+
+        Replaces N per-table calls (one HTTP request + one engine/connection each)
+        with a single request that reuses one connection — the main latency win for
+        Text-to-SQL and the schema diagram.
+        """
+        try:
+            inspector = inspect(self.engine)
+            out = []
+            for table_name in inspector.get_table_names():
+                try:
+                    columns = inspector.get_columns(table_name)
+                    pk = inspector.get_pk_constraint(table_name)
+                    try:
+                        fks = inspector.get_foreign_keys(table_name)
+                    except Exception:
+                        fks = []
+                    pk_cols = pk.get("constrained_columns", [])
+                    out.append({
+                        "table": table_name,
+                        "columns": [
+                            {
+                                "name": c["name"],
+                                "type": str(c["type"]),
+                                "nullable": c.get("nullable"),
+                                "is_primary_key": c["name"] in pk_cols,
+                            }
+                            for c in columns
+                        ],
+                        "primary_keys": pk_cols,
+                        "foreign_keys": [
+                            {
+                                "columns": fk.get("constrained_columns", []),
+                                "referred_table": fk.get("referred_table"),
+                                "referred_columns": fk.get("referred_columns", []),
+                            }
+                            for fk in fks
+                        ],
+                    })
+                except Exception as e:
+                    logger.warning("full schema: table %s failed: %s", table_name, e)
+            return {"status": "success", "tables": out, "count": len(out)}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
     
     def show_table_schema(self, table_name: str) -> dict[str, Any]:
         """Get schema/columns for a specific table"""

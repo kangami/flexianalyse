@@ -43,12 +43,31 @@ const UserBubble: React.FC<{ text: string }> = ({ text }) => (
   </div>
 );
 
-const AssistantTurn: React.FC<{ turn: DbTurn }> = ({ turn }) => {
+// Reveals the answer progressively (typing effect) for the latest turn, then
+// renders the full markdown. Earlier turns render immediately.
+const TypingMarkdown: React.FC<{ text: string; animate: boolean }> = ({ text, animate }) => {
+  const [shown, setShown] = useState(animate ? '' : text);
+  const doneRef = useRef(!animate);
+  useEffect(() => {
+    if (!animate || doneRef.current) { setShown(text); return; }
+    let i = 0;
+    const step = Math.max(2, Math.round(text.length / 120)); // ~120 ticks whatever the length
+    const id = setInterval(() => {
+      i = Math.min(i + step, text.length);
+      setShown(text.slice(0, i));
+      if (i >= text.length) { clearInterval(id); doneRef.current = true; }
+    }, 18);
+    return () => clearInterval(id);
+  }, [text, animate]);
+  return <MarkdownResponse content={shown} />;
+};
+
+const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, animate }) => {
   const [showSql, setShowSql] = useState(false);
   return (
     <div className="flex flex-col gap-2">
       <div className="max-w-[92%] rounded-2xl rounded-tl-sm bg-gray-50 border border-gray-100 px-3.5 py-2.5 text-sm text-gray-800">
-        <MarkdownResponse content={turn.answer} />
+        <TypingMarkdown text={turn.answer} animate={animate} />
       </div>
 
       {turn.sql && (
@@ -118,10 +137,10 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
-        {turns.map((turn) => (
+        {turns.map((turn, i) => (
           <div key={turn.id} className="flex flex-col gap-3">
             <UserBubble text={turn.query} />
-            <AssistantTurn turn={turn} />
+            <AssistantTurn turn={turn} animate={i === turns.length - 1 && !loading} />
           </div>
         ))}
 

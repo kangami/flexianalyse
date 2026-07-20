@@ -21,6 +21,10 @@ def _should_retry(state: SearchState) -> str:
     """Route after validation — retry if not grounded and under retry limit."""
     if state.get("grounded"):
         return "end"
+    # Live SQL rows are authoritative — never spend a retry (extra LLM round-trips)
+    # reformulating a data question we already answered from the database.
+    if state.get("sql_rows"):
+        return "end"
     if state.get("retry_count", 0) >= MAX_RETRIES:
         logger.warning("Max retries reached — returning best effort answer")
         return "end"

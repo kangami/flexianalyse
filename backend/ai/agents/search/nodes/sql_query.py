@@ -215,41 +215,70 @@ def _call_sql_tool(tool_name: str, params: dict, database_url: str, timeout: int
     return resp.json()
 
 
+def fetch_tables_meta(database_url: str) -> list[dict]:
+    """Structured schema: [{name, columns:[{name,type,pk}], foreign_keys:[...]}].
+
+    Uses the batched `show_full_schema` (one round-trip); falls back to the old
+    per-table calls if the MCP server predates that tool, so a rolling deploy
+    keeps working. Shared by the Text-to-SQL node and the dbAnalyse agent.
+    """
+    res = _call_sql_tool("show_full_schema", {}, database_url)
+    if res.get("status") == "success" and isinstance(res.get("tables"), list):
+        return [
+            {
+                "name": t.get("table"),
+                "columns": [
+                    {"name": c["name"], "type": str(c.get("type", "")), "pk": bool(c.get("is_primary_key"))}
+                    for c in t.get("columns", [])
+                ],
+                "foreign_keys": t.get("foreign_keys", []),
+            }
+            for t in res["tables"]
+        ]
+
+    # Fallback — per-table introspection (older MCP server without show_full_schema).
+    names = (_call_sql_tool("show_tables", {}, database_url).get("tables") or [])[:MAX_TABLES_IN_PROMPT]
+    out = []
+    for name in names:
+        try:
+            sch = _call_sql_tool("show_table_schema", {"table_name": name}, database_url).get("schema", {})
+            out.append({
+                "name": name,
+                "columns": [
+                    {"name": c["name"], "type": str(c.get("type", "")), "pk": bool(c.get("is_primary_key"))}
+                    for c in sch.get("columns", [])
+                ],
+                "foreign_keys": sch.get("foreign_keys", []),
+            })
+        except Exception as e:
+            logger.warning("Schema read failed for table %s: %s", name, e)
+    return out
+
+
 def _fetch_schema(database_url: str) -> str:
-    """Introspect tables + columns (+ FKs) and render a compact schema string.
-    Cached per database URL for `_SCHEMA_TTL` seconds."""
+    """Render a compact schema string for the SQL generator. Cached per URL."""
     cached = _SCHEMA_CACHE.get(database_url)
     if cached and (time.time() - cached[0]) < _SCHEMA_TTL:
         return cached[1]
 
-    tables_res = _call_sql_tool("show_tables", {}, database_url)
-    tables = (tables_res.get("tables") or [])[:MAX_TABLES_IN_PROMPT]
+    tables = fetch_tables_meta(database_url)[:MAX_TABLES_IN_PROMPT]
     if not tables:
         return ""
 
     lines: list[str] = []
-    for table in tables:
-        try:
-            schema_res = _call_sql_tool("show_table_schema", {"table_name": table}, database_url)
-            sch = schema_res.get("schema", {})
-            columns = sch.get("columns", [])
-            col_str = ", ".join(f'{c["name"]} {c["type"]}' for c in columns)
-            line = f"{table}({col_str})"
-
-            # Surface foreign keys so the generator can JOIN related tables.
-            fks = sch.get("foreign_keys", [])
-            if fks:
-                fk_str = "; ".join(
-                    f"{','.join(fk.get('columns', []))} -> "
-                    f"{fk.get('referred_table')}({','.join(fk.get('referred_columns', []))})"
-                    for fk in fks if fk.get("referred_table")
-                )
-                if fk_str:
-                    line += f"  [FK: {fk_str}]"
-            lines.append(line)
-        except Exception as e:
-            logger.warning("Schema read failed for table %s: %s", table, e)
-            lines.append(f"{table}(...)")
+    for t in tables:
+        col_str = ", ".join(f'{c["name"]} {c["type"]}' for c in t["columns"])
+        line = f'{t["name"]}({col_str})'
+        fks = t.get("foreign_keys", [])
+        if fks:
+            fk_str = "; ".join(
+                f"{','.join(fk.get('columns', []))} -> "
+                f"{fk.get('referred_table')}({','.join(fk.get('referred_columns', []))})"
+                for fk in fks if fk.get("referred_table")
+            )
+            if fk_str:
+                line += f"  [FK: {fk_str}]"
+        lines.append(line)
 
     schema_str = "\n".join(lines)
     _SCHEMA_CACHE[database_url] = (time.time(), schema_str)

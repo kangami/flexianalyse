@@ -20,8 +20,8 @@ import time
 import logging
 
 from ai.observability import get_openai_client
-# Reuse the connector resolution + sync MCP call already used by Text-to-SQL.
-from ai.agents.search.nodes.sql_query import _get_database_url, _call_sql_tool
+# Reuse the connector resolution + batched schema fetch used by Text-to-SQL.
+from ai.agents.search.nodes.sql_query import _get_database_url, fetch_tables_meta
 
 logger = logging.getLogger(__name__)
 
@@ -66,26 +66,18 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _introspect(db_url: str) -> list[dict]:
-    """[{name, columns:[{name,type,pk}], fks:[{columns,referred_table}]}] per table."""
-    tables_res = _call_sql_tool("show_tables", {}, db_url)
-    names = (tables_res.get("tables") or [])[:MAX_TABLES]
-
+    """[{name, columns:[{name,type,pk}], fks:[{columns,referred_table}]}] per table.
+    One batched round-trip via the shared fetch_tables_meta."""
     out = []
-    for name in names:
-        try:
-            res = _call_sql_tool("show_table_schema", {"table_name": name}, db_url)
-            sch = res.get("schema", {})
-            cols = [
-                {"name": c["name"], "type": str(c.get("type", "")), "pk": bool(c.get("is_primary_key"))}
-                for c in sch.get("columns", [])
-            ]
-            fks = [
+    for t in fetch_tables_meta(db_url)[:MAX_TABLES]:
+        out.append({
+            "name": t["name"],
+            "columns": t["columns"],
+            "fks": [
                 {"columns": fk.get("columns", []), "referred_table": fk.get("referred_table")}
-                for fk in sch.get("foreign_keys", []) if fk.get("referred_table")
-            ]
-            out.append({"name": name, "columns": cols, "fks": fks})
-        except Exception as e:
-            logger.warning("Schema read failed for table %s: %s", name, e)
+                for fk in t.get("foreign_keys", []) if fk.get("referred_table")
+            ],
+        })
     return out
 
 
