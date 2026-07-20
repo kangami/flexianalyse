@@ -27,6 +27,7 @@
     "langchain": "^0.3.24",
     "lucide-react": "^0.487.0",
     "mammoth": "^1.9.0",
+    "mermaid": "^11.16.0",
     "pdf.js-extract": "^0.2.1",
     "pdfjs-dist": "^4.8.69",
     "react": "^19.0.0",

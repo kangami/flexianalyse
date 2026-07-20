@@ -7,6 +7,8 @@ import { DB_ENGINES, DbEngineLogo } from '../../lib/dbEngines';
 import DbResultGrid from './DbResultGrid';
 import DbChatPanel, { DbTurn } from './DbChatPanel';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
+import SuggestionChips from './SuggestionChips';
+import MermaidDiagram from './MermaidDiagram';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -112,6 +114,31 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const engineCounts: Record<string, number> = {};
     for (const c of connectors) if (c.engine) engineCounts[c.engine] = (engineCounts[c.engine] || 0) + 1;
 
+    // dbAnalyse agent: inferred domain, anticipated questions, ER diagram — fetched
+    // in the background per scope (cached server-side). Powers the suggestion chips
+    // and the "Database diagram" view.
+    const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string }>({ domain: '', questions: [], schema_mermaid: '' });
+    const [insightsLoading, setInsightsLoading] = useState(false);
+    const [showDiagram, setShowDiagram] = useState(false);
+
+    useEffect(() => {
+        if (!account?.organization_id) return;
+        setInsightsLoading(true);
+        authFetch(`${API_BASE}/api/mcp/db-insights`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Organization-Id': account.organization_id },
+            body: JSON.stringify({ connector_id: searchScope }),
+        })
+            .then(r => r.json())
+            .then(d => setInsights({
+                domain: d.domain || '',
+                questions: Array.isArray(d.questions) ? d.questions : [],
+                schema_mermaid: d.schema_mermaid || '',
+            }))
+            .catch(() => {})
+            .finally(() => setInsightsLoading(false));
+    }, [account?.organization_id, searchScope]);
+
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
     const runSearch = async (q: string) => {
@@ -120,6 +147,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setEnterpriseLoading(true);
         setPendingQuery(question);
         setQuery('');
+        setShowDiagram(false);   // a data query shows the grid, not the schema
         try {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             // Explicit when known; otherwise the backend defaults to the user's
@@ -294,19 +322,34 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const activeDef = CONNECTOR_DEFS.find(d => d.id === activeConnector) ?? null;
 
-    // Once a search is submitted, swap the centered hero for the two-pane view:
-    // DBeaver-style result grid on the LEFT, running discussion on the RIGHT.
-    if (conversation.length > 0 || enterpriseLoading) {
+    // Once a search is submitted (or the schema diagram is opened), swap the
+    // centered hero for the two-pane view: result grid / ER diagram on the LEFT,
+    // running discussion on the RIGHT.
+    if (conversation.length > 0 || enterpriseLoading || showDiagram) {
         return (
             <div className="h-full w-full flex overflow-hidden">
-                {/* LEFT: DBeaver-style grid — desktop only (needs width) */}
-                <div className="hidden md:block flex-1 min-w-0 border-r border-gray-200 h-full">
-                    <DbResultGrid
-                        columns={tableColumns}
-                        rows={tableRows}
-                        sql={tableSql}
-                        loading={enterpriseLoading && tableColumns.length === 0}
-                    />
+                {/* LEFT: schema diagram or DBeaver-style grid — desktop only (needs width) */}
+                <div className="hidden md:flex flex-col flex-1 min-w-0 border-r border-gray-200 h-full bg-white">
+                    {showDiagram ? (
+                        <>
+                            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                                <span className="text-xs font-semibold text-gray-700">Database schema</span>
+                                <button onClick={() => setShowDiagram(false)} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
+                            </div>
+                            <div className="flex-1 min-h-0">
+                                {insights.schema_mermaid
+                                    ? <MermaidDiagram chart={insights.schema_mermaid} />
+                                    : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? 'Analysing your database…' : 'No schema available'}</div>}
+                            </div>
+                        </>
+                    ) : (
+                        <DbResultGrid
+                            columns={tableColumns}
+                            rows={tableRows}
+                            sql={tableSql}
+                            loading={enterpriseLoading && tableColumns.length === 0}
+                        />
+                    )}
                 </div>
                 {/* RIGHT: conversation — always visible, full width on mobile */}
                 <div className="w-full md:w-[440px] flex-shrink-0 h-full">
@@ -319,6 +362,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         connectors={connectors}
                         scope={searchScope}
                         onScopeChange={setSearchScope}
+                        questions={insights.questions}
+                        insightsLoading={insightsLoading}
+                        onShowDiagram={() => setShowDiagram(true)}
                     />
                 </div>
             </div>
@@ -476,6 +522,16 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             </div>
                         </div>
                     )}
+
+                    {/* dbAnalyse: anticipated questions + database diagram, above the input */}
+                    <div className="mx-auto w-full max-w-2xl flex justify-center">
+                        <SuggestionChips
+                            questions={insights.questions}
+                            loading={insightsLoading}
+                            onPick={runSearch}
+                            onShowDiagram={() => setShowDiagram(true)}
+                        />
+                    </div>
 
                     {/* Integrated textarea with controls - Modern Stylish Design */}
                     <div className="group relative mx-auto w-full max-w-2xl rounded-2xl backdrop-blur-xl shadow-[0_2px_12px_-2px_rgba(0,0,0,0.12)] overflow-hidden transition-all duration-300 border"

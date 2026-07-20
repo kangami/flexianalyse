@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MarkdownResponse from './MarkdownResponse';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
+import SuggestionChips from './SuggestionChips';
 
 /**
  * Clean conversation panel for the RIGHT pane — driven by /api/mcp/search
@@ -28,6 +29,9 @@ interface DbChatPanelProps {
   connectors: ScopeConnector[];
   scope: string | null;
   onScopeChange: (id: string | null) => void;
+  questions: string[];
+  insightsLoading: boolean;
+  onShowDiagram: () => void;
 }
 
 const UserBubble: React.FC<{ text: string }> = ({ text }) => (
@@ -76,7 +80,7 @@ const AssistantTurn: React.FC<{ turn: DbTurn }> = ({ turn }) => {
   );
 };
 
-const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange }) => {
+const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram }) => {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -134,9 +138,16 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
         )}
       </div>
 
-      {/* Input — mirrors the main AppHome query box: textarea on top, a control
-          row with the search-perimeter selector and the send button below. */}
+      {/* Input — mirrors the main AppHome query box: suggestion chips on top, a
+          textarea, then a control row with the perimeter selector and send. */}
       <div className="border-t border-gray-200 p-3 flex-shrink-0 bg-white">
+        <SuggestionChips
+          questions={questions}
+          loading={insightsLoading}
+          onPick={onSubmit}
+          onShowDiagram={onShowDiagram}
+          compact
+        />
         <div className="rounded-xl border border-gray-200 bg-gray-50 focus-within:ring-2 focus-within:ring-purple-200 focus-within:border-purple-400 transition-all">
           <textarea
             value={input}

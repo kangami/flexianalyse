@@ -452,6 +452,23 @@ def enterprise_search():
         return jsonify({'error': str(e)}), 500
 
 
+@mcp_bp.route('/db-insights', methods=['POST'])
+def db_insights():
+    """Background DB analysis: inferred business domain, anticipated questions,
+    and a deterministic Mermaid ER diagram of the connector's schema."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json(silent=True) or {}
+    try:
+        from ai.agents.db_analysis import get_db_insights
+        result = get_db_insights(org_id, data.get('connector_id'))
+        return jsonify({'status': 'success', **result})
+    except Exception as e:
+        logger.error("DB insights error: %s", e, exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 # KNOWLEDGE GRAPH
 # ============================================================================
 @mcp_bp.route('/knowledge-graph/build', methods=['POST'])
