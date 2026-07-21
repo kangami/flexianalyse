@@ -33,6 +33,9 @@ interface DbChatPanelProps {
   questions: string[];
   insightsLoading: boolean;
   onShowDiagram: () => void;
+  history?: { id: string; title: string | null; updated_at: string | null }[];
+  activeConversationId?: string | null;
+  onOpenConversation?: (id: string) => void;
 }
 
 const UserBubble: React.FC<{ text: string }> = ({ text }) => (
@@ -100,8 +103,9 @@ const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, ani
   );
 };
 
-const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram }) => {
+const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, history = [], activeConversationId, onOpenConversation }) => {
   const [input, setInput] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -118,21 +122,55 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+      <div className="relative flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
         <div className="flex items-center gap-2">
           <img src="/flexiAnalyseLogo_website.png" alt="" className="h-5 w-auto" />
           <span className="text-sm font-bold text-purple-600">Flexi</span>
         </div>
-        <button
-          onClick={onNewSearch}
-          className="text-[11px] font-medium text-gray-500 hover:text-purple-600 inline-flex items-center gap-1 transition-colors"
-          title="Start a new search"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-          </svg>
-          New search
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Conversation history */}
+          <button
+            onClick={() => setShowHistory(s => !s)}
+            className="text-[11px] font-medium text-gray-500 hover:text-purple-600 inline-flex items-center gap-1 transition-colors"
+            title="Conversation history"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            History
+          </button>
+          <button
+            onClick={onNewSearch}
+            className="text-[11px] font-medium text-gray-500 hover:text-purple-600 inline-flex items-center gap-1 transition-colors"
+            title="Start a new search"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+            </svg>
+            New search
+          </button>
+        </div>
+
+        {showHistory && (
+          <div className="absolute right-3 top-11 z-20 w-64 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+            {history.length === 0 ? (
+              <p className="px-3 py-2 text-[11px] text-gray-400">No past conversations.</p>
+            ) : (
+              history.map(h => (
+                <button
+                  key={h.id}
+                  onClick={() => { onOpenConversation?.(h.id); setShowHistory(false); }}
+                  className={`w-full text-left px-3 py-1.5 text-[11px] truncate hover:bg-purple-50 ${
+                    h.id === activeConversationId ? 'text-purple-700 font-semibold bg-purple-50' : 'text-gray-600'
+                  }`}
+                  title={h.title || 'Untitled'}
+                >
+                  {h.title || 'Untitled'}
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Messages */}

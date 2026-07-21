@@ -24,6 +24,9 @@ class Message(db.Model):
     conversation_id = db.Column(db.Uuid, db.ForeignKey('conversations.id'), nullable=False)
     role = db.Column(db.String, nullable=False)
     content = db.Column(db.Text, nullable=True)
+    # Structured payload of an assistant turn: generated_sql, sql_columns,
+    # sql_rows, sources — so a reopened conversation can restore the result grid.
+    message_metadata = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     deleted_at = db.Column(db.DateTime, nullable=True)
 

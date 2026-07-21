@@ -6,12 +6,14 @@ Supports multi-org connector management.
 
 import json
 import logging
+from datetime import datetime
 from flask import g, request, jsonify, Blueprint, Response, stream_with_context
 from services.mcp_http_client import get_mcp_client, MCP_SERVERS, MCPHttpClient
 from models.connector import Connector, ConnectorCredentials
+from models.conversation import Conversation, Message
 from config.extensions import db
 from services.encryption_service import get_encryption_service
-from services.request_context import current_organization_id
+from services.request_context import current_organization_id, current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -453,13 +455,38 @@ def enterprise_search():
         return jsonify({'error': str(e)}), 500
 
 
+def _save_assistant_message(conversation_id, answer: str, meta: dict) -> None:
+    """Persist the assistant turn (answer + structured result) at stream end."""
+    try:
+        db.session.add(Message(
+            conversation_id=conversation_id,
+            role='assistant',
+            content=answer,
+            message_metadata={
+                'generated_sql': meta.get('generated_sql', ''),
+                'sql_columns':   meta.get('sql_columns', []),
+                'sql_rows':      meta.get('sql_rows', []),
+                'sources':       meta.get('sources', []),
+            },
+        ))
+        convo = Conversation.query.get(conversation_id)
+        if convo:
+            convo.updated_at = datetime.utcnow()
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Failed to persist assistant message: %s", e)
+
+
 @mcp_bp.route('/search-stream', methods=['POST'])
 def enterprise_search_stream():
-    """SSE variant of /search — streams the answer token-by-token.
+    """SSE variant of /search — streams the answer token-by-token, with history.
 
-    Emits `meta` (SQL + rows + sources) first so the grid fills, then `token`
-    events for the answer, then `done`. stream_with_context keeps the request/app
-    context alive so the pipeline's DB access works during iteration.
+    Emits `conversation` (the id) first, then `meta` (SQL + rows + sources) so the
+    grid fills, then `token` events for the answer, then `done`. Persists both the
+    user and assistant turns so the conversation can be reopened and continued;
+    prior turns are passed back in so follow-up questions resolve. stream_with_context
+    keeps the app context alive so DB access works during iteration.
     """
     org_id = _get_org_id()
     if not org_id:
@@ -471,7 +498,37 @@ def enterprise_search_stream():
 
     from ai.agents.search.graph import run_search_stream
 
+    user_id = current_user_id()
+
+    # Resolve or open the conversation, and gather prior turns for follow-up context.
+    conversation_id = data.get('conversation_id')
+    history: list = []
+    convo = None
+    if conversation_id:
+        convo = Conversation.query.filter_by(
+            id=conversation_id, organization_id=org_id, deleted_at=None,
+        ).first()
+    if convo is None:
+        convo = Conversation(
+            organization_id=org_id, user_id=user_id, title=query[:80],
+        )
+        db.session.add(convo)
+        db.session.commit()
+    else:
+        prior = Message.query.filter_by(conversation_id=convo.id, deleted_at=None) \
+            .order_by(Message.created_at.asc()).all()
+        history = [{"role": m.role, "content": m.content or ""} for m in prior]
+
+    conv_id = str(convo.id)
+    # Persist the user turn now (survives an early client disconnect).
+    db.session.add(Message(conversation_id=convo.id, role='user', content=query))
+    convo.updated_at = datetime.utcnow()
+    db.session.commit()
+
     def sse():
+        yield f"event: conversation\ndata: {json.dumps({'conversation_id': conv_id})}\n\n"
+        answer_parts: list[str] = []
+        meta_payload: dict = {}
         try:
             for event, payload in run_search_stream(
                 query=query,
@@ -479,8 +536,14 @@ def enterprise_search_stream():
                 user_role=data.get('user_role', 'employee'),
                 allowed_connectors=data.get('allowed_connectors'),
                 scope_connector_id=data.get('connector_id'),
+                history=history,
             ):
+                if event == 'meta':
+                    meta_payload = payload
+                elif event == 'token':
+                    answer_parts.append(payload)
                 yield f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+            _save_assistant_message(convo.id, "".join(answer_parts), meta_payload)
         except Exception as e:
             logger.error("search-stream failed: %s", e, exc_info=True)
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
@@ -494,6 +557,64 @@ def enterprise_search_stream():
             'Connection': 'keep-alive',
         },
     )
+
+
+@mcp_bp.route('/conversations', methods=['GET'])
+def list_conversations():
+    """Recent conversations of the current user in this org (newest first)."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    uid = current_user_id()
+    convos = Conversation.query.filter_by(
+        organization_id=org_id, user_id=uid, deleted_at=None,
+    ).order_by(Conversation.updated_at.desc()).limit(50).all()
+    return jsonify({'data': [
+        {
+            'id': str(c.id),
+            'title': c.title,
+            'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+        }
+        for c in convos
+    ]})
+
+
+@mcp_bp.route('/conversations/<conversation_id>', methods=['GET'])
+def get_conversation(conversation_id):
+    """A conversation with its messages (to reopen and continue it)."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    convo = Conversation.query.filter_by(
+        id=conversation_id, organization_id=org_id, user_id=current_user_id(), deleted_at=None,
+    ).first()
+    if not convo:
+        return jsonify({'error': 'not found'}), 404
+    msgs = Message.query.filter_by(conversation_id=convo.id, deleted_at=None) \
+        .order_by(Message.created_at.asc()).all()
+    return jsonify({
+        'id': str(convo.id),
+        'title': convo.title,
+        'messages': [
+            {'role': m.role, 'content': m.content, 'metadata': m.message_metadata or {}}
+            for m in msgs
+        ],
+    })
+
+
+@mcp_bp.route('/conversations/<conversation_id>', methods=['DELETE'])
+def delete_conversation(conversation_id):
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    convo = Conversation.query.filter_by(
+        id=conversation_id, organization_id=org_id, user_id=current_user_id(), deleted_at=None,
+    ).first()
+    if not convo:
+        return jsonify({'error': 'not found'}), 404
+    convo.deleted_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'deleted': True})
 
 
 @mcp_bp.route('/db-insights', methods=['POST'])

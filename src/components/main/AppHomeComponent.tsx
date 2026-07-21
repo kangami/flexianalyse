@@ -90,8 +90,12 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
     const [enterpriseLoading, setEnterpriseLoading] = useState(false);
-    // Multi-turn discussion (in-memory) + the latest result set shown in the grid.
+    // Multi-turn discussion + the latest result set shown in the grid. The
+    // conversation is persisted server-side; conversationId links the turns so
+    // follow-up questions carry context.
     const [conversation, setConversation] = useState<DbTurn[]>([]);
+    const [conversationId, setConversationId] = useState<string | null>(null);
+    const [history, setHistory] = useState<{ id: string; title: string | null; updated_at: string | null }[]>([]);
     const [pendingQuery, setPendingQuery]   = useState<string | null>(null);
     const [tableColumns, setTableColumns]   = useState<string[]>([]);
     const [tableRows, setTableRows]         = useState<Record<string, unknown>[]>([]);
@@ -149,6 +153,57 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             .finally(() => setInsightsLoading(false));
     }, [account?.organization_id, searchScope]);
 
+    // Persisted conversation history for the current org (titles + order).
+    const loadHistory = useCallback(() => {
+        const headers: Record<string, string> = {};
+        if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
+        authFetch(`${API_BASE}/api/mcp/conversations`, { headers })
+            .then(r => r.json())
+            .then(d => setHistory(Array.isArray(d.data) ? d.data : []))
+            .catch(() => {});
+    }, [account?.organization_id]);
+
+    useEffect(() => { loadHistory(); }, [loadHistory]);
+
+    // Reopen a past conversation: rebuild the turns (and the last result grid)
+    // from the stored messages, and continue it (conversationId set).
+    const openConversation = async (id: string) => {
+        try {
+            const headers: Record<string, string> = {};
+            if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
+            const r = await authFetch(`${API_BASE}/api/mcp/conversations/${id}`, { headers });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || r.statusText);
+
+            const turns: DbTurn[] = [];
+            let lastQuery = '';
+            let cols: string[] = [], rows: Record<string, unknown>[] = [], sql = '';
+            for (const m of (d.messages || []) as { role: string; content: string; metadata: Record<string, unknown> }[]) {
+                if (m.role === 'user') { lastQuery = m.content || ''; continue; }
+                const md = m.metadata || {};
+                turns.push({
+                    id: `${turns.length}-${id}`,
+                    query: lastQuery,
+                    answer: m.content || '',
+                    sql: (md.generated_sql as string) || '',
+                    sqlError: null,
+                    sources: Array.isArray(md.sources) ? md.sources as DbTurn['sources'] : [],
+                });
+                if (Array.isArray(md.sql_columns) && (md.sql_columns as string[]).length) {
+                    cols = md.sql_columns as string[];
+                    rows = Array.isArray(md.sql_rows) ? md.sql_rows as Record<string, unknown>[] : [];
+                    sql = (md.generated_sql as string) || '';
+                }
+            }
+            setConversation(turns);
+            setConversationId(id);
+            setTableColumns(cols);
+            setTableRows(rows);
+            setTableSql(sql);
+            setShowDiagram(false);
+        } catch { /* ignore */ }
+    };
+
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
     // Streams the answer over SSE (/api/mcp/search-stream): the `meta` event
@@ -177,7 +232,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                 method: 'POST',
                 headers,
                 // connector_id scopes the live SQL to one database; null = all context.
-                body: JSON.stringify({ query: question, connector_id: searchScope }),
+                // conversation_id chains follow-up questions (null starts a new one).
+                body: JSON.stringify({ query: question, connector_id: searchScope, conversation_id: conversationId }),
             });
             if (!res.ok || !res.body) {
                 const err = await res.json().catch(() => ({}));
@@ -210,7 +266,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             };
 
             const handleEvent = (event: string, data: string) => {
-                if (event === 'meta') {
+                if (event === 'conversation') {
+                    const cid = (JSON.parse(data).conversation_id as string) || null;
+                    if (cid) setConversationId(cid);
+                } else if (event === 'meta') {
                     startTurn(JSON.parse(data));
                 } else if (event === 'token') {
                     if (!turnStarted) startTurn({});
@@ -261,6 +320,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         } finally {
             setPendingQuery(null);
             setEnterpriseLoading(false);
+            loadHistory();   // reflect the new/updated conversation in the list
         }
     };
 
@@ -268,6 +328,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     const resetSearch = () => {
         setConversation([]);
+        setConversationId(null);
         setPendingQuery(null);
         setTableColumns([]);
         setTableRows([]);
@@ -438,6 +499,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         questions={insights.questions}
                         insightsLoading={insightsLoading}
                         onShowDiagram={() => setShowDiagram(true)}
+                        history={history}
+                        activeConversationId={conversationId}
+                        onOpenConversation={openConversation}
                     />
                 </div>
             </div>

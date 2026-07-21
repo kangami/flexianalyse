@@ -155,19 +155,58 @@ def _initial_state(query, org_id, user_role, allowed_connectors, scope_connector
     }
 
 
+def _contextualize_query(query: str, history: list) -> str:
+    """Rewrite a follow-up into a standalone question using the conversation.
+
+    "et par mois ?" after "combien de commandes en 2025 ?" → "combien de commandes
+    par mois en 2025 ?". Cheap model; on any failure returns the query unchanged.
+    `history` is a list of {"role", "content"} (oldest first)."""
+    if not history:
+        return query
+    try:
+        from ai.observability import get_openai_client
+        convo = "\n".join(
+            f"{'Utilisateur' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
+            for m in history[-6:]
+        )
+        resp = get_openai_client().chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": (
+                    "Reformule la dernière question de l'utilisateur en une question "
+                    "autonome et complète, en intégrant le contexte de la conversation. "
+                    "Réponds UNIQUEMENT par la question reformulée, dans la même langue. "
+                    "Si la question est déjà autonome, renvoie-la telle quelle."
+                )},
+                {"role": "user", "content": f"Conversation:\n{convo}\n\nDernière question: {query}"},
+            ],
+            max_tokens=200,
+            temperature=0,
+        )
+        rewritten = (resp.choices[0].message.content or "").strip()
+        if rewritten:
+            logger.info("Follow-up rewritten: %r → %r", query, rewritten)
+            return rewritten
+    except Exception as e:
+        logger.warning("Query contextualization failed: %s", e)
+    return query
+
+
 def run_search_stream(
     query: str,
     org_id: str,
     user_role: str = "employee",
     allowed_connectors: list[str] = None,
     scope_connector_id: str = None,
+    history: list = None,
 ):
     """Streaming variant — yields (event, payload) tuples for SSE.
 
     Runs the pipeline node-by-node (reusing the graph's node functions) so the
     structured result (SQL + rows + sources) can be sent up front, then streams
     the answer token-by-token. Skips the validate/retry loop (we commit to the
-    first grounded answer while streaming).
+    first grounded answer while streaming). `history` (prior {role, content}
+    messages) turns a follow-up into a standalone question first.
 
     Events: ("meta", {...}) → ("token", str) … → ("done", {}) | ("error", str)
     """
@@ -178,6 +217,7 @@ def run_search_stream(
     from ai.agents.search.nodes.generate import assemble_context, stream_answer_tokens
 
     try:
+        query = _contextualize_query(query, history or [])
         state = _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id)
         state = understand_query(state)
         if state.get("needs_database"):
