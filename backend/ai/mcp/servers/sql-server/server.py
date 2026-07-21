@@ -98,6 +98,11 @@ async def query_database(sql_query: str, limit: int = 1000) -> dict:
     return sql_tools.query_database(sql_query, limit)
 
 @mcp.tool()
+async def execute_write(sql_query: str, dry_run: bool = True) -> dict:
+    """Execute a write (UPDATE/INSERT/DELETE) in a transaction; dry_run rolls back"""
+    return sql_tools.execute_write(sql_query, dry_run)
+
+@mcp.tool()
 async def get_table_row_count(table_name: str) -> dict:
     """Get row count for table"""
     return sql_tools.get_table_row_count(table_name)
@@ -163,6 +168,11 @@ async def execute_tool(request: Request):
             return tools.query_database(
                 params.get("sql_query", ""),
                 params.get("limit", 1000)
+            )
+        elif tool_name == "execute_write":
+            return tools.execute_write(
+                params.get("sql_query", ""),
+                params.get("dry_run", True),
             )
         elif tool_name == "show_table_schema":
             return tools.show_table_schema(params.get("table_name", ""))

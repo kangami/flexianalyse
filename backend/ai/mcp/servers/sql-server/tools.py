@@ -274,6 +274,49 @@ class SQLTools:
         except Exception as e:
             return {"status": "error", "message": str(e)}
     
+    def execute_write(self, sql_query: str, dry_run: bool = True) -> dict[str, Any]:
+        """Execute a single write (UPDATE / INSERT / DELETE) in a transaction.
+
+        dry_run=True  → run then ROLLBACK, returning rows_affected (impact preview).
+        dry_run=False → run then COMMIT.
+
+        Defense in depth (the API guards too): only a single UPDATE/INSERT/DELETE,
+        no DDL, no statement chaining.
+        """
+        try:
+            cleaned = sql_query.strip().rstrip(";").strip()
+            lowered = cleaned.lower()
+
+            if not (lowered.startswith("update") or lowered.startswith("insert")
+                    or lowered.startswith("delete")):
+                return {"status": "error", "message": "Only UPDATE / INSERT / DELETE are allowed"}
+            if ";" in cleaned.rstrip(";"):
+                return {"status": "error", "message": "Multiple statements are not allowed"}
+            _ddl = ("drop ", "truncate ", "alter ", "create ", "grant ", "revoke ", "merge ", "exec ")
+            if any(k in lowered for k in _ddl):
+                return {"status": "error", "message": "DDL is not allowed"}
+
+            with self.engine.connect() as conn:
+                trans = conn.begin()
+                try:
+                    result = conn.execute(text(cleaned))
+                    affected = result.rowcount
+                    if dry_run:
+                        trans.rollback()
+                    else:
+                        trans.commit()
+                except Exception:
+                    trans.rollback()
+                    raise
+
+            return {
+                "status": "success",
+                "rows_affected": int(affected) if affected is not None else None,
+                "committed": (not dry_run),
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     def get_table_row_count(self, table_name: str) -> dict[str, Any]:
         """Get the number of rows in a table"""
         try:

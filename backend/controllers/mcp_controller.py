@@ -624,6 +624,167 @@ def delete_conversation(conversation_id):
     return jsonify({'deleted': True})
 
 
+@mcp_bp.route('/sql/run', methods=['POST'])
+def sql_run():
+    """Execute raw SQL typed directly in the query form. Read-only (SELECT/WITH)
+    here — writes must go through /write/preview + /write/confirm."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    sql = (data.get('sql') or '').strip()
+    if not sql:
+        return jsonify({'error': 'sql required'}), 400
+
+    from services.sql_write import statement_kind
+    from ai.agents.search.nodes.sql_query import (
+        _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
+        _is_safe_select, _org_plan_limits, MAX_RESULT_ROWS,
+    )
+
+    kind = statement_kind(sql)
+    if kind == 'write':
+        return jsonify({'ok': False, 'error': "Requête d'écriture — passe par la confirmation.",
+                        'code': 'write_requires_confirmation'}), 409
+    if kind != 'read' or not _is_safe_select(sql):
+        return jsonify({'ok': False, 'error': "Seules les requêtes SELECT / WITH (lecture) sont exécutées ici."}), 400
+
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'ok': False, 'error': 'No active SQL connector'}), 404
+    db_url = _decrypt_connector_url(connector)
+    limits = _org_plan_limits(org_id)
+    try:
+        result = _call_sql_tool(
+            "query_database",
+            {"sql_query": sql, "limit": limits.get("max_rows", MAX_RESULT_ROWS)},
+            db_url,
+        )
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+    if result.get("status") != "success":
+        return jsonify({'ok': False, 'error': result.get("message", "Query failed"), 'sql': sql})
+    return jsonify({'ok': True, 'sql': sql,
+                    'columns': result.get("columns", []), 'rows': result.get("rows", [])})
+
+
+@mcp_bp.route('/write/preview', methods=['POST'])
+def write_preview():
+    """Phase 1 — propose a write and preview its impact WITHOUT committing.
+    Guards the statement, then dry-runs it in a rolled-back transaction."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+
+    from services.sql_write import guard_write, generate_write_sql, MASS_WRITE_THRESHOLD
+    from services.audit import record
+    from config.plans import plan_allows
+    from models.organization import Organization
+    from uuid import UUID
+    from ai.agents.search.nodes.sql_query import (
+        _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
+        _org_plan_limits, _fetch_schema_smart,
+    )
+
+    org = Organization.query.get(UUID(org_id))
+    if not plan_allows(org.plan if org else None, 'writes'):
+        return jsonify({'ok': False, 'code': 'plan_required',
+                        'error': "Les écritures nécessitent le plan Business ou supérieur."}), 403
+
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'ok': False, 'error': 'No active SQL connector'}), 404
+    db_url = _decrypt_connector_url(connector)
+    limits = _org_plan_limits(org_id)
+
+    sql = (data.get('sql') or '').strip()
+    if not sql:
+        query = (data.get('query') or '').strip()
+        if not query:
+            return jsonify({'ok': False, 'error': 'query or sql required'}), 400
+        schema = _fetch_schema_smart(connector, query, db_url, limits)
+        sql = generate_write_sql(query, schema, limits['sql_model'])
+    if not sql:
+        return jsonify({'ok': False, 'error': "Impossible de produire une écriture sûre pour cette demande."})
+
+    ok, err = guard_write(sql)
+    if not ok:
+        record(action='denied', resource='write.preview', tool='sql-write',
+               metadata={'sql': sql, 'reason': err})
+        return jsonify({'ok': False, 'error': err, 'sql': sql})
+
+    try:
+        result = _call_sql_tool("execute_write", {"sql_query": sql, "dry_run": True}, db_url)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e), 'sql': sql})
+    if result.get("status") != "success":
+        return jsonify({'ok': False, 'error': result.get("message", "dry-run failed"), 'sql': sql})
+
+    affected = result.get("rows_affected")
+    record(action='read', resource='write.preview', tool='sql-write',
+           metadata={'sql': sql, 'rows_affected': affected, 'connector_id': str(connector.id)})
+    return jsonify({
+        'ok': True, 'sql': sql, 'rows_affected': affected,
+        'requires_extra_confirm': bool(affected and affected > MASS_WRITE_THRESHOLD),
+        'connector_id': str(connector.id),
+    })
+
+
+@mcp_bp.route('/write/confirm', methods=['POST'])
+def write_confirm():
+    """Phase 2 — execute the confirmed write (committed). Re-guards + re-gates."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    sql = (data.get('sql') or '').strip()
+    if not sql:
+        return jsonify({'ok': False, 'error': 'sql required'}), 400
+
+    from services.sql_write import guard_write
+    from services.audit import record
+    from config.plans import plan_allows
+    from models.organization import Organization
+    from uuid import UUID
+    from ai.agents.search.nodes.sql_query import (
+        _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
+    )
+
+    org = Organization.query.get(UUID(org_id))
+    if not plan_allows(org.plan if org else None, 'writes'):
+        return jsonify({'ok': False, 'code': 'plan_required',
+                        'error': "Les écritures nécessitent le plan Business ou supérieur."}), 403
+
+    ok, err = guard_write(sql)
+    if not ok:
+        record(action='denied', resource='write.confirm', tool='sql-write',
+               metadata={'sql': sql, 'reason': err})
+        return jsonify({'ok': False, 'error': err})
+
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'ok': False, 'error': 'No active SQL connector'}), 404
+    db_url = _decrypt_connector_url(connector)
+
+    try:
+        result = _call_sql_tool("execute_write", {"sql_query": sql, "dry_run": False}, db_url)
+    except Exception as e:
+        record(action='update', resource='write.confirm', tool='sql-write',
+               metadata={'sql': sql, 'outcome': 'error', 'error': str(e)})
+        return jsonify({'ok': False, 'error': str(e), 'sql': sql})
+    if result.get("status") != "success":
+        record(action='update', resource='write.confirm', tool='sql-write',
+               metadata={'sql': sql, 'outcome': 'error', 'error': result.get('message')})
+        return jsonify({'ok': False, 'error': result.get("message", "execution failed"), 'sql': sql})
+
+    affected = result.get("rows_affected")
+    record(action='update', resource='write.confirm', tool='sql-write',
+           metadata={'sql': sql, 'rows_affected': affected, 'outcome': 'committed',
+                     'connector_id': str(connector.id)})
+    return jsonify({'ok': True, 'sql': sql, 'rows_affected': affected, 'committed': True})
+
+
 @mcp_bp.route('/db-insights', methods=['POST'])
 def db_insights():
     """Background DB analysis: inferred business domain, anticipated questions,
