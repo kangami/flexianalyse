@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../auth/AuthProvider';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -101,7 +101,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [connectors, setConnectors]       = useState<ScopeConnector[]>([]);
     const [searchScope, setSearchScope]     = useState<string | null>(null); // null = all context
 
-    useEffect(() => {
+    const loadConnectors = useCallback(() => {
         const headers: Record<string, string> = {};
         if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
         authFetch(`${API_BASE}/api/v2/connectors`, { headers })
@@ -109,6 +109,16 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             .then(d => setConnectors(Array.isArray(d.data) ? d.data : []))
             .catch(() => {});
     }, [account?.organization_id]);
+
+    useEffect(() => { loadConnectors(); }, [loadConnectors]);
+
+    // The connector form lives in the Sidebar (a sibling component); refresh the
+    // perimeter selector + engine badges when it adds/removes a connector.
+    useEffect(() => {
+        const onChange = () => loadConnectors();
+        window.addEventListener('connectors:changed', onChange);
+        return () => window.removeEventListener('connectors:changed', onChange);
+    }, [loadConnectors]);
 
     // Number of connectors per engine (for the notification-style badges).
     const engineCounts: Record<string, number> = {};

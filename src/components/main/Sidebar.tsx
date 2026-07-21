@@ -1482,6 +1482,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       });
       if (r.ok) {
         setSavedConnectors(prev => prev.filter(c => c.id !== id));
+        window.dispatchEvent(new CustomEvent('connectors:changed'));
         if (connectorEditId === id) resetConnectorForm();
       }
     } catch {
@@ -1608,6 +1609,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
         setConnectorMsg({ text: 'Connection updated!', ok: true });
         await loadConnectors();
+        window.dispatchEvent(new CustomEvent('connectors:changed'));
         setTimeout(resetConnectorForm, 1500);
         return;
       }
@@ -1625,6 +1627,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
       const saved = await r.json();
       await loadConnectors();
+      window.dispatchEvent(new CustomEvent('connectors:changed'));
 
       // OAuth flow pour Google Drive, SharePoint et Dropbox
       if (OAUTH_CONNECTORS.has(activeConnectorType)) {
