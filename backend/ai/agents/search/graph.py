@@ -223,12 +223,16 @@ def run_search_stream(
         query = _contextualize_query(query, history or [])
         state = _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id)
         state = understand_query(state)
-        if state.get("needs_database"):
-            state = {**state, "kg_nodes": [], "chunks": []}
+
+        # SQL-first: try the database. If it answers, DON'T also run document
+        # search — blending unrelated document chunks into a DB answer made the
+        # model contradict a correct SQL result and cite the wrong connector.
+        state = sql_query(state)
+        if state.get("sql_rows"):
+            state = {**state, "kg_nodes": [], "chunks": [], "reranked_chunks": []}
         else:
             state = retrieve(state)
             state = rerank(state)
-        state = sql_query(state)
         state = assemble_context(state)
 
         # Send the structured result first so the UI grid fills while the answer

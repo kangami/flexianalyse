@@ -38,13 +38,23 @@ def _detect_language_name(text: str) -> str | None:
 
 
 def assemble_context(state: SearchState) -> SearchState:
-    """Build the context string from KG nodes + reranked chunks."""
+    """Build the context string for the answer.
+
+    SQL-first: when the live SQL query returned rows, that result is the answer —
+    we deliberately IGNORE the KG nodes and document chunks (and their sources).
+    Blending document search into a database answer is what made the model
+    contradict a correct SQL result and cite chunks from another connector.
+    Document context is used only as a fallback when SQL produced nothing.
+    """
     parts   = []
     sources = []
 
-    # KG context — structural information
+    sql_rows = state.get("sql_rows", [])
+    has_sql  = bool(sql_rows)
+
+    # KG context — structural information (skipped when SQL answered)
     kg_nodes = state.get("kg_nodes", [])
-    if kg_nodes:
+    if kg_nodes and not has_sql:
         parts.append("## Structural Context (Knowledge Graph)")
         for node in kg_nodes[:5]:
             parts.append(
@@ -52,9 +62,9 @@ def assemble_context(state: SearchState) -> SearchState:
                 + (f" (via {node['connector']})" if node.get('connector') else "")
             )
 
-    # Chunk context — actual content
+    # Chunk context — actual content (skipped when SQL answered)
     reranked = state.get("reranked_chunks", [])
-    if reranked:
+    if reranked and not has_sql:
         parts.append("\n## Document/Data Content")
         for chunk in reranked:
             title    = chunk.get("resource_title", "Unknown")
@@ -82,7 +92,6 @@ def assemble_context(state: SearchState) -> SearchState:
             })
 
     # Live SQL context — authoritative tabular data from the org's database
-    sql_rows = state.get("sql_rows", [])
     if sql_rows:
         parts.append("\n## Live Database Query Result")
         generated_sql = state.get("generated_sql", "")
