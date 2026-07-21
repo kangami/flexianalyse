@@ -239,12 +239,22 @@ class SQLTools:
         try:
             # Normalize: drop trailing semicolons/whitespace before any rewriting
             cleaned = sql_query.strip().rstrip(";").strip()
+            lowered = cleaned.lower()
 
-            # Validate it's a SELECT query
-            if not cleaned.upper().startswith("SELECT"):
+            # Allow read-only SELECT and CTE (WITH ... SELECT) queries — the latter
+            # is needed for window-function / month-over-month analytics.
+            if not (lowered.startswith("select") or lowered.startswith("with")):
                 return {
                     "status": "error",
-                    "message": "Only SELECT queries are allowed"
+                    "message": "Only read-only SELECT / WITH queries are allowed",
+                }
+            # Defense in depth: block DML/DDL even inside a CTE (WITH x AS (...) DELETE ...).
+            _forbidden = ("insert ", "update ", "delete ", "drop ", "alter ",
+                          "truncate ", "create ", "grant ", "revoke ", "merge ", "exec ")
+            if any(f in lowered for f in _forbidden):
+                return {
+                    "status": "error",
+                    "message": "Read-only queries only (no INSERT/UPDATE/DELETE/DDL)",
                 }
 
             # Cap rows with the target dialect's syntax (LIMIT / ROWNUM / TOP).

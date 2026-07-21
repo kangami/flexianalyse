@@ -477,24 +477,42 @@ Rules:
   tables, return an empty string.
 - When grouping "X by Y" (e.g. users by organization), select a Y label column
   (e.g. organizations.name) alongside the X rows and ORDER BY it.
+- You MAY and SHOULD use CTEs (WITH ...), window functions
+  (LAG/LEAD/RANK/ROW_NUMBER/SUM(...) OVER (PARTITION BY ... ORDER BY ...)) and
+  date functions (DATE_TRUNC('month', ...)) when the question needs them — e.g.
+  month-over-month change, running totals, ranking. Do NOT give up on a complex
+  analytical question; write the full query.
 - Do not append a trailing semicolon.
 - Do not add a LIMIT clause; a row limit is applied automatically.
 - If the question cannot be answered from this schema, return an empty string.
 
-Return JSON exactly as: {{"sql": "..."}}"""
+Return ONLY the SQL SELECT statement — no markdown fences, no explanation, no JSON."""
 
     response = get_openai_client().chat.completions.create(
         model=model or SQL_GEN_MODEL,
-        response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": "You are an expert text-to-SQL engine. Return only valid JSON."},
+            {"role": "system", "content": "You are an expert text-to-SQL engine. Return only the raw SQL query."},
             {"role": "user", "content": prompt},
         ],
-        max_tokens=800,
+        max_tokens=2000,
     )
 
-    data = json.loads(response.choices[0].message.content)
-    return (data.get("sql") or "").strip()
+    return _extract_sql(response.choices[0].message.content)
+
+
+def _extract_sql(text: str) -> str:
+    """Pull a raw SQL statement out of the model's reply (strip markdown fences,
+    stray prose). Returns '' if the reply doesn't contain a SELECT — that's the
+    'not answerable' signal that falls back to document search."""
+    s = (text or "").strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+        s = re.sub(r"\s*```$", "", s).strip()
+    # If the model prefixed prose before the query, start at the first SELECT/WITH.
+    m = re.search(r"(?is)\b(with|select)\b", s)
+    if not m:
+        return ""
+    return s[m.start():].strip().rstrip(";").strip()
 
 
 _FORBIDDEN_KEYWORDS = (
@@ -510,9 +528,12 @@ def _is_safe_select(sql: str) -> bool:
     unsafe generation never reaches the wire.
     """
     s = sql.strip().lower()
-    if not s.startswith("select"):
+    # Allow read-only SELECT and CTE (WITH ... SELECT) queries — the latter is
+    # needed for window-function / month-over-month style analytics.
+    if not (s.startswith("select") or s.startswith("with")):
         return False
     # Disallow statement chaining (e.g. "select 1; drop table x").
     if ";" in s.rstrip(";"):
         return False
+    # Block DML/DDL even inside a CTE (WITH x AS (...) DELETE ...).
     return not any(kw in s for kw in _FORBIDDEN_KEYWORDS)
