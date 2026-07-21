@@ -92,33 +92,39 @@ def sql_query(state: SearchState) -> SearchState:
         if not schema:
             return {**state, "sql_error": "Could not read the database schema"}
 
-        sql = _generate_sql(state["query"], schema, limits["sql_model"])
-        if not sql:
+        # Plan → Act → Reflect: the ReAct sub-agent generates, executes, and
+        # self-reviews the SQL, retrying on a wrong or failed query. This is the
+        # anti-hallucination guard — only a reviewed (or best-effort, flagged)
+        # result comes back.
+        from ai.agents.search.sql_agent import run_sql_react
+        result = run_sql_react(
+            question=state["query"],
+            schema=schema,
+            database_url=database_url,
+            model=limits["sql_model"],
+            max_rows=limits.get("max_rows", MAX_RESULT_ROWS),
+        )
+
+        sql = result.get("sql", "")
+        rows = result.get("rows", [])
+        if not sql and not rows:
             # Not answerable from the DB schema → silently fall back to document
             # search (no error note that would pollute a plain document answer).
             return state
+        if result.get("sql_error") and not rows:
+            return {**state, "generated_sql": sql, "sql_error": result["sql_error"]}
 
-        if not _is_safe_select(sql):
-            logger.warning("SQL node rejected an unsafe statement: %s", sql)
-            return {**state, "generated_sql": sql,
-                    "sql_error": "Generated query was not a safe read-only SELECT"}
-
-        result = _call_sql_tool(
-            "query_database",
-            {"sql_query": sql, "limit": limits.get("max_rows", MAX_RESULT_ROWS)},
-            database_url,
+        logger.info(
+            "SQL node: %d rows for org %s (attempts=%s, uncertain=%s)",
+            len(rows), org_id, result.get("attempts"), result.get("uncertain"),
         )
-        if result.get("status") != "success":
-            return {**state, "generated_sql": sql,
-                    "sql_error": result.get("message", "Query execution failed")}
-
-        rows = result.get("rows", [])
-        logger.info("SQL node: %d rows returned for org %s", len(rows), org_id)
         return {
             **state,
             "generated_sql": sql,
             "sql_columns": result.get("columns", []),
             "sql_rows": rows,
+            "sql_plan": result.get("plan", ""),
+            "sql_uncertain": bool(result.get("uncertain")),
         }
 
     except Exception as e:
@@ -425,12 +431,22 @@ def _render_catalog_schema(rows) -> str:
     return "\n".join(lines)
 
 
-def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL) -> str:
-    """Translate a natural-language question into a single read-only SELECT."""
+def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
+                  plan: str = "", feedback: str = "") -> str:
+    """Translate a natural-language question into a single read-only SELECT.
+
+    `plan` (from the ReAct planner) and `feedback` (a critique/error from a prior
+    attempt) steer the generation when present — used by the SQL ReAct sub-agent.
+    """
+    plan_block = f"\nApproach to follow:\n{plan}\n" if plan else ""
+    feedback_block = (
+        f"\nIMPORTANT — your previous attempt was rejected. {feedback}\n"
+        "Produce a corrected query that fixes this.\n" if feedback else ""
+    )
     prompt = f"""Database schema. Each line is `table(column type, ...)` and may
 end with `[FK: col -> other_table(col)]` describing foreign-key relationships:
 {schema}
-
+{plan_block}{feedback_block}
 User question: {question}
 
 Write a single read-only SQL SELECT query (PostgreSQL dialect) that answers it.

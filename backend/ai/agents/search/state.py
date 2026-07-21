@@ -26,6 +26,8 @@ class SearchState(TypedDict):
     sql_columns: list[str]       # column names of the result set
     sql_rows: list[dict]         # rows returned by the live query
     sql_error: Optional[str]     # error message if the SQL step failed
+    sql_plan: str                # ReAct plan (tables/joins/filters) behind the query
+    sql_uncertain: bool          # query ran but the self-review couldn't validate it
 
     # ── Generation 
     context: str                 # assembled context for LLM

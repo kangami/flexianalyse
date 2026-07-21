@@ -88,6 +88,13 @@ def assemble_context(state: SearchState) -> SearchState:
         generated_sql = state.get("generated_sql", "")
         if generated_sql:
             parts.append(f"Query: `{generated_sql}`")
+        if state.get("sql_uncertain"):
+            # The ReAct reviewer could not confirm this query — tell the model to
+            # answer with the data but explicitly flag the uncertainty.
+            parts.append(
+                "NOTE: this query could not be fully validated. Report the figures "
+                "but clearly warn the user that the result may be unreliable."
+            )
         parts.append(_format_sql_rows(state.get("sql_columns", []), sql_rows))
 
         sources.append({

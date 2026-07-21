@@ -118,6 +118,8 @@ def run_search(
         "sql_columns":         [],
         "sql_rows":            [],
         "sql_error":           None,
+        "sql_plan":            "",
+        "sql_uncertain":       False,
         "context":             "",
         "answer":              "",
         "sources":             [],
@@ -150,6 +152,7 @@ def _initial_state(query, org_id, user_role, allowed_connectors, scope_connector
         "intent": "", "entities": [], "sub_queries": [], "needs_database": False,
         "kg_nodes": [], "chunks": [], "reranked_chunks": [],
         "generated_sql": "", "sql_columns": [], "sql_rows": [], "sql_error": None,
+        "sql_plan": "", "sql_uncertain": False,
         "context": "", "answer": "", "sources": [], "confidence": 0.0,
         "grounded": False, "retry_count": 0, "error": None,
     }
