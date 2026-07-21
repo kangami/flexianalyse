@@ -9,6 +9,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../auth/AuthProvider';
 import LoginModal from '../auth/LoginModal';
 import SignUpModal from '../auth/SignUpModal';
+import PlansView from './PlansView';
 import { auth } from '../../lib/firebase';
 import { authFetch } from '../../lib/apiClient';
 import { DB_ENGINES, DB_ENGINE_IDS, getDbEngine, DbEngineLogo } from '../../lib/dbEngines';
@@ -579,6 +580,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
+  const [showPlans, setShowPlans] = useState<boolean>(false);
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState<boolean>(false);
   
   // Icon rail active panel state
@@ -2560,6 +2562,22 @@ const Sidebar: React.FC<SidebarProps> = ({
               })}
             </nav>
 
+            {/* Plans / billing icon */}
+            {(() => {
+              const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+              const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
+              return (
+              <button
+                onClick={() => { setShowPlans(true); setActivePanel(null); }}
+                className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${hoverClass}`}
+                style={{ color: inactiveColor }}
+                title="Plans & tarifs"
+              >
+                <i className="bi bi-gem text-lg font-bold"></i>
+                <span className="text-[9px] mt-0.5 leading-tight font-bold">Plans</span>
+              </button>
+            )})()}
+
             {/* Settings icon */}
             {(() => {
               const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
@@ -2745,6 +2763,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       )}
     </div>
+
+    {/* Plans / pricing overlay */}
+    <PlansView open={showPlans} onClose={() => setShowPlans(false)} orgId={selectedOrgId} />
 
     {/* Login Modal */}
     {!isSignUpModalOpen && (

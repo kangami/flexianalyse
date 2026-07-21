@@ -11,6 +11,7 @@ from controllers.auth_controller import register as _register_auth
 from controllers.role_controller import register as _register_roles
 from controllers.skeleton_controller import register as _register_skeletons
 from controllers.lead_controller import register as _register_leads
+from controllers.plan_controller import register as _register_plans
 from connectors.api import register as _register_connectors
 
 logger = logging.getLogger(__name__)
@@ -110,3 +111,4 @@ def register_all():
     #_register_skeletons(api_bp)
     _register_connectors(api_bp)
     _register_leads(api_bp)
+    _register_plans(api_bp)

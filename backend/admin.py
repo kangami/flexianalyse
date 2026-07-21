@@ -9,6 +9,7 @@ from flask_admin.contrib.sqla import ModelView
 from models.knowledge_graph import KGNode, KGEdge
 from models.resource import Resource, ResourceChunk
 from models.connector import Connector, ConnectorSync
+from models.organization import Organization
 from config.extensions import db
 
 # ============================================================================
@@ -193,6 +194,20 @@ class ConnectorSyncView(ModelView):
     }
 
 
+class OrganizationView(ModelView):
+    """Organisations — permet notamment de changer le plan (facturation)."""
+
+    column_list = ('name', 'plan', 'created_at')
+    column_filters = ('plan',)
+    column_searchable_list = ('name',)
+    column_editable_list = ('plan',)
+    form_choices = {
+        'plan': [('free', 'Free'), ('pro', 'Pro'), ('business', 'Business'), ('enterprise', 'Enterprise')],
+    }
+    column_labels = {'name': 'Organisation', 'plan': 'Plan', 'created_at': 'Créée le'}
+    page_size = 50
+
+
 # ============================================================================
 # INITIALISATION
 # ============================================================================
@@ -209,5 +224,6 @@ def init_admin(app):
     admin.add_view(ResourceChunkView(ResourceChunk, db.session, name='Chunks', category='Ingestion'))
     admin.add_view(ConnectorView(Connector, db.session, name='Connectors', category='Connectors'))
     admin.add_view(ConnectorSyncView(ConnectorSync, db.session, name='Sync History', category='Connectors'))
-    
+    admin.add_view(OrganizationView(Organization, db.session, name='Organizations', category='Billing'))
+
     return admin
