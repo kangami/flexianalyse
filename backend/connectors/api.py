@@ -264,17 +264,18 @@ def register(api_bp) -> None:  # noqa: C901
             )
             locator.connector_credentials.create(creds)
 
-            # Non-OAuth connectors (e.g. SQL) have usable credentials right now,
-            # so kick off ingestion immediately. OAuth ones start in their callback.
-            if connector_type not in OAUTH_CONNECTOR_TYPES:
-                from ai.agents.office_manager.ingestion.tasks import start_ingestion
-                ingestion_task_id = start_ingestion(connector.id, org_id)
-
-            # SQL connectors: also crawl the schema catalog (Text-to-SQL retrieval),
-            # in the background — independent of the document ingestion above.
+            # SQL connectors: a database agent queries the data live (Text-to-SQL),
+            # so we only crawl the *schema* catalog — no document ingestion of the
+            # rows (that path stays for file connectors only).
             if connector_type == "sql":
                 from ai.agents.office_manager.ingestion.tasks import start_schema_crawl
                 start_schema_crawl(connector.id, org_id)
+            elif connector_type not in OAUTH_CONNECTOR_TYPES:
+                # Non-OAuth, non-SQL connectors (if any) have usable credentials
+                # now, so kick off document ingestion. OAuth ones start in their
+                # callback.
+                from ai.agents.office_manager.ingestion.tasks import start_ingestion
+                ingestion_task_id = start_ingestion(connector.id, org_id)
 
         payload = _connector_to_dict(connector)
         payload["ingestion_task_id"] = ingestion_task_id
@@ -426,12 +427,21 @@ def register(api_bp) -> None:  # noqa: C901
 
     @api_bp.route("/connectors/<connector_id>/ingest", methods=["POST"])
     def ingest_connector(connector_id: str):
-        """Launch the full ingestion pipeline (download → extract → embed → KG)
-        for an existing connector. This is what the sidebar 'sync' button calls."""
+        """Launch the full document ingestion pipeline (download → extract → embed
+        → KG) for a file connector. This is what the sidebar 'sync' button calls.
+
+        SQL connectors don't use document ingestion (the agent queries the data
+        live) — they use the schema crawl instead, so route them there.
+        """
         connector, err = _get_connector_or_404(connector_id)
         if err:
             return err
-        from ai.agents.office_manager.ingestion.tasks import start_ingestion
+        from ai.agents.office_manager.ingestion.tasks import start_ingestion, start_schema_crawl
+        if connector.type == "sql":
+            task_id = start_schema_crawl(connector.id, str(connector.organization_id))
+            if not task_id:
+                return _err("Failed to start schema crawl (is the Celery worker running?)", 503)
+            return jsonify({"status": "started", "schema_crawl": True, "task_id": task_id})
         task_id = start_ingestion(connector.id, str(connector.organization_id))
         if not task_id:
             return _err("Failed to start ingestion (is the Celery worker running?)", 503)

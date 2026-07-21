@@ -1406,11 +1406,14 @@ const Sidebar: React.FC<SidebarProps> = ({
     if (activePanel === 'connector') loadConnectors();
   }, [activePanel, selectedOrgId, loadConnectors]);
 
-  // Live progress: poll while any connector is actively ingesting so the rings
-  // animate towards 100%. Stops automatically once nothing is running.
+  // Live progress: poll while any connector is actively ingesting (rings animate)
+  // or its schema is being crawled, so statuses update. Stops once nothing runs.
   useEffect(() => {
     if (activePanel !== 'connector') return;
-    const anyRunning = savedConnectors.some(c => c.progress?.status === 'running');
+    const anyRunning = savedConnectors.some(c =>
+      c.progress?.status === 'running' ||
+      c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending'
+    );
     if (!anyRunning) return;
     const t = setInterval(loadConnectors, 3000);
     return () => clearInterval(t);
@@ -1854,14 +1857,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                     const busy = connectorBusyId === c.id;
                     const editing = connectorEditId === c.id;
                     const pr = c.progress;
-                    const subtitle =
-                      pr?.status === 'running'
-                        ? `Ingesting… ${pr.percent}%`
-                        : pr?.status === 'failed'
-                        ? `${pr.percent}% · errors`
-                        : pr && pr.total > 0
-                        ? `${pr.percent}% ingested`
-                        : c.status;
+                    // DB connectors are queried live (Text-to-SQL) — no document
+                    // ingestion; their status reflects the schema catalog crawl.
+                    const subtitle = engineMeta
+                      ? c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending'
+                        ? 'Syncing schema…'
+                        : c.schema_crawl_status === 'failed'
+                        ? 'Schema sync failed'
+                        : c.schema_crawl_status === 'done'
+                        ? `${c.schema_table_count ?? 0} tables`
+                        : c.status
+                      : pr?.status === 'running'
+                      ? `Ingesting… ${pr.percent}%`
+                      : pr?.status === 'failed'
+                      ? `${pr.percent}% · errors`
+                      : pr && pr.total > 0
+                      ? `${pr.percent}% ingested`
+                      : c.status;
                     return (
                       <div
                         key={c.id}
@@ -1905,14 +1917,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                               } ${c.schema_crawl_status === 'failed' ? 'text-red-500' : ''}`}></i>
                             </button>
                           )}
-                          <button
-                            title="Sync / ingest"
-                            disabled={busy}
-                            onClick={() => handleSyncConnector(c.id)}
-                            className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
-                          >
-                            <i className={`bi bi-arrow-repeat text-sm ${busy ? 'animate-spin' : ''}`}></i>
-                          </button>
+                          {/* Document ingestion — file connectors only. DB
+                              connectors are queried live and use the schema sync
+                              button above instead. */}
+                          {!engineMeta && (
+                            <button
+                              title="Sync / ingest"
+                              disabled={busy}
+                              onClick={() => handleSyncConnector(c.id)}
+                              className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
+                            >
+                              <i className={`bi bi-arrow-repeat text-sm ${busy ? 'animate-spin' : ''}`}></i>
+                            </button>
+                          )}
                           <button
                             title="Edit"
                             onClick={() => handleEditConnector(c)}
