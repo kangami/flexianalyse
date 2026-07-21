@@ -65,6 +65,13 @@ def _authenticate_mcp():
     return None
 
 
+@mcp_bp.after_request
+def _audit(response):
+    """Trace every mutating /api/mcp call (searches, connector ops) in the audit log."""
+    from services.audit import audit_request
+    return audit_request(response)
+
+
 # ============================================================================
 # HELPERS
 # ============================================================================

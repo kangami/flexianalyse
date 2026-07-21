@@ -12,6 +12,7 @@ from controllers.role_controller import register as _register_roles
 from controllers.skeleton_controller import register as _register_skeletons
 from controllers.lead_controller import register as _register_leads
 from controllers.plan_controller import register as _register_plans
+from controllers.audit_controller import register as _register_audit
 from connectors.api import register as _register_connectors
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,13 @@ def _authenticate():
     return None
 
 
+@api_bp.after_request
+def _audit(response):
+    """Trace every mutating /api/v2 call in the audit log."""
+    from services.audit import audit_request
+    return audit_request(response)
+
+
 # Conservés pour compatibilité — l'implémentation vit dans services/request_context.py
 # (voir la note de cycle d'import dans ce module).
 get_current_user_id = _ctx_user_id
@@ -112,3 +120,4 @@ def register_all():
     _register_connectors(api_bp)
     _register_leads(api_bp)
     _register_plans(api_bp)
+    _register_audit(api_bp)

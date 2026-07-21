@@ -10,6 +10,7 @@ from models.knowledge_graph import KGNode, KGEdge
 from models.resource import Resource, ResourceChunk
 from models.connector import Connector, ConnectorSync
 from models.organization import Organization
+from models.audit_log import AuditLog
 from config.extensions import db
 
 # ============================================================================
@@ -208,6 +209,20 @@ class OrganizationView(ModelView):
     page_size = 50
 
 
+class AuditLogView(ModelView):
+    """Journal d'audit — lecture seule (qui a fait quoi, quand)."""
+
+    can_create = False
+    can_edit = False
+    can_delete = False
+    column_list = ('created_at', 'action', 'resource', 'tool', 'user_id', 'organization_id')
+    column_filters = ('action', 'resource')
+    column_searchable_list = ('resource', 'action')
+    column_default_sort = ('created_at', True)
+    page_size = 100
+    column_labels = {'created_at': 'Quand', 'user_id': 'Utilisateur', 'organization_id': 'Org'}
+
+
 # ============================================================================
 # INITIALISATION
 # ============================================================================
@@ -225,5 +240,6 @@ def init_admin(app):
     admin.add_view(ConnectorView(Connector, db.session, name='Connectors', category='Connectors'))
     admin.add_view(ConnectorSyncView(ConnectorSync, db.session, name='Sync History', category='Connectors'))
     admin.add_view(OrganizationView(Organization, db.session, name='Organizations', category='Billing'))
+    admin.add_view(AuditLogView(AuditLog, db.session, name='Audit Log', category='Security'))
 
     return admin
