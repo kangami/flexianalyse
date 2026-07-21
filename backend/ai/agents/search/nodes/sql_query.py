@@ -65,15 +65,15 @@ def sql_query(state: SearchState) -> SearchState:
     org_id = state["org_id"]
     query = state["query"]
 
-    # Robust routing — the single-LLM `needs_database` flag is unreliable, so we
-    # ALSO run the SQL path when the query names a known table or clearly asks
-    # for data. Naming a known table is the strongest signal.
-    known_tables = _known_sql_tables(org_id)
-    if not (
-        state.get("needs_database")
-        or _mentions_known_table(query, known_tables)
-        or _looks_like_db_query(query)
-    ):
+    # SQL-first routing. This is a database agent, so we ATTEMPT SQL for
+    # essentially every question. The real gate is the SQL generator itself: it
+    # returns an empty query when the question can't be answered from the schema,
+    # and only then do we fall back to document search. We skip SQL up front only
+    # for input that is obviously not a data question (a greeting) AND doesn't
+    # name a catalogued table.
+    tables = _known_sql_tables(org_id, state.get("scope_connector_id"))
+    if _is_obviously_not_data(query) and not _mentions_known_table(query, tables):
+        logger.info("SQL node skipped — non-data input: %r", query)
         return state
 
     try:
@@ -139,40 +139,51 @@ def sql_query(state: SearchState) -> SearchState:
 # Kept deliberately narrow (strong "structured data" signals) so plain document
 # questions don't needlessly trigger the SQL path. A known-table mention or the
 # LLM `needs_database` flag covers the rest.
-_DB_KEYWORDS = (
-    "how many", "how much", "number of", "count of", "rows", "records",
-    "total of", "sum of", "average of", "group by", "top ",
-)
+# Very light "obviously not a data question" guard (greetings / chitchat) so the
+# database-first routing doesn't spend the ReAct loop on "hello".
+_NON_DATA = {
+    "hello", "hi", "hey", "yo", "bonjour", "salut", "coucou", "merci",
+    "thanks", "thank you", "ok", "okay", "test", "ping", "yes", "no", "oui", "non",
+}
 
 
-def _known_sql_tables(org_id: str) -> list[str]:
-    """Table names known locally for this org's SQL connector(s) — a fast local
-    DB lookup (no network) used to detect table mentions in the query."""
-    from models.resource import Resource
+def _is_obviously_not_data(query: str) -> bool:
+    q = (query or "").strip().lower()
+    return len(q) < 4 or q.rstrip("!?. ") in _NON_DATA
+
+
+def _known_sql_tables(org_id: str, connector_id: str | None = None) -> list[str]:
+    """Table names from the org's schema CATALOG (connector_schema_tables), used
+    to detect table mentions in a query. Reads the catalog — not ingested Resource
+    rows — because SQL connectors are no longer ingested as documents."""
+    from models.connector_schema import ConnectorSchemaTable
     try:
-        rows = Resource.query.filter(
-            Resource.organization_id == org_id,
-            Resource.type.in_(("sql", "sql_table")),
-            Resource.deleted_at.is_(None),
-        ).all()
-        return [r.title for r in rows if r.title]
+        q = ConnectorSchemaTable.query.filter(
+            ConnectorSchemaTable.organization_id == org_id
+        )
+        if connector_id:
+            from uuid import UUID
+            try:
+                q = q.filter(ConnectorSchemaTable.connector_id == UUID(connector_id))
+            except (ValueError, TypeError):
+                pass
+        return [t.table_name for t in q.all() if t.table_name]
     except Exception as e:
-        logger.warning("Could not load known SQL tables for org %s: %s", org_id, e)
+        logger.warning("Could not load catalog tables for org %s: %s", org_id, e)
         return []
 
 
 def _mentions_known_table(query: str, tables: list[str]) -> bool:
-    """True if the query contains a known table name as a whole word."""
+    """True if the query names a catalogued table (matching singular/plural)."""
     if not tables:
         return False
     words = set(re.findall(r"\w+", query.lower()))
-    return any(t and t.lower() in words for t in tables)
-
-
-def _looks_like_db_query(query: str) -> bool:
-    """Heuristic: does the query read like a request for structured data?"""
-    q = query.lower()
-    return any(kw in q for kw in _DB_KEYWORDS)
+    words |= {w.rstrip("s") for w in words}   # films → film, actors → actor
+    for t in tables:
+        tl = t.lower()
+        if tl in words or tl.rstrip("s") in words:
+            return True
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
