@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import SearchProgress from './SearchProgress';
 
 /**
@@ -23,6 +23,9 @@ const renderCell = (value: unknown): { text: string; isNull: boolean } => {
 
 const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading }) => {
   const hasData = columns.length > 0;
+  // Collapsed by default so a long analytical query (CTEs/window functions)
+  // doesn't push the result grid off-screen.
+  const [showSql, setShowSql] = useState(false);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -42,11 +45,22 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
         </div>
       </div>
 
-      {/* SQL (when a query ran) */}
+      {/* SQL (when a query ran) — collapsible, capped height so it never eats
+          the whole pane on a long analytical query. */}
       {sql && (
-        <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex-shrink-0">
-          <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Live SQL</p>
-          <pre className="text-[11px] text-gray-700 overflow-x-auto"><code>{sql}</code></pre>
+        <div className="border-b border-gray-100 bg-gray-50 flex-shrink-0">
+          <button
+            onClick={() => setShowSql((s) => !s)}
+            className="w-full flex items-center gap-1.5 px-4 py-1.5 text-[9px] font-semibold text-gray-400 uppercase tracking-wide hover:text-purple-600 transition-colors"
+          >
+            <svg className={`w-3 h-3 transition-transform ${showSql ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+            </svg>
+            Live SQL
+          </button>
+          {showSql && (
+            <pre className="text-[11px] text-gray-700 overflow-auto max-h-40 px-4 pb-2"><code>{sql}</code></pre>
+          )}
         </div>
       )}
 
