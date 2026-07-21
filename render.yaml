@@ -58,7 +58,9 @@ services:
     region: oregon
     plan: standard
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    # Worker also installs the heavy ML/ingestion deps (docling/onnx/faiss) on
+    # top of the base. The API build stays light (it doesn't import them).
+    buildCommand: pip install -r requirements.txt -r requirements-ml.txt
     startCommand: celery -A celery_app worker --loglevel=info --concurrency=2
     envVars:
       - key: PG_HOST

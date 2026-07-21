@@ -1,0 +1,14 @@
+# Heavy ML / document-parsing dependencies — WORKER ONLY.
+#
+# These are needed only by the Celery worker's document-ingestion pipeline
+# (docling pulls torch/transformers/onnx — ~GB and slow to build). The API and
+# the SQL MCP server do NOT import them (verified: create_app + the search graph
+# load without docling/faiss/onnxruntime), so they are kept out of the API build
+# to keep it fast and cheap on Render pipeline minutes.
+#
+# Installed by the worker on top of requirements.txt (see render.yaml):
+#   pip install -r requirements.txt -r requirements-ml.txt
+docling>=2.0.0
+docling-core>=2.0.0
+onnxruntime
+faiss-cpu==1.12.0

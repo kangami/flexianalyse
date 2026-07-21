@@ -23,7 +23,10 @@ from models.resource import Resource, ResourceChunk
 from models.knowledge_graph import KGNode, KGEdge
 from services.encryption_service import EncryptionService
 from services.mcp_http_client import get_mcp_client
-from ai.ingestion.extractor import DocumentExtractor
+# NOTE: `ai.ingestion.extractor` (docling → torch/transformers/onnx) is imported
+# LAZILY inside _get_extractor(), not here. The API process imports this module
+# only to ENQUEUE ingestion tasks; keeping the heavy import out of module scope
+# lets the API run without docling/onnx installed (worker-only deps).
 from ai.ingestion.embedder import Embedder
 from ai.ingestion.router import classify_document
 
@@ -58,9 +61,11 @@ def _get_encryption_service() -> EncryptionService:
     return _encryption_service
 
 
-def _get_extractor() -> DocumentExtractor:
+def _get_extractor():
     global _extractor
     if _extractor is None:
+        # Lazy heavy import (docling → torch/transformers/onnx) — worker only.
+        from ai.ingestion.extractor import DocumentExtractor
         _extractor = DocumentExtractor()
     return _extractor
 
