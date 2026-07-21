@@ -167,7 +167,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     // Reopen a past conversation: rebuild the turns (and the last result grid)
     // from the stored messages, and continue it (conversationId set).
-    const openConversation = async (id: string) => {
+    const openConversation = useCallback(async (id: string) => {
         try {
             const headers: Record<string, string> = {};
             if (account?.organization_id) headers['X-Organization-Id'] = account.organization_id;
@@ -202,7 +202,17 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             setTableSql(sql);
             setShowDiagram(false);
         } catch { /* ignore */ }
-    };
+    }, [account?.organization_id]);
+
+    // Open a conversation when clicked from the Sidebar's History panel.
+    useEffect(() => {
+        const onOpen = (e: Event) => {
+            const id = (e as CustomEvent).detail?.id;
+            if (id) openConversation(id);
+        };
+        window.addEventListener('conversation:open', onOpen);
+        return () => window.removeEventListener('conversation:open', onOpen);
+    }, [openConversation]);
 
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.

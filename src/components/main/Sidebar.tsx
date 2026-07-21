@@ -577,7 +577,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [, setIsLoadingModels] = useState<boolean>(true);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [recentDocuments, setRecentDocuments] = useState<RecentDocument[]>([]);
-  
+  // Persisted DB-agent conversations (shown in the History panel).
+  const [dbConversations, setDbConversations] = useState<{ id: string; title: string | null; updated_at: string | null }[]>([]);
+
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const [showPlans, setShowPlans] = useState<boolean>(false);
@@ -1407,6 +1409,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     if (activePanel === 'connector') loadConnectors();
   }, [activePanel, selectedOrgId, loadConnectors]);
+
+  // Load the DB-agent conversation history when the History panel opens.
+  const loadDbConversations = useCallback(async () => {
+    try {
+      const headers: Record<string, string> = {};
+      if (selectedOrgId) headers['X-Organization-Id'] = selectedOrgId;
+      const r = await authFetch(`${API}/api/mcp/conversations`, { headers });
+      const d = await r.json();
+      setDbConversations(Array.isArray(d.data) ? d.data : []);
+    } catch {
+      setDbConversations([]);
+    }
+  }, [API, selectedOrgId]);
+
+  useEffect(() => {
+    if (activePanel === 'history') loadDbConversations();
+  }, [activePanel, loadDbConversations]);
 
   // Live progress: poll while any connector is actively ingesting (rings animate)
   // or its schema is being crawled, so statuses update. Stops once nothing runs.
@@ -2323,7 +2342,28 @@ const Sidebar: React.FC<SidebarProps> = ({
         return (
           <div className="p-4">
             <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('sidebar.history')}</h3>
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-[70vh] overflow-y-auto">
+              {/* DB-agent conversations — click to reopen and continue. */}
+              {dbConversations.length > 0 && (
+                <div className="space-y-1 mb-3">
+                  <p className="text-xs text-gray-400 mb-2">Conversations</p>
+                  {dbConversations.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        window.dispatchEvent(new CustomEvent('conversation:open', { detail: { id: c.id } }));
+                        setActivePanel(null);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded text-xs text-gray-600 hover:bg-purple-50 hover:text-purple-700 transition-colors truncate"
+                      title={c.title || 'Conversation'}
+                    >
+                      <i className="bi bi-chat-left-text mr-2 text-gray-400"></i>
+                      {c.title || 'Conversation'}
+                    </button>
+                  ))}
+                  <hr className="my-3 border-gray-200" />
+                </div>
+              )}
               {searchHistory.length > 0 ? (
                 <div className="space-y-1">
                   <p className="text-xs text-gray-400 mb-2">{t('sidebar.recent.searches')}</p>
@@ -2686,6 +2726,22 @@ const Sidebar: React.FC<SidebarProps> = ({
           );
           })}
         </nav>
+
+        {/* Plans / billing icon */}
+        {(() => {
+          const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
+          const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
+          return (
+          <button
+            onClick={() => { setShowPlans(true); setActivePanel(null); }}
+            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 mb-1 ${hoverClass}`}
+            title="Plans & tarifs"
+            style={{ color: inactiveColor }}
+          >
+            <i className="bi bi-gem text-lg font-bold"></i>
+            <span className="text-[9px] mt-0.5 leading-tight font-bold">Plans</span>
+          </button>
+        )})()}
 
         {/* Settings icon */}
         {(() => {
