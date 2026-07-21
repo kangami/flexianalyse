@@ -57,6 +57,9 @@ class ConnectorRepository(BaseRepository[Connector]):
         if not entity:
             return False
         entity.deleted_at = datetime.now(timezone.utc)
+        # Also flip status so any query keyed on status (not just deleted_at)
+        # excludes it too — defensive, keeps the two flags consistent.
+        entity.status = 'inactive'
         db.session.commit()
         return True
 
