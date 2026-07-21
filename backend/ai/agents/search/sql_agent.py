@@ -217,7 +217,7 @@ def _build_sql_react_graph():
 sql_react_agent = _build_sql_react_graph()
 
 
-def run_sql_react(question: str, db_schema: str, database_url: str, model: str, max_rows: int) -> dict:
+def run_sql_react(question: str, schema: str, database_url: str, model: str, max_rows: int) -> dict:
     """Run the Plan→Act→Reflect SQL loop; returns the final working state."""
     initial: SqlReActState = {
         "question": question, "db_schema": schema, "database_url": database_url,
