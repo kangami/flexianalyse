@@ -148,18 +148,46 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     const map = new Map<string, Element>();
     const host = svgHostRef.current;
     if (!host) return map;
-    const entitySet = new Set(graph.entities);
-    // Mermaid v11 renders ER entities via the unified node renderer → each entity
-    // is a <g class="node …">. Fall back to any <g> holding a <rect> just in case.
-    let nodes = Array.from(host.querySelectorAll('g.node'));
-    if (!nodes.length) {
-      nodes = Array.from(host.querySelectorAll('g')).filter((g) => g.querySelector('rect'));
+    const ents = graph.entities;
+    const entitySet = new Set(ents);
+    const register = (name: string | undefined, g: Element | null) => {
+      if (name && g && !map.has(name)) map.set(name, g);
+    };
+
+    // Mermaid v11 renders ER entities via the unified node renderer:
+    //   <g class="node default …" id="…" data-id="…"> … </g>
+    // Match each node by its id/data-id, its title <text>, or the entity name
+    // embedded in the id.
+    host.querySelectorAll('g.node').forEach((g) => {
+      const id = (g.getAttribute('data-id') || g.getAttribute('id') || '').trim();
+      let name: string | undefined = entitySet.has(id) ? id : undefined;
+      if (!name) {
+        name = Array.from(g.querySelectorAll('text'))
+          .map((t) => (t.textContent || '').trim())
+          .find((t) => entitySet.has(t));
+      }
+      if (!name && id) {
+        name = ents.find((e) => id === e || id.split(/[-_]/).includes(e) || id.endsWith(`-${e}`) || id.includes(`-${e}-`));
+      }
+      register(name, g);
+    });
+
+    // Fallback — from each entity's title <text>, walk up to the nearest <g> that
+    // holds a <rect> (its box).
+    if (map.size === 0) {
+      host.querySelectorAll('text').forEach((t) => {
+        const name = (t.textContent || '').trim();
+        if (!entitySet.has(name)) return;
+        let cur: Element | null = t.parentElement;
+        while (cur && cur.tagName.toLowerCase() !== 'svg') {
+          if (cur.tagName.toLowerCase() === 'g' && cur.querySelector('rect')) { register(name, cur); break; }
+          cur = cur.parentElement;
+        }
+      });
     }
-    for (const g of nodes) {
-      const name = Array.from(g.querySelectorAll('text'))
-        .map((t) => (t.textContent || '').trim())
-        .find((t) => entitySet.has(t));
-      if (name && !map.has(name)) map.set(name, g);
+    if (map.size === 0) {
+      // eslint-disable-next-line no-console
+      console.debug('[ER search] no entity groups matched; g.node=', host.querySelectorAll('g.node').length, 'entities=', ents.length);
     }
     return map;
   }, [graph]);
