@@ -984,7 +984,7 @@ def start_schema_crawl(connector_id: str, org_id: str) -> str | None:
     que le worker ne prenne la tâche. Renvoie l'id de tâche, ou None si l'enfilage
     a échoué (broker indisponible)."""
     try:
-        connector = Connector.query.get(UUID(connector_id))
+        connector = Connector.query.get(UUID(str(connector_id)))
         if connector:
             connector.schema_crawl_status = "pending"
             db.session.commit()
