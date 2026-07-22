@@ -26,6 +26,9 @@ class ConnectorSchemaTable(db.Model):
     primary_keys = db.Column(db.JSON, nullable=True)   # [col, ...]
     foreign_keys = db.Column(db.JSON, nullable=True)   # [{columns, referred_table, referred_columns}]
     row_estimate = db.Column(db.BigInteger, nullable=True)
+    # Set at crawl time by the audit-table name heuristic. When the connector's
+    # hide_audit_tables is on, these are excluded from the diagram + retrieval.
+    is_audit = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
     embedding = db.Column(Vector(int(os.getenv('EMBEDDING_DIMENSIONS', '1536'))), nullable=True)
     introspected_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 

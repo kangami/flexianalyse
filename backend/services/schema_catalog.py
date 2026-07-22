@@ -72,6 +72,8 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
         descriptors = [table_descriptor(t) for t in tables]
         embeddings = Embedder().embed_chunks(descriptors) if descriptors else []
 
+        from services.audit_tables import is_audit_table
+
         # Remplace le catalogue existant (delete-then-insert dans la transaction).
         ConnectorSchemaTable.query.filter_by(connector_id=UUID(connector_id)).delete()
         for meta, emb in zip(tables, embeddings):
@@ -82,6 +84,8 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
                 columns=meta.get("columns", []),
                 primary_keys=[c["name"] for c in meta.get("columns", []) if c.get("pk")],
                 foreign_keys=meta.get("foreign_keys", []),
+                row_estimate=meta.get("row_estimate"),
+                is_audit=is_audit_table(meta["name"]),
                 embedding=emb,
                 introspected_at=datetime.now(timezone.utc),
             ))

@@ -408,6 +408,13 @@ def _fetch_schema_smart(connector, question: str, database_url: str, limits: dic
         # Not crawled yet → live introspection for this question (cached in-process).
         return _fetch_schema(database_url)
 
+    # Drop audit/log/system tables so they don't pollute retrieval (the agent
+    # otherwise confuses an audit copy for the business table on a large schema).
+    if getattr(connector, "hide_audit_tables", True):
+        business = [r for r in rows if not getattr(r, "is_audit", False)]
+        if business:            # never leave the generator with an empty schema
+            rows = business
+
     if len(rows) <= limits["inline_threshold"] or not limits["retrieval_top_k"]:
         selected = rows
     else:

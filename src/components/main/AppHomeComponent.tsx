@@ -135,6 +135,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string }>({ domain: '', questions: [], schema_mermaid: '' });
     const [insightsLoading, setInsightsLoading] = useState(false);
     const [showDiagram, setShowDiagram] = useState(false);
+    const [hideAudit, setHideAudit] = useState(true);
+    const [diagramConnectorId, setDiagramConnectorId] = useState<string | null>(null);
     // Click-a-table detail panel (description + null/non-null stats).
     interface TableColStat { name: string; type: string; pk: boolean; non_null: number | null; null_count: number | null }
     interface TableDetail { table: string; description: string; column_count: number; row_count: number | null; columns: TableColStat[] }
@@ -150,14 +152,47 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             body: JSON.stringify({ connector_id: searchScope }),
         })
             .then(r => r.json())
-            .then(d => setInsights({
-                domain: d.domain || '',
-                questions: Array.isArray(d.questions) ? d.questions : [],
-                schema_mermaid: d.schema_mermaid || '',
-            }))
+            .then(d => {
+                setInsights({
+                    domain: d.domain || '',
+                    questions: Array.isArray(d.questions) ? d.questions : [],
+                    schema_mermaid: d.schema_mermaid || '',
+                });
+                if (typeof d.hide_audit === 'boolean') setHideAudit(d.hide_audit);
+                setDiagramConnectorId((d.connector_id as string) || searchScope || null);
+            })
             .catch(() => {})
             .finally(() => setInsightsLoading(false));
     }, [account?.organization_id, searchScope]);
+
+    // Toggle audit/log/system tables in the diagram + Text-to-SQL retrieval, then
+    // re-fetch insights so the diagram reflects the change immediately.
+    const toggleHideAudit = useCallback(async (hide: boolean) => {
+        const cid = diagramConnectorId;
+        if (!cid || !account?.organization_id) return;
+        setHideAudit(hide);           // optimistic
+        try {
+            await authFetch(`${API_BASE}/api/v2/connectors/${cid}/audit-tables`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'X-Organization-Id': account.organization_id },
+                body: JSON.stringify({ hide }),
+            });
+            setInsightsLoading(true);
+            const r = await authFetch(`${API_BASE}/api/mcp/db-insights`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Organization-Id': account.organization_id },
+                body: JSON.stringify({ connector_id: searchScope }),
+            });
+            const d = await r.json();
+            setInsights({
+                domain: d.domain || '',
+                questions: Array.isArray(d.questions) ? d.questions : [],
+                schema_mermaid: d.schema_mermaid || '',
+            });
+            if (typeof d.hide_audit === 'boolean') setHideAudit(d.hide_audit);
+        } catch { /* keep optimistic state */ }
+        finally { setInsightsLoading(false); }
+    }, [diagramConnectorId, account?.organization_id, searchScope]);
 
     // Persisted conversation history for the current org (titles + order).
     const loadHistory = useCallback(() => {
@@ -602,7 +637,22 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         <>
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
                                 <span className="text-xs font-semibold text-gray-700">Database schema</span>
-                                <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
+                                <div className="flex items-center gap-3">
+                                    <label
+                                        title="Masque les tables d'audit / log / système du diagramme et les exclut des réponses de l'agent"
+                                        className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer select-none hover:text-purple-600"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={hideAudit}
+                                            disabled={!diagramConnectorId || insightsLoading}
+                                            onChange={(e) => toggleHideAudit(e.target.checked)}
+                                            className="accent-purple-600 w-3 h-3"
+                                        />
+                                        Masquer les tables d'audit
+                                    </label>
+                                    <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
+                                </div>
                             </div>
                             <div className="flex-1 min-h-0 relative">
                                 {insights.schema_mermaid

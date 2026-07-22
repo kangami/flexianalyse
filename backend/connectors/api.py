@@ -68,6 +68,7 @@ def _connector_to_dict(c: Connector) -> dict:
         "name": c.name,
         "status": c.status,
         "connection_mode": getattr(c, "connection_mode", "cloud"),
+        "hide_audit_tables": bool(getattr(c, "hide_audit_tables", True)),
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "schema_crawl_status": c.schema_crawl_status,
         "schema_table_count": c.schema_table_count,
@@ -483,6 +484,22 @@ def register(api_bp) -> None:  # noqa: C901
         if not task_id:
             return _err("Failed to start schema crawl (is the Celery worker running?)", 503)
         return jsonify({"status": "started", "task_id": task_id})
+
+    @api_bp.route("/connectors/<connector_id>/audit-tables", methods=["PATCH"])
+    def set_hide_audit_tables(connector_id: str):
+        """Toggle whether audit/log/system tables are hidden from the diagram and
+        excluded from Text-to-SQL retrieval for this connector."""
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        data = request.get_json(silent=True) or {}
+        hide = data.get("hide")
+        if not isinstance(hide, bool):
+            return _err("Body must include boolean 'hide'", 400)
+        from config.extensions import db
+        connector.hide_audit_tables = hide
+        db.session.commit()
+        return jsonify(_connector_to_dict(connector))
 
     @api_bp.route("/connectors/<connector_id>/ingest", methods=["POST"])
     def ingest_connector(connector_id: str):

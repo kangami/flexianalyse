@@ -24,6 +24,11 @@ class Connector(db.Model):
     schema_crawl_status = db.Column(db.String, nullable=True)  # pending | running | done | failed
     schema_crawled_at = db.Column(db.DateTime, nullable=True)
     schema_table_count = db.Column(db.Integer, nullable=True)
+    # Exclude detected audit/log/system tables from the ER diagram + Text-to-SQL
+    # retrieval. On by default: on a large schema these tables pollute retrieval
+    # (the agent confuses an audit copy for the business table) and clutter the
+    # diagram. Users can flip it to see/query them.
+    hide_audit_tables = db.Column(db.Boolean, nullable=False, default=True, server_default=db.true())
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     deleted_at = db.Column(db.DateTime, nullable=True)
 

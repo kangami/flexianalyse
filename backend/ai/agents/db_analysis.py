@@ -22,8 +22,9 @@ import logging
 from ai.observability import get_openai_client
 # Reuse the connector resolution + batched schema fetch used by Text-to-SQL.
 from ai.agents.search.nodes.sql_query import (
-    _get_database_url, fetch_tables_meta, _org_plan_limits,
+    _get_database_url, fetch_tables_meta, _org_plan_limits, _resolve_sql_connector,
 )
+from services.audit_tables import is_audit_table
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,12 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
     if not db_url:
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "No active SQL connector"}
 
-    cached = _CACHE.get(db_url)
+    connector = _resolve_sql_connector(org_id, connector_id)
+    hide_audit = bool(getattr(connector, "hide_audit_tables", True)) if connector else True
+
+    # Cache key includes the audit toggle so flipping it re-renders the diagram.
+    ckey = (db_url, hide_audit)
+    cached = _CACHE.get(ckey)
     if cached and (time.time() - cached[0]) < _TTL:
         return cached[1]
 
@@ -62,6 +68,11 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
         logger.error("DB introspection failed: %s", e, exc_info=True)
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "Could not read the database schema"}
 
+    if hide_audit:
+        kept = [t for t in tables if not is_audit_table(t["name"])]
+        if kept:                # never blank the diagram if everything looked like audit
+            tables = kept
+
     if not tables:
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "No tables found"}
 
@@ -69,8 +80,14 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
     # The LLM only needs a representative sample to infer the domain + questions.
     domain, questions = _llm_domain_and_questions(tables[:LLM_MAX_TABLES])
 
-    result = {"domain": domain, "questions": questions, "schema_mermaid": mermaid}
-    _CACHE[db_url] = (time.time(), result)
+    result = {
+        "domain": domain,
+        "questions": questions,
+        "schema_mermaid": mermaid,
+        "hide_audit": hide_audit,
+        "connector_id": str(connector.id) if connector else None,
+    }
+    _CACHE[ckey] = (time.time(), result)
     return result
 
 
