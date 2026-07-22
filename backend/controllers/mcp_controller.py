@@ -785,6 +785,66 @@ def write_confirm():
     return jsonify({'ok': True, 'sql': sql, 'rows_affected': affected, 'committed': True})
 
 
+@mcp_bp.route('/schema', methods=['POST'])
+def schema_structured():
+    """Structured schema (tables + columns + FKs) for the interactive ER diagram."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    from ai.agents.search.nodes.sql_query import (
+        _resolve_sql_connector, _decrypt_connector_url, fetch_tables_meta, _org_plan_limits,
+    )
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'error': 'No active SQL connector', 'tables': []}), 404
+    db_url = _decrypt_connector_url(connector)
+    cap = _org_plan_limits(org_id)['catalog_max']
+    try:
+        tables = fetch_tables_meta(db_url, limit=cap if cap is not None else 100000)
+    except Exception as e:
+        logger.error("schema fetch failed: %s", e)
+        return jsonify({'error': 'Could not read the database schema', 'tables': []}), 502
+    return jsonify({'tables': [
+        {
+            'name': t.get('name'),
+            'columns': [
+                {'name': c['name'], 'type': str(c.get('type', '')), 'pk': bool(c.get('pk'))}
+                for c in t.get('columns', [])
+            ],
+            'foreign_keys': [
+                {'columns': fk.get('columns', []), 'referred_table': fk.get('referred_table'),
+                 'referred_columns': fk.get('referred_columns', [])}
+                for fk in t.get('foreign_keys', []) if fk.get('referred_table')
+            ],
+        }
+        for t in tables
+    ]})
+
+
+@mcp_bp.route('/table-detail', methods=['POST'])
+def table_detail():
+    """Click a table → business description + per-column null / non-null stats."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json() or {}
+    table = (data.get('table') or '').strip()
+    if not table:
+        return jsonify({'error': 'table required'}), 400
+    from ai.agents.search.nodes.sql_query import _resolve_sql_connector, _decrypt_connector_url
+    from services.table_detail import get_table_detail
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'error': 'No active SQL connector'}), 404
+    db_url = _decrypt_connector_url(connector)
+    try:
+        return jsonify(get_table_detail(db_url, table))
+    except Exception as e:
+        logger.error("table-detail failed: %s", e, exc_info=True)
+        return jsonify({'error': str(e)}), 502
+
+
 @mcp_bp.route('/db-insights', methods=['POST'])
 def db_insights():
     """Background DB analysis: inferred business domain, anticipated questions,

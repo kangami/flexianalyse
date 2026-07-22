@@ -13,6 +13,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 
 interface MermaidDiagramProps {
   chart: string;
+  onTableSelect?: (name: string) => void;
 }
 
 const MIN_SCALE = 0.1;
@@ -21,7 +22,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 let _seq = 0;
 
-const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
+const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart, onTableSelect }) => {
   const { theme } = useTheme();
   const [svg, setSvg] = useState('');
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
@@ -271,6 +272,26 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     obs.observe(host, { childList: true, subtree: true });
     return () => obs.disconnect();
   }, [svg, query, graph, focusTable]);
+
+  // Make each table clickable → open its detail panel. Re-attaches after any
+  // re-render (assigning onclick overwrites, so no duplicate handlers).
+  useEffect(() => {
+    const host = svgHostRef.current;
+    if (!host || !svg || !onTableSelect) return;
+    const decorate = () => {
+      entityGroups().forEach((g, name) => {
+        (g as HTMLElement).style.cursor = 'pointer';
+        (g as SVGElement & { onclick: ((e: Event) => void) | null }).onclick = (e: Event) => {
+          e.stopPropagation();
+          onTableSelect(name);
+        };
+      });
+    };
+    decorate();
+    const obs = new MutationObserver(decorate);
+    obs.observe(host, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, [svg, onTableSelect, entityGroups]);
 
   const onSearchChange = (v: string) => {
     setQuery(v);

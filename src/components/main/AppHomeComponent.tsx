@@ -134,6 +134,11 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string }>({ domain: '', questions: [], schema_mermaid: '' });
     const [insightsLoading, setInsightsLoading] = useState(false);
     const [showDiagram, setShowDiagram] = useState(false);
+    // Click-a-table detail panel (description + null/non-null stats).
+    interface TableColStat { name: string; type: string; pk: boolean; non_null: number | null; null_count: number | null }
+    interface TableDetail { table: string; description: string; column_count: number; row_count: number | null; columns: TableColStat[] }
+    const [tableDetail, setTableDetail] = useState<TableDetail | null>(null);
+    const [tableDetailLoading, setTableDetailLoading] = useState(false);
 
     useEffect(() => {
         if (!account?.organization_id) return;
@@ -304,6 +309,21 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const cancelWrite = (turnId: string) => {
         setConversation(prev => prev.map(t => t.id === turnId && t.write ? { ...t, write: { ...t.write, status: 'cancelled' } } : t));
     };
+
+    // Clicking a table in the ER diagram → fetch its description + column stats.
+    const openTableDetail = useCallback((name: string) => {
+        setTableDetail(null);
+        setTableDetailLoading(true);
+        authFetch(`${API_BASE}/api/mcp/table-detail`, {
+            method: 'POST', headers: orgHeaders(),
+            body: JSON.stringify({ table: name, connector_id: searchScope }),
+        })
+            .then(r => r.json())
+            .then((d: TableDetail & { error?: string }) => { if (!d.error) setTableDetail(d); })
+            .catch(() => {})
+            .finally(() => setTableDetailLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [account?.organization_id, searchScope]);
 
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
@@ -573,12 +593,72 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         <>
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
                                 <span className="text-xs font-semibold text-gray-700">Database schema</span>
-                                <button onClick={() => setShowDiagram(false)} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
+                                <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
                             </div>
-                            <div className="flex-1 min-h-0">
+                            <div className="flex-1 min-h-0 relative">
                                 {insights.schema_mermaid
-                                    ? <MermaidDiagram chart={insights.schema_mermaid} />
+                                    ? <MermaidDiagram chart={insights.schema_mermaid} onTableSelect={openTableDetail} />
                                     : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? 'Analysing your database…' : 'No schema available'}</div>}
+
+                                {/* Table detail panel — appears when a table is clicked. */}
+                                {(tableDetail || tableDetailLoading) && (
+                                    <div className="absolute top-0 right-0 h-full w-72 bg-white border-l border-gray-200 shadow-lg z-20 flex flex-col animate-in slide-in-from-right-2 duration-200">
+                                        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                                            <span className="text-xs font-bold text-purple-600 truncate">{tableDetail?.table || 'Table'}</span>
+                                            <button onClick={() => { setTableDetail(null); setTableDetailLoading(false); }} className="text-gray-400 hover:text-gray-600">
+                                                <i className="bi bi-x text-lg"></i>
+                                            </button>
+                                        </div>
+                                        {tableDetailLoading && !tableDetail ? (
+                                            <div className="flex-1 flex items-center justify-center text-gray-400 text-xs">Analyse…</div>
+                                        ) : tableDetail ? (
+                                            <div className="flex-1 overflow-y-auto p-3 text-xs">
+                                                {tableDetail.description && (
+                                                    <p className="text-gray-600 mb-3 leading-snug">{tableDetail.description}</p>
+                                                )}
+                                                <div className="flex gap-3 mb-3">
+                                                    <div className="flex-1 rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5 text-center">
+                                                        <div className="text-sm font-bold text-gray-800 tabular-nums">{tableDetail.column_count}</div>
+                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Colonnes</div>
+                                                    </div>
+                                                    <div className="flex-1 rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5 text-center">
+                                                        <div className="text-sm font-bold text-gray-800 tabular-nums">{tableDetail.row_count ?? '—'}</div>
+                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Lignes</div>
+                                                    </div>
+                                                </div>
+                                                <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Colonnes · nuls / non-nuls</p>
+                                                <div className="flex flex-col gap-1">
+                                                    {tableDetail.columns.map((c) => {
+                                                        const total = tableDetail.row_count || 0;
+                                                        const nn = c.non_null ?? 0;
+                                                        const pct = total > 0 ? Math.round((nn / total) * 100) : 0;
+                                                        return (
+                                                            <div key={c.name} className="rounded border border-gray-100 px-2 py-1">
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="font-medium text-gray-700 truncate">{c.name}
+                                                                        {c.pk && <span className="ml-1 text-[8px] font-bold text-amber-600">PK</span>}
+                                                                    </span>
+                                                                    <span className="text-[9px] text-gray-400 uppercase flex-shrink-0">{c.type?.split('(')[0]}</span>
+                                                                </div>
+                                                                {c.non_null !== null && (
+                                                                    <>
+                                                                        <div className="mt-1 h-1.5 rounded-full bg-red-100 overflow-hidden">
+                                                                            <div className="h-full bg-green-400" style={{ width: `${pct}%` }} />
+                                                                        </div>
+                                                                        <div className="mt-0.5 flex justify-between text-[9px] text-gray-400 tabular-nums">
+                                                                            <span className="text-green-600">{c.non_null} non-nuls</span>
+                                                                            <span className="text-red-500">{c.null_count} nuls</span>
+                                                                        </div>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                )}
                             </div>
                         </>
                     ) : (
