@@ -39,9 +39,28 @@ def dispatch_tool(tools: "SQLTools", tool_name: str, params: dict) -> dict:
     return {"status": "error", "message": f"Tool '{tool_name}' not found"}
 
 
+# Map bare URL schemes to the drivers actually installed in this image, so a
+# customer can paste a plain "mysql://…" / "postgres://…" URL and it just works.
+_SCHEME_FIXUPS = {
+    "mysql://": "mysql+mysqlconnector://",
+    "mariadb://": "mysql+mysqlconnector://",
+    "postgres://": "postgresql://",      # psycopg2 (default)
+    "mssql://": "mssql+pymssql://",
+    "sqlserver://": "mssql+pymssql://",
+    "oracle://": "oracle+oracledb://",
+}
+
+
+def _normalize_db_url(url: str) -> str:
+    for bare, full in _SCHEME_FIXUPS.items():
+        if url.startswith(bare):
+            return full + url[len(bare):]
+    return url
+
+
 class SQLTools:
     """Tools for querying various SQL databases"""
-    
+
     def __init__(self, database_url: str):
         """
         Initialize SQL tools with database connection
@@ -54,7 +73,7 @@ class SQLTools:
                 - oracle+oracledb://user:password@host:1521/?service_name=XEPDB1
                 - mssql+pymssql://user:password@host:1433/dbname
         """
-        self.database_url = database_url
+        self.database_url = _normalize_db_url(database_url)
         self.engine = None
         self.dialect = ""
         self._connect()
