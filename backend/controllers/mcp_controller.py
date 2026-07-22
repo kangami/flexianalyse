@@ -843,7 +843,7 @@ def table_detail():
         return jsonify({'error': 'No active SQL connector'}), 404
     db_url = _decrypt_connector_url(connector)
     try:
-        return jsonify(get_table_detail(db_url, table))
+        return jsonify(get_table_detail(db_url, table, connector=connector))
     except Exception as e:
         logger.error("table-detail failed: %s", e, exc_info=True)
         return jsonify({'error': str(e)}), 502

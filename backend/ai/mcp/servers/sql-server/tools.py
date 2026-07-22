@@ -165,6 +165,40 @@ class SQLTools:
                 out[table] = value
         return out
 
+    def _row_estimates(self, names: set) -> dict:
+        """Approximate row count per table from the engine's catalog statistics —
+        instant (no table scan), unlike COUNT(*). Estimates can be stale/zero
+        before the DB has gathered stats; callers treat <0 / None as unknown.
+        Best-effort: any failure returns {} and the schema still loads."""
+        d = self.dialect
+        if d == "postgresql":
+            q = ("SELECT c.relname AS t, c.reltuples::bigint AS n "
+                 "FROM pg_class c JOIN pg_namespace nsp ON nsp.oid = c.relnamespace "
+                 "WHERE c.relkind IN ('r','p') "
+                 "AND nsp.nspname NOT IN ('pg_catalog','information_schema')")
+        elif d in ("mysql", "mariadb"):
+            q = ("SELECT table_name AS t, table_rows AS n FROM information_schema.tables "
+                 "WHERE table_schema = DATABASE()")
+        elif d == "mssql":
+            q = ("SELECT t.name AS t, SUM(p.rows) AS n FROM sys.tables t "
+                 "JOIN sys.partitions p ON p.object_id = t.object_id "
+                 "WHERE p.index_id IN (0,1) GROUP BY t.name")
+        elif d == "oracle":
+            q = "SELECT table_name AS t, num_rows AS n FROM user_tables"
+        else:
+            return {}   # sqlite & others: no catalog stats — skip (tables are small)
+        try:
+            out = {}
+            with self.engine.connect() as conn:
+                for row in conn.execute(text(q)):
+                    name, n = row[0], row[1]
+                    if name in names and n is not None and int(n) >= 0:
+                        out[name] = int(n)
+            return out
+        except Exception as e:
+            logger.warning("row-estimate query failed (%s): %s", d, e)
+            return {}
+
     def show_full_schema(self, limit: int | None = None) -> dict[str, Any]:
         """Every table's columns + PK + FK.
 
@@ -193,6 +227,8 @@ class SQLTools:
                 logger.warning("bulk reflection unavailable (%s) — per-table fallback", e)
                 cols_by = None
 
+            estimates = self._row_estimates(name_set)
+
             out = []
             for table_name in names:
                 try:
@@ -209,6 +245,7 @@ class SQLTools:
                             fks = []
                     out.append({
                         "table": table_name,
+                        "row_estimate": estimates.get(table_name),
                         "columns": [
                             {
                                 "name": c["name"],

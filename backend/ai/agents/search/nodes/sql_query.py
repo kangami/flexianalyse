@@ -330,6 +330,7 @@ def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> l
                     for c in t.get("columns", [])
                 ],
                 "foreign_keys": t.get("foreign_keys", []),
+                "row_estimate": t.get("row_estimate"),
             }
             for t in res["tables"]
         ]

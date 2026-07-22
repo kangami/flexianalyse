@@ -139,7 +139,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [diagramConnectorId, setDiagramConnectorId] = useState<string | null>(null);
     // Click-a-table detail panel (description + null/non-null stats).
     interface TableColStat { name: string; type: string; pk: boolean; non_null: number | null; null_count: number | null }
-    interface TableDetail { table: string; description: string; column_count: number; row_count: number | null; columns: TableColStat[] }
+    interface TableDetail { table: string; description: string; column_count: number; row_count: number | null; row_estimated?: boolean; stats_skipped?: boolean; columns: TableColStat[] }
     const [tableDetail, setTableDetail] = useState<TableDetail | null>(null);
     const [tableDetailLoading, setTableDetailLoading] = useState(false);
 
@@ -681,11 +681,18 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                                         <div className="text-[9px] text-gray-400 uppercase tracking-wide">Colonnes</div>
                                                     </div>
                                                     <div className="flex-1 rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5 text-center">
-                                                        <div className="text-sm font-bold text-gray-800 tabular-nums">{tableDetail.row_count ?? '—'}</div>
-                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Lignes</div>
+                                                        <div className="text-sm font-bold text-gray-800 tabular-nums">
+                                                            {tableDetail.row_count != null
+                                                                ? `${tableDetail.row_estimated ? '~' : ''}${tableDetail.row_count.toLocaleString()}`
+                                                                : '—'}
+                                                        </div>
+                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Lignes{tableDetail.row_estimated ? ' (est.)' : ''}</div>
                                                     </div>
                                                 </div>
                                                 <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Colonnes · nuls / non-nuls</p>
+                                                {tableDetail.stats_skipped && (
+                                                    <p className="text-[9px] text-gray-400 mb-1 italic">Stats nuls non calculées (table volumineuse).</p>
+                                                )}
                                                 <div className="flex flex-col gap-1">
                                                     {tableDetail.columns.map((c) => {
                                                         const total = tableDetail.row_count || 0;
