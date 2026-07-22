@@ -26,28 +26,53 @@ logger = logging.getLogger("flexi-agent")
 MAX_MSG = 32 * 1024 * 1024  # allow large result payloads
 
 
+async def _handle_request(ws, tools, msg) -> None:
+    """Run one tool request off the event loop and stream the reply back.
+
+    dispatch_tool is SYNCHRONOUS and can block for a long time (schema reflection
+    or a heavy query on a large database). Running it inline would freeze the
+    asyncio loop, so the WebSocket keepalive pings stop and the gateway drops the
+    connection ("Agent OFFLINE") mid-query. Offloading to a worker thread keeps the
+    loop free to answer pings — long queries no longer kill the socket, and several
+    requests can run at once.
+    """
+    rid = msg.get("id")
+    try:
+        result = await asyncio.to_thread(
+            dispatch_tool, tools, msg.get("tool"), msg.get("params", {})
+        )
+    except Exception as e:
+        result = {"status": "error", "message": str(e)}
+    try:
+        await ws.send(json.dumps({"type": "response", "id": rid, "result": result}))
+    except Exception:
+        pass  # socket closed while we were working; the gateway will retry
+
+
 async def _serve(ws, tools) -> None:
     await ws.send(json.dumps({"type": "auth", "token": os.getenv("FLEXI_TOKEN", "")}))
-    async for raw in ws:
-        try:
-            msg = json.loads(raw)
-        except Exception:
-            continue
-        mtype = msg.get("type")
-        if mtype == "auth_ok":
-            logger.info("Agent authenticated — ready to serve queries.")
-            continue
-        if mtype == "auth_error":
-            logger.error("Gateway rejected the token: %s", msg.get("message"))
-            await ws.close()
-            return
-        if mtype == "request":
-            rid = msg.get("id")
+    tasks: set = set()
+    try:
+        async for raw in ws:
             try:
-                result = dispatch_tool(tools, msg.get("tool"), msg.get("params", {}))
-            except Exception as e:
-                result = {"status": "error", "message": str(e)}
-            await ws.send(json.dumps({"type": "response", "id": rid, "result": result}))
+                msg = json.loads(raw)
+            except Exception:
+                continue
+            mtype = msg.get("type")
+            if mtype == "auth_ok":
+                logger.info("Agent authenticated — ready to serve queries.")
+                continue
+            if mtype == "auth_error":
+                logger.error("Gateway rejected the token: %s", msg.get("message"))
+                await ws.close()
+                return
+            if mtype == "request":
+                t = asyncio.ensure_future(_handle_request(ws, tools, msg))
+                tasks.add(t)
+                t.add_done_callback(tasks.discard)
+    finally:
+        for t in tasks:
+            t.cancel()
 
 
 async def run_agent() -> None:

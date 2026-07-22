@@ -298,6 +298,10 @@ def _call_sql_tool(tool_name: str, params: dict, database_url: str, timeout: int
 # (dozens of catalog queries), so it gets its own, more generous HTTP timeout.
 SCHEMA_FETCH_TIMEOUT = int(os.getenv("SQL_SCHEMA_TIMEOUT", "90"))
 
+# A single SELECT can be slow on a large database; give data queries a more
+# generous HTTP timeout than the 30s default (well under the gateway's 120s).
+QUERY_EXEC_TIMEOUT = int(os.getenv("SQL_QUERY_TIMEOUT", "60"))
+
 
 def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> list[dict]:
     """Structured schema: [{name, columns:[{name,type,pk}], foreign_keys:[...]}].

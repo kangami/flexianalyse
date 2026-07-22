@@ -34,7 +34,7 @@ logger = logging.getLogger("agent-gateway")
 
 TOKEN_SECRET = os.getenv("AGENT_TOKEN_SECRET", "")
 RPC_SECRET = os.getenv("AGENT_GATEWAY_SECRET", "")
-RPC_TIMEOUT = float(os.getenv("AGENT_RPC_TIMEOUT", "60"))
+RPC_TIMEOUT = float(os.getenv("AGENT_RPC_TIMEOUT", "120"))
 
 app = FastAPI(title="FlexiAnalyse Agent Gateway")
 

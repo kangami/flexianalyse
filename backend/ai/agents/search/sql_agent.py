@@ -101,7 +101,9 @@ def _generate_node(state: SqlReActState) -> SqlReActState:
 
 def _execute_node(state: SqlReActState) -> SqlReActState:
     """Run the SQL via the MCP server (act / observe)."""
-    from ai.agents.search.nodes.sql_query import _is_safe_select, _call_sql_tool, MAX_RESULT_ROWS
+    from ai.agents.search.nodes.sql_query import (
+        _is_safe_select, _call_sql_tool, MAX_RESULT_ROWS, QUERY_EXEC_TIMEOUT,
+    )
     sql = state.get("sql", "")
     if not sql:
         return {**state, "rows": [], "columns": [], "sql_error": "empty query"}
@@ -114,6 +116,7 @@ def _execute_node(state: SqlReActState) -> SqlReActState:
             "query_database",
             {"sql_query": sql, "limit": state.get("max_rows", MAX_RESULT_ROWS)},
             state["database_url"],
+            timeout=QUERY_EXEC_TIMEOUT,
         )
     except Exception as e:
         return {**state, "rows": [], "columns": [], "sql_error": str(e),
