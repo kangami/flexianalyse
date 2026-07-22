@@ -21,12 +21,19 @@ import logging
 
 from ai.observability import get_openai_client
 # Reuse the connector resolution + batched schema fetch used by Text-to-SQL.
-from ai.agents.search.nodes.sql_query import _get_database_url, fetch_tables_meta
+from ai.agents.search.nodes.sql_query import (
+    _get_database_url, fetch_tables_meta, _org_plan_limits,
+)
 
 logger = logging.getLogger(__name__)
 
 INSIGHTS_MODEL = os.getenv("DB_INSIGHTS_MODEL", "gpt-4o")
-MAX_TABLES = 40        # keep the diagram + prompt bounded
+# The ER diagram shows every table the plan allows (like the /schema endpoint);
+# only the LLM domain/questions prompt stays bounded (sending hundreds of tables
+# is wasteful and blows the token budget). Enterprise (catalog_max=None) is
+# capped by DIAGRAM_HARD_MAX so a multi-thousand-table DB can't hang Mermaid.
+LLM_MAX_TABLES = int(os.getenv("DB_INSIGHTS_LLM_TABLES", "40"))
+DIAGRAM_HARD_MAX = int(os.getenv("DB_INSIGHTS_DIAGRAM_MAX", "1000"))
 MAX_COLS_PER_TABLE = 20
 
 # database_url -> (timestamp, insights dict)
@@ -44,8 +51,13 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
     if cached and (time.time() - cached[0]) < _TTL:
         return cached[1]
 
+    # Diagram cap follows the plan (free 15 / pro 150 / business 500 / enterprise
+    # unlimited → DIAGRAM_HARD_MAX), so the ER diagram shows what the sync catalogued.
+    cap = _org_plan_limits(org_id).get("catalog_max")
+    diagram_cap = DIAGRAM_HARD_MAX if cap is None else min(cap, DIAGRAM_HARD_MAX)
+
     try:
-        tables = _introspect(db_url)
+        tables = _introspect(db_url, diagram_cap)
     except Exception as e:
         logger.error("DB introspection failed: %s", e, exc_info=True)
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "Could not read the database schema"}
@@ -54,7 +66,8 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "No tables found"}
 
     mermaid = _build_mermaid_er(tables)
-    domain, questions = _llm_domain_and_questions(tables)
+    # The LLM only needs a representative sample to infer the domain + questions.
+    domain, questions = _llm_domain_and_questions(tables[:LLM_MAX_TABLES])
 
     result = {"domain": domain, "questions": questions, "schema_mermaid": mermaid}
     _CACHE[db_url] = (time.time(), result)
@@ -65,11 +78,11 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
 # Introspection
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _introspect(db_url: str) -> list[dict]:
+def _introspect(db_url: str, limit: int) -> list[dict]:
     """[{name, columns:[{name,type,pk}], fks:[{columns,referred_table}]}] per table.
     One batched round-trip via the shared fetch_tables_meta."""
     out = []
-    for t in fetch_tables_meta(db_url, limit=MAX_TABLES)[:MAX_TABLES]:
+    for t in fetch_tables_meta(db_url, limit=limit)[:limit]:
         out.append({
             "name": t["name"],
             "columns": t["columns"],
