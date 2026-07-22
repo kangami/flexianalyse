@@ -18,8 +18,10 @@ _SYSTEM_TABLES = {
 }
 
 # A name whose token set intersects these is treated as audit/log.
+# NB: "aud"/"auds" are matched as whole camelCase/underscore tokens (CustomerAud,
+# customer_aud) — NOT as substrings — so "fraud" (single token) is never flagged.
 _AUDIT_TOKENS = {
-    "audit", "audits", "auditlog", "auditlogs",
+    "audit", "audits", "auditlog", "auditlogs", "aud", "auds",
     "log", "logs", "logging",
     "hist", "history", "histories",
     "journal", "journals", "changelog", "changelogs",
@@ -30,7 +32,7 @@ _AUDIT_TOKENS = {
 
 _PREFIXES = ("sys_", "tmp_", "temp_", "stg_", "bak_", "audit_", "log_", "hist_", "z_")
 _SUFFIXES = (
-    "_audit", "_audits", "_log", "_logs", "_hist", "_history",
+    "_audit", "_audits", "_aud", "_log", "_logs", "_hist", "_history",
     "_journal", "_archive", "_bak", "_backup", "_stg", "_tmp",
 )
 

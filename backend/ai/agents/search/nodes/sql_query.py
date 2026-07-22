@@ -419,11 +419,71 @@ def _fetch_schema_smart(connector, question: str, database_url: str, limits: dic
     if len(rows) <= limits["inline_threshold"] or not limits["retrieval_top_k"]:
         selected = rows
     else:
-        selected = _retrieve_catalog_tables(rows, question, limits)
-        logger.info("Schema retrieval: %d/%d tables selected for the query",
-                    len(selected), len(rows))
+        # 1) Recall — cast a WIDE net by embedding similarity (+ FK expansion) so the
+        #    right table is in the candidate pool even among hundreds of tables.
+        pool = max(limits["retrieval_top_k"], RERANK_POOL) if RERANK_ENABLED else limits["retrieval_top_k"]
+        candidates = _retrieve_catalog_tables(rows, question, limits, k=pool)
+        # 2) Precision — an LLM picks the tables STRICTLY needed (with join targets),
+        #    which is what stops the agent confusing look-alike tables on a big schema.
+        selected = candidates
+        if RERANK_ENABLED and len(candidates) > limits["retrieval_top_k"]:
+            picked = _rerank_tables_llm(candidates, question, limits.get("sql_model", SQL_GEN_MODEL))
+            if picked:
+                selected = picked
+        logger.info("Schema retrieval: %d candidates → %d tables for the query",
+                    len(candidates), len(selected))
 
     return _render_catalog_schema(selected)
+
+
+# Wider candidate pool fed to the LLM reranker (recall), before it narrows to the
+# tables actually needed (precision). Kill-switch via env for cost control.
+RERANK_POOL = int(os.getenv("SQL_RERANK_POOL", "40"))
+RERANK_ENABLED = os.getenv("SQL_TABLE_RERANK", "1") not in ("0", "false", "False")
+RERANK_MAX_CANDIDATES = int(os.getenv("SQL_RERANK_MAX_CANDIDATES", "60"))
+
+
+def _rerank_tables_llm(candidates: list, question: str, model: str) -> list | None:
+    """Pick the tables STRICTLY needed to answer, from the candidate pool.
+
+    Cosine recall casts a wide net but ranks look-alike tables (audit copies,
+    similarly-named domains) near the real one; on a large schema that's what makes
+    the SQL generator join the wrong table. This reasoning pass reads the candidate
+    names + columns and returns the minimal relevant subset (with join targets).
+    Returns None on any failure so the caller falls back to the raw candidates.
+    """
+    pool = candidates[:RERANK_MAX_CANDIDATES]
+    listing = []
+    for r in pool:
+        cols = ", ".join(c.get("name", "") for c in (r.columns or [])[:14])
+        listing.append(f"- {r.table_name}({cols})")
+    prompt = (
+        f"Question de l'utilisateur : {question}\n\n"
+        "Tables candidates (nom(colonnes)) :\n"
+        f"{chr(10).join(listing)}\n\n"
+        "Choisis UNIQUEMENT les tables strictement nécessaires pour répondre à la "
+        "question, en incluant les tables de jointure requises. Ne choisis que dans "
+        "la liste ci-dessus, n'invente aucun nom. Réponds en JSON strict : "
+        '{\"tables\": [\"nom1\", \"nom2\"]}.'
+    )
+    try:
+        resp = get_openai_client().chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "Tu sélectionnes les tables pertinentes d'un schéma pour répondre à une question. Réponds uniquement en JSON valide."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=300,
+            temperature=0,
+        )
+        names = json.loads(resp.choices[0].message.content or "{}").get("tables", [])
+        wanted = {str(n).strip() for n in names if str(n).strip()}
+        picked = [r for r in pool if r.table_name in wanted]
+        return picked or None
+    except Exception as e:
+        logger.warning("Table rerank failed (%s) — using raw candidates", e)
+        return None
 
 
 def _cosine(a, b) -> float:
@@ -434,12 +494,13 @@ def _cosine(a, b) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-def _retrieve_catalog_tables(rows, question: str, limits: dict) -> list:
+def _retrieve_catalog_tables(rows, question: str, limits: dict, k: int | None = None) -> list:
     """Top-K tables by embedding similarity to the question, plus a 1-hop FK
-    expansion so join targets / association tables aren't cut off."""
+    expansion so join targets / association tables aren't cut off. `k` overrides the
+    plan's retrieval_top_k (used to cast a wider net before the LLM reranker)."""
     from ai.ingestion.embedder import Embedder
 
-    k = limits["retrieval_top_k"]
+    k = k or limits["retrieval_top_k"]
     with_emb = [r for r in rows if r.embedding is not None]
     if not with_emb:
         return rows[:k]
