@@ -148,15 +148,22 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     const map = new Map<string, Element>();
     const host = svgHostRef.current;
     if (!host) return map;
+    const entitySet = new Set(graph.entities);
+    // From an entity's title <text>, walk up to the <g> that actually holds the
+    // entity box (i.e. contains a <rect>) — closest('g') alone grabs a text-only
+    // wrapper and styling it wouldn't dim the whole table.
+    const findBox = (el: Element | null): Element | null => {
+      let cur: Element | null = el;
+      while (cur && cur.tagName.toLowerCase() !== 'svg') {
+        if (cur.tagName.toLowerCase() === 'g' && cur.querySelector('rect')) return cur;
+        cur = cur.parentElement;
+      }
+      return el ? el.closest('g') : null;
+    };
     host.querySelectorAll('text').forEach((t) => {
       const name = (t.textContent || '').trim();
-      if (!map.has(name) && graph.neighbors.has(name)) {
-        const g = t.closest('g');
-        if (g) map.set(name, g);
-      }
-      // entities with no relations aren't in `neighbors`; still allow a match
-      if (!map.has(name) && graph.entities.includes(name)) {
-        const g = t.closest('g');
+      if (entitySet.has(name) && !map.has(name)) {
+        const g = findBox(t);
         if (g) map.set(name, g);
       }
     });
@@ -172,6 +179,8 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     });
     host.querySelectorAll<SVGElement>('[data-er-hl]').forEach((el) => {
       el.style.filter = '';
+      el.style.stroke = '';
+      el.style.strokeWidth = '';
       el.removeAttribute('data-er-hl');
     });
   }, []);
@@ -200,8 +209,14 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     // Emphasize the searched table + recenter on it.
     const primary = groups.get(name);
     if (primary) {
-      (primary as SVGElement).style.filter = 'drop-shadow(0 0 4px rgba(147,51,234,0.95))';
+      (primary as SVGElement).style.filter = 'drop-shadow(0 0 5px rgba(147,51,234,0.95))';
       primary.setAttribute('data-er-hl', '1');
+      // Purple outline on the table's boxes so it clearly reads as selected.
+      primary.querySelectorAll<SVGElement>('rect').forEach((r) => {
+        r.style.stroke = '#9333ea';
+        r.style.strokeWidth = '2px';
+        r.setAttribute('data-er-hl', '1');
+      });
       const label = Array.from(primary.querySelectorAll('text'))
         .find((t) => (t.textContent || '').trim() === name) || primary.querySelector('text');
       const lr = (label as Element | null)?.getBoundingClientRect();
@@ -214,8 +229,14 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     }
   }, [graph, clearHighlight, entityGroups]);
 
-  // A new diagram (chart/theme change) resets the search.
-  useEffect(() => { setQuery(''); setSearchOpen(false); }, [svg]);
+  // Re-apply the highlight after the SVG is (re)rendered — the diagram can be
+  // re-rendered (e.g. insights re-fetch) which replaces the DOM and would wipe a
+  // manual highlight. requestAnimationFrame lets the new SVG lay out first.
+  useEffect(() => {
+    if (!svg || !query || !graph.entities.includes(query)) return;
+    const id = requestAnimationFrame(() => focusTable(query));
+    return () => cancelAnimationFrame(id);
+  }, [svg, query, graph, focusTable]);
 
   const onSearchChange = (v: string) => {
     setQuery(v);
