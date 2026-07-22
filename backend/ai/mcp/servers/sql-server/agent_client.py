@@ -43,8 +43,17 @@ async def _handle_request(ws, tools, msg) -> None:
         )
     except Exception as e:
         result = {"status": "error", "message": str(e)}
+    # default=str is a safety net: a column type json can't encode natively
+    # (datetime, UUID, Decimal, …) would otherwise raise here — and since the send
+    # failure is swallowed, the caller would just hang until it times out. Encoding
+    # such values as strings guarantees a response always goes back.
     try:
-        await ws.send(json.dumps({"type": "response", "id": rid, "result": result}))
+        payload = json.dumps({"type": "response", "id": rid, "result": result}, default=str)
+    except Exception as e:
+        payload = json.dumps({"type": "response", "id": rid,
+                              "result": {"status": "error", "message": f"unserializable result: {e}"}})
+    try:
+        await ws.send(payload)
     except Exception:
         pass  # socket closed while we were working; the gateway will retry
 

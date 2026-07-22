@@ -14,6 +14,35 @@ logger = logging.getLogger(__name__)
 # hanging until the caller's HTTP timeout — it fails fast with a real error.
 CONNECT_TIMEOUT = int(os.getenv("SQL_CONNECT_TIMEOUT", "8"))
 
+# Max characters kept per result cell. A table that stores files / long text
+# (e.g. a "basefileentity") returns megabytes per row on SELECT *, which is slow to
+# ship over the agent socket and useless in a chat grid — so we truncate.
+CELL_MAX_CHARS = int(os.getenv("SQL_CELL_MAX_CHARS", "2000"))
+
+
+def _slim_value(v):
+    """Make one DB value JSON-safe and bounded.
+
+    Binary columns can't be JSON-serialized (json.dumps would raise and the agent
+    would never send a response → the caller times out), and huge text bloats the
+    payload. Elide bytes, truncate long strings, and normalize Decimal/date/time so
+    every cell is safe to serialize regardless of the driver's Python types.
+    """
+    import datetime as _dt
+    from decimal import Decimal
+    if v is None or isinstance(v, (bool, int, float)):
+        return v
+    if isinstance(v, str):
+        return v if len(v) <= CELL_MAX_CHARS else v[:CELL_MAX_CHARS] + f"… (+{len(v) - CELL_MAX_CHARS} chars)"
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return f"<binary {len(bytes(v))} bytes>"
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (_dt.datetime, _dt.date, _dt.time)):
+        return v.isoformat()
+    s = str(v)
+    return s if len(s) <= CELL_MAX_CHARS else s[:CELL_MAX_CHARS] + f"… (+{len(s) - CELL_MAX_CHARS} chars)"
+
 
 def dispatch_tool(tools: "SQLTools", tool_name: str, params: dict) -> dict:
     """Run a named tool against a SQLTools instance. Shared by the HTTP MCP server
@@ -348,7 +377,10 @@ class SQLTools:
                 return {
                     "status": "success",
                     "columns": columns,
-                    "rows": [dict(row._mapping) for row in rows],
+                    "rows": [
+                        {k: _slim_value(v) for k, v in row._mapping.items()}
+                        for row in rows
+                    ],
                     "row_count": len(rows)
                 }
         except Exception as e:

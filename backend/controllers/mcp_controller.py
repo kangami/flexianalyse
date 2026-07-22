@@ -640,6 +640,7 @@ def sql_run():
     from ai.agents.search.nodes.sql_query import (
         _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
         _is_safe_select, _org_plan_limits, MAX_RESULT_ROWS, RESPONSE_ROW_CAP,
+        QUERY_EXEC_TIMEOUT,
     )
 
     kind = statement_kind(sql)
@@ -659,6 +660,7 @@ def sql_run():
             "query_database",
             {"sql_query": sql, "limit": limits.get("max_rows", MAX_RESULT_ROWS)},
             db_url,
+            timeout=QUERY_EXEC_TIMEOUT,
         )
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
