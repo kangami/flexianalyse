@@ -149,24 +149,18 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     const host = svgHostRef.current;
     if (!host) return map;
     const entitySet = new Set(graph.entities);
-    // From an entity's title <text>, walk up to the <g> that actually holds the
-    // entity box (i.e. contains a <rect>) — closest('g') alone grabs a text-only
-    // wrapper and styling it wouldn't dim the whole table.
-    const findBox = (el: Element | null): Element | null => {
-      let cur: Element | null = el;
-      while (cur && cur.tagName.toLowerCase() !== 'svg') {
-        if (cur.tagName.toLowerCase() === 'g' && cur.querySelector('rect')) return cur;
-        cur = cur.parentElement;
-      }
-      return el ? el.closest('g') : null;
-    };
-    host.querySelectorAll('text').forEach((t) => {
-      const name = (t.textContent || '').trim();
-      if (entitySet.has(name) && !map.has(name)) {
-        const g = findBox(t);
-        if (g) map.set(name, g);
-      }
-    });
+    // Mermaid v11 renders ER entities via the unified node renderer → each entity
+    // is a <g class="node …">. Fall back to any <g> holding a <rect> just in case.
+    let nodes = Array.from(host.querySelectorAll('g.node'));
+    if (!nodes.length) {
+      nodes = Array.from(host.querySelectorAll('g')).filter((g) => g.querySelector('rect'));
+    }
+    for (const g of nodes) {
+      const name = Array.from(g.querySelectorAll('text'))
+        .map((t) => (t.textContent || '').trim())
+        .find((t) => entitySet.has(t));
+      if (name && !map.has(name)) map.set(name, g);
+    }
     return map;
   }, [graph]);
 
@@ -206,22 +200,26 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
       p.setAttribute('data-er-dim', '1');
     });
 
-    // Emphasize the searched table + recenter on it.
+    // Colour the searched table's box (best-effort — depends on finding its group).
     const primary = groups.get(name);
     if (primary) {
       (primary as SVGElement).style.filter = 'drop-shadow(0 0 5px rgba(147,51,234,0.95))';
       primary.setAttribute('data-er-hl', '1');
-      // Purple outline on the table's boxes so it clearly reads as selected.
       primary.querySelectorAll<SVGElement>('rect').forEach((r) => {
         r.style.stroke = '#9333ea';
         r.style.strokeWidth = '2px';
         r.setAttribute('data-er-hl', '1');
       });
-      const label = Array.from(primary.querySelectorAll('text'))
-        .find((t) => (t.textContent || '').trim() === name) || primary.querySelector('text');
-      const lr = (label as Element | null)?.getBoundingClientRect();
+    }
+
+    // Recenter on the table — robust: find its title <text> directly (independent
+    // of the box-group detection) and pan so it sits at the container centre.
+    const titleText = Array.from(host.querySelectorAll('text'))
+      .find((t) => (t.textContent || '').trim() === name);
+    if (titleText) {
+      const lr = titleText.getBoundingClientRect();
       const cr = cont.getBoundingClientRect();
-      if (lr && lr.width) {
+      if (lr.width) {
         const dx = (cr.left + cr.width / 2) - (lr.left + lr.width / 2);
         const dy = (cr.top + cr.height / 2) - (lr.top + lr.height / 2);
         setPos((p) => ({ x: p.x + dx, y: p.y + dy }));
@@ -229,13 +227,21 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart }) => {
     }
   }, [graph, clearHighlight, entityGroups]);
 
-  // Re-apply the highlight after the SVG is (re)rendered — the diagram can be
-  // re-rendered (e.g. insights re-fetch) which replaces the DOM and would wipe a
-  // manual highlight. requestAnimationFrame lets the new SVG lay out first.
+  // The diagram re-renders on its own (Mermaid re-render / insights re-fetch
+  // replaces the whole SVG), which wipes a manual DOM highlight. A MutationObserver
+  // on the SVG host re-applies the highlight whenever the subtree is rebuilt.
+  // (We only observe childList/subtree, not attributes, so our own style changes
+  // don't retrigger it — no loop.)
   useEffect(() => {
-    if (!svg || !query || !graph.entities.includes(query)) return;
-    const id = requestAnimationFrame(() => focusTable(query));
-    return () => cancelAnimationFrame(id);
+    const host = svgHostRef.current;
+    if (!host || !svg) return;
+    const reapply = () => {
+      if (query && graph.entities.includes(query)) requestAnimationFrame(() => focusTable(query));
+    };
+    reapply();
+    const obs = new MutationObserver(reapply);
+    obs.observe(host, { childList: true, subtree: true });
+    return () => obs.disconnect();
   }, [svg, query, graph, focusTable]);
 
   const onSearchChange = (v: string) => {
