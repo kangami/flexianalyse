@@ -8,7 +8,7 @@ import DbResultGrid from './DbResultGrid';
 import DbChatPanel, { DbTurn } from './DbChatPanel';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 import SuggestionChips from './SuggestionChips';
-import MermaidDiagram from './MermaidDiagram';
+import SchemaFlow, { DiagramTable } from './SchemaFlow';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -132,7 +132,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     // dbAnalyse agent: inferred domain, anticipated questions, ER diagram — fetched
     // in the background per scope (cached server-side). Powers the suggestion chips
     // and the "Database diagram" view.
-    const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string }>({ domain: '', questions: [], schema_mermaid: '' });
+    const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string; tables: DiagramTable[] }>({ domain: '', questions: [], schema_mermaid: '', tables: [] });
     const [insightsLoading, setInsightsLoading] = useState(false);
     const [showDiagram, setShowDiagram] = useState(false);
     const [hideAudit, setHideAudit] = useState(true);
@@ -157,6 +157,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                     domain: d.domain || '',
                     questions: Array.isArray(d.questions) ? d.questions : [],
                     schema_mermaid: d.schema_mermaid || '',
+                    tables: Array.isArray(d.tables) ? d.tables : [],
                 });
                 if (typeof d.hide_audit === 'boolean') setHideAudit(d.hide_audit);
                 setDiagramConnectorId((d.connector_id as string) || searchScope || null);
@@ -188,6 +189,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                 domain: d.domain || '',
                 questions: Array.isArray(d.questions) ? d.questions : [],
                 schema_mermaid: d.schema_mermaid || '',
+                tables: Array.isArray(d.tables) ? d.tables : [],
             });
             if (typeof d.hide_audit === 'boolean') setHideAudit(d.hide_audit);
         } catch { /* keep optimistic state */ }
@@ -655,8 +657,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                 </div>
                             </div>
                             <div className="flex-1 min-h-0 relative">
-                                {insights.schema_mermaid
-                                    ? <MermaidDiagram chart={insights.schema_mermaid} onTableSelect={openTableDetail} />
+                                {insights.tables.length
+                                    ? <SchemaFlow tables={insights.tables} onTableSelect={openTableDetail} />
                                     : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? 'Analysing your database…' : 'No schema available'}</div>}
 
                                 {/* Table detail panel — appears when a table is clicked. */}

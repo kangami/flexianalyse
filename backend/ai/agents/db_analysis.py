@@ -83,7 +83,8 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
     result = {
         "domain": domain,
         "questions": questions,
-        "schema_mermaid": mermaid,
+        "schema_mermaid": mermaid,          # kept for backward-compat / fallback
+        "tables": _diagram_tables(tables),  # structured schema for the React Flow diagram
         "hide_audit": hide_audit,
         "connector_id": str(connector.id) if connector else None,
     }
@@ -103,12 +104,29 @@ def _introspect(db_url: str, limit: int) -> list[dict]:
         out.append({
             "name": t["name"],
             "columns": t["columns"],
+            "row_estimate": t.get("row_estimate"),
             "fks": [
                 {"columns": fk.get("columns", []), "referred_table": fk.get("referred_table")}
                 for fk in t.get("foreign_keys", []) if fk.get("referred_table")
             ],
         })
     return out
+
+
+def _diagram_tables(tables: list[dict]) -> list[dict]:
+    """Compact structured schema the React Flow diagram builds nodes/edges from.
+    Column *names* only (the detail panel fetches the rest on click) so the payload
+    stays small even at hundreds of tables."""
+    return [
+        {
+            "name": t["name"],
+            "columns": [c["name"] for c in t["columns"]],
+            "pk": [c["name"] for c in t["columns"] if c.get("pk")],
+            "row_estimate": t.get("row_estimate"),
+            "fks": [fk["referred_table"] for fk in t["fks"] if fk.get("referred_table")],
+        }
+        for t in tables
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
