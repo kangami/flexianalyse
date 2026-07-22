@@ -72,6 +72,11 @@ const MermaidDiagram: React.FC<MermaidDiagramProps> = ({ chart, onTableSelect })
           startOnLoad: false,
           theme: theme === 'white' ? 'neutral' : 'dark',
           securityLevel: 'strict',
+          // A large schema (hundreds of tables) blows past Mermaid's default
+          // 50k-char cap — "Maximum text size in diagram exceeded". Raise it so
+          // the diagram renders; the backend already trims columns per table.
+          maxTextSize: 5_000_000,
+          maxEdges: 5000,
         });
         const res = await mod.default.render(idRef.current, chart);
         if (cancelled) return;

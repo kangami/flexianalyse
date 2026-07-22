@@ -13,6 +13,8 @@ export interface DbResultGridProps {
   rows: Record<string, unknown>[];
   sql?: string;
   loading?: boolean;
+  /** True total matched by the query, when more rows exist than are displayed. */
+  totalRows?: number;
 }
 
 const renderCell = (value: unknown): { text: string; isNull: boolean } => {
@@ -21,8 +23,9 @@ const renderCell = (value: unknown): { text: string; isNull: boolean } => {
   return { text: String(value), isNull: false };
 };
 
-const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading }) => {
+const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading, totalRows }) => {
   const hasData = columns.length > 0;
+  const truncated = typeof totalRows === 'number' && totalRows > rows.length;
   // Collapsed by default so a long analytical query (CTEs/window functions)
   // doesn't push the result grid off-screen.
   const [showSql, setShowSql] = useState(false);
@@ -39,7 +42,10 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
           <span className="text-xs font-semibold text-gray-700 truncate">Result</span>
           {hasData && (
             <span className="text-[10px] text-gray-400 tabular-nums flex-shrink-0">
-              {rows.length} row{rows.length === 1 ? '' : 's'} · {columns.length} col{columns.length === 1 ? '' : 's'}
+              {truncated
+                ? `${rows.length} of ${totalRows!.toLocaleString()} rows`
+                : `${rows.length} row${rows.length === 1 ? '' : 's'}`}
+              {' · '}{columns.length} col{columns.length === 1 ? '' : 's'}
             </span>
           )}
         </div>

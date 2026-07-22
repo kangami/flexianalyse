@@ -110,6 +110,12 @@ def _san_type(sql_type: str) -> str:
     return re.sub(r"\W+", "_", t) or "text"
 
 
+# Above this many tables, show only key columns (PK/FK) per entity so the Mermaid
+# source stays small enough to render — a full column list × hundreds of tables
+# overflows the renderer and is unreadable anyway. Relationships are kept intact.
+SLIM_TABLE_THRESHOLD = int(os.getenv("DB_INSIGHTS_SLIM_ABOVE", "60"))
+
+
 def _build_mermaid_er(tables: list[dict]) -> str:
     """Emit a Mermaid erDiagram from tables + columns + foreign keys."""
     present = {t["name"] for t in tables}
@@ -119,14 +125,21 @@ def _build_mermaid_er(tables: list[dict]) -> str:
         t["name"]: {c for fk in t["fks"] for c in fk.get("columns", [])}
         for t in tables
     }
+    slim = len(tables) > SLIM_TABLE_THRESHOLD
 
     lines = ["erDiagram"]
 
     for t in tables:
         ent = name_map[t["name"]]
+        keys = fk_cols[t["name"]]
+        cols = t["columns"]
+        if slim:
+            # Keep only primary/foreign keys; fall back to the first column so an
+            # entity is never rendered empty.
+            cols = [c for c in cols if c["pk"] or c["name"] in keys] or cols[:1]
         lines.append(f"    {ent} {{")
-        for col in t["columns"][:MAX_COLS_PER_TABLE]:
-            key = "PK" if col["pk"] else ("FK" if col["name"] in fk_cols[t["name"]] else "")
+        for col in cols[:MAX_COLS_PER_TABLE]:
+            key = "PK" if col["pk"] else ("FK" if col["name"] in keys else "")
             attr = f"        {_san_type(col['type'])} {_san(col['name'])}"
             if key:
                 attr += f" {key}"

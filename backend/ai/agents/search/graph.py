@@ -141,6 +141,7 @@ def run_search(
         "sql_error":     final_state.get("sql_error"),
         "sql_columns":   final_state.get("sql_columns", []),
         "sql_rows":      final_state.get("sql_rows", []),
+        "sql_total_rows": final_state.get("sql_total_rows", len(final_state.get("sql_rows", []))),
     }
 
 
@@ -242,6 +243,7 @@ def run_search_stream(
             "sql_error":     state.get("sql_error"),
             "sql_columns":   state.get("sql_columns", []),
             "sql_rows":      state.get("sql_rows", []),
+            "sql_total_rows": state.get("sql_total_rows", len(state.get("sql_rows", []))),
             "sources":       state.get("sources", []),
             "intent":        state.get("intent", ""),
         })

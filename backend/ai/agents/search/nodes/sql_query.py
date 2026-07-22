@@ -50,6 +50,11 @@ _AGENT_SCHEME = "agent://"
 
 MAX_TABLES_IN_PROMPT = 30    # include enough tables so JOIN targets aren't cut off
 MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context
+# Rows shipped to the browser for display. The DB query still runs with the plan's
+# row limit (so aggregates compute over the full set), but a chat UI can't usefully
+# render thousands of rows — sending them just makes the client lag. We ship a
+# capped sample and tell the UI the true total.
+RESPONSE_ROW_CAP     = int(os.getenv("SQL_RESPONSE_ROWS", "200"))
 # gpt-4o (not -mini) is markedly more reliable at multi-table joins, esp. joining
 # through association tables — worth the cost for correctness. Override via env.
 SQL_GEN_MODEL        = os.getenv("SQL_GEN_MODEL", "gpt-4o")
@@ -131,7 +136,8 @@ def sql_query(state: SearchState) -> SearchState:
             **state,
             "generated_sql": sql,
             "sql_columns": result.get("columns", []),
-            "sql_rows": rows,
+            "sql_rows": rows[:RESPONSE_ROW_CAP],
+            "sql_total_rows": len(rows),
             "sql_plan": result.get("plan", ""),
             "sql_uncertain": bool(result.get("uncertain")),
         }

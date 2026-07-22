@@ -639,7 +639,7 @@ def sql_run():
     from services.sql_write import statement_kind
     from ai.agents.search.nodes.sql_query import (
         _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
-        _is_safe_select, _org_plan_limits, MAX_RESULT_ROWS,
+        _is_safe_select, _org_plan_limits, MAX_RESULT_ROWS, RESPONSE_ROW_CAP,
     )
 
     kind = statement_kind(sql)
@@ -664,8 +664,12 @@ def sql_run():
         return jsonify({'ok': False, 'error': str(e)})
     if result.get("status") != "success":
         return jsonify({'ok': False, 'error': result.get("message", "Query failed"), 'sql': sql})
+    rows = result.get("rows", [])
+    # Ship a capped sample to the browser (a chat grid can't render thousands of
+    # rows without lagging); report the true matched count so the UI can note it.
     return jsonify({'ok': True, 'sql': sql,
-                    'columns': result.get("columns", []), 'rows': result.get("rows", [])})
+                    'columns': result.get("columns", []),
+                    'rows': rows[:RESPONSE_ROW_CAP], 'total_rows': len(rows)})
 
 
 @mcp_bp.route('/write/preview', methods=['POST'])

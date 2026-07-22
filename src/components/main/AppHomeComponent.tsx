@@ -99,6 +99,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [pendingQuery, setPendingQuery]   = useState<string | null>(null);
     const [tableColumns, setTableColumns]   = useState<string[]>([]);
     const [tableRows, setTableRows]         = useState<Record<string, unknown>[]>([]);
+    const [tableTotalRows, setTableTotalRows] = useState<number>(0);
     const [tableSql, setTableSql]           = useState<string>('');
 
     // Connectors of the org — feed the perimeter selector and the engine badges.
@@ -204,6 +205,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             setConversationId(id);
             setTableColumns(cols);
             setTableRows(rows);
+            setTableTotalRows(rows.length);
             setTableSql(sql);
             setShowDiagram(false);
         } catch { /* ignore */ }
@@ -252,7 +254,12 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const cols: string[] = d.columns || [];
             const rows: Record<string, unknown>[] = d.rows || [];
             setConversation(prev => [...prev, { id: turnId, query: sql, answer: `${rows.length} ligne${rows.length === 1 ? '' : 's'} retournée${rows.length === 1 ? '' : 's'}.`, sql, sources: [] }]);
-            if (cols.length) { setTableColumns(cols); setTableRows(rows); setTableSql(sql); }
+            if (cols.length) {
+                setTableColumns(cols);
+                setTableRows(rows);
+                setTableTotalRows(typeof d.total_rows === 'number' ? d.total_rows : rows.length);
+                setTableSql(sql);
+            }
         } catch (e) {
             setPendingQuery(null);
             setConversation(prev => [...prev, { id: turnId, query: sql, answer: `⚠️ ${(e as Error).message}`, sources: [] }]);
@@ -385,7 +392,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                 // Refresh the left grid only when this turn returned a table.
                 if (columns.length) {
                     setTableColumns(columns);
-                    setTableRows(Array.isArray(meta.sql_rows) ? meta.sql_rows as Record<string, unknown>[] : []);
+                    const metaRows = Array.isArray(meta.sql_rows) ? meta.sql_rows as Record<string, unknown>[] : [];
+                    setTableRows(metaRows);
+                    setTableTotalRows(typeof meta.sql_total_rows === 'number' ? meta.sql_total_rows : metaRows.length);
                     setTableSql((meta.generated_sql as string) || '');
                 }
             };
@@ -665,6 +674,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         <DbResultGrid
                             columns={tableColumns}
                             rows={tableRows}
+                            totalRows={tableTotalRows}
                             sql={tableSql}
                             loading={enterpriseLoading && tableColumns.length === 0}
                         />
