@@ -595,6 +595,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [connectorMsg, setConnectorMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [connectorSaving, setConnectorSaving] = useState(false);
   const [connectorTesting, setConnectorTesting] = useState(false);
+  // Dial-home local database: 'cloud' (direct) vs 'local' (on-prem agent).
+  const [connectorMode, setConnectorMode] = useState<'cloud' | 'local'>('cloud');
+  const [agentSetup, setAgentSetup] = useState<{ command: string; connectorId: string } | null>(null);
+  const [agentOnline, setAgentOnline] = useState(false);
   // Saved connectors list + edit/action state
   const [savedConnectors, setSavedConnectors] = useState<{
     id: string; type: string; engine?: string | null; name: string; status: string;
@@ -1387,6 +1391,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     setConnectorForm({});
     setConnectorMsg(null);
     setConnectorEditId(null);
+    setConnectorMode('cloud');
+    setAgentSetup(null);
+    setAgentOnline(false);
   }, []);
 
   const loadConnectors = useCallback(async () => {
@@ -1426,6 +1433,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     if (activePanel === 'history') loadDbConversations();
   }, [activePanel, loadDbConversations]);
+
+  // Poll the on-prem agent's status once its setup command is shown, until online.
+  useEffect(() => {
+    if (!agentSetup || agentOnline) return;
+    const check = async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (selectedOrgId) headers['X-Organization-Id'] = selectedOrgId;
+        const r = await authFetch(`${API}/api/v2/connectors/${agentSetup.connectorId}/agent-status`, { headers });
+        const d = await r.json();
+        if (d.online) { setAgentOnline(true); loadConnectors(); }
+      } catch { /* ignore */ }
+    };
+    check();
+    const t = setInterval(check, 3000);
+    return () => clearInterval(t);
+  }, [agentSetup, agentOnline, API, selectedOrgId, loadConnectors]);
 
   // Live progress: poll while any connector is actively ingesting (rings animate)
   // or its schema is being crawled, so statuses update. Stops once nothing runs.
@@ -1579,6 +1603,27 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       const apiType = CONNECTOR_META[activeConnectorType].apiType;
 
+      // Local (on-prem) database → create the connector without credentials, then
+      // fetch the dial-home agent command for the customer to run.
+      if (!isEdit && DB_CONNECTORS.has(activeConnectorType) && connectorMode === 'local') {
+        const hdrs = { 'Content-Type': 'application/json', 'X-Organization-Id': selectedOrgId };
+        const cr = await authFetch(`${API}/api/v2/connectors`, {
+          method: 'POST', headers: hdrs,
+          body: JSON.stringify({ type: apiType, engine: activeConnectorType, name: connectorForm.name || `New ${activeConnectorType}`, connection_mode: 'local' }),
+        });
+        const cd = await cr.json();
+        if (!cr.ok) throw new Error(cd?.error || cr.statusText);
+        const tr = await authFetch(`${API}/api/v2/connectors/${cd.id}/agent-token`, { method: 'POST', headers: hdrs });
+        const td = await tr.json();
+        if (!tr.ok) throw new Error(td?.error || tr.statusText);
+        setAgentSetup({ command: td.command, connectorId: cd.id });
+        setAgentOnline(false);
+        await loadConnectors();
+        window.dispatchEvent(new CustomEvent('connectors:changed'));
+        setConnectorMsg({ text: "Connecteur local créé — lance la commande de l'agent.", ok: true });
+        return;
+      }
+
       // Construit le body selon le type de connector
       const body: Record<string, unknown> = {
         type: apiType,
@@ -1678,7 +1723,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     } finally {
       setConnectorSaving(false);
     }
-  }, [activeConnectorType, connectorForm, API, selectedOrgId, connectorEditId, loadConnectors, resetConnectorForm]);
+  }, [activeConnectorType, connectorForm, connectorMode, API, selectedOrgId, connectorEditId, loadConnectors, resetConnectorForm]);
 
   // Close flyout when clicking outside
   useEffect(() => {
@@ -1736,7 +1781,59 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           )}
 
-          {CONNECTOR_FIELDS[activeConnectorType].map(field => (
+          {/* Cloud vs on-premise (local) — local runs a dial-home agent. */}
+          {!isEdit && DB_CONNECTORS.has(activeConnectorType) && (
+            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px] font-medium">
+              <button
+                onClick={() => { setConnectorMode('cloud'); setAgentSetup(null); }}
+                className={`flex-1 px-2 py-1.5 transition-colors ${connectorMode === 'cloud' ? 'bg-purple-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >Base accessible</button>
+              <button
+                onClick={() => setConnectorMode('local')}
+                className={`flex-1 px-2 py-1.5 transition-colors ${connectorMode === 'local' ? 'bg-purple-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+              >Base locale / on-prem</button>
+            </div>
+          )}
+
+          {/* Local mode, before creation: name + explanation. */}
+          {!isEdit && DB_CONNECTORS.has(activeConnectorType) && connectorMode === 'local' && !agentSetup && (
+            <>
+              <div>
+                <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wide">Nom</label>
+                <input
+                  value={connectorForm.name || ''}
+                  onChange={e => setConnectorForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Ma base locale"
+                  className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 placeholder:text-gray-300"
+                />
+              </div>
+              <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-2">
+                <i className="bi bi-hdd-network text-blue-500 text-sm mt-0.5 flex-shrink-0"></i>
+                <p className="text-[10px] text-blue-700 leading-snug">
+                  Ta base reste chez toi. On génère une commande Docker à lancer sur une machine de ton réseau ; l'agent se connecte à nous en <strong>sortant</strong> (aucun port à ouvrir). Les identifiants ne quittent jamais ta machine.
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* Local mode, after creation: the agent command + online status. */}
+          {agentSetup && (
+            <div className="rounded-lg border border-gray-200 p-2.5 flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700">
+                <span className={`w-2 h-2 rounded-full ${agentOnline ? 'bg-green-500' : 'bg-amber-400 animate-pulse'}`}></span>
+                {agentOnline ? 'Agent en ligne' : "En attente de l'agent…"}
+              </div>
+              <p className="text-[10px] text-gray-500">Remplace <code>DATABASE_URL</code> par ta base, puis lance sur une machine du réseau :</p>
+              <pre className="text-[10px] bg-gray-900 text-gray-100 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{agentSetup.command}</pre>
+              <button
+                onClick={() => navigator.clipboard.writeText(agentSetup.command)}
+                className="text-[11px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 self-start"
+              >Copier la commande</button>
+              {agentOnline && <p className="text-[10px] text-green-600">✓ Connecté — ferme, puis synchronise le schéma.</p>}
+            </div>
+          )}
+
+          {(!DB_CONNECTORS.has(activeConnectorType) || connectorMode === 'cloud') && CONNECTOR_FIELDS[activeConnectorType].map(field => (
             <div key={field.key}>
               <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wide">{field.label}</label>
               <input
@@ -1751,7 +1848,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
           {/* SSL toggle — cloud-managed DBs (RDS, Cloud SQL, Supabase, Neon…)
               often require it. Only wired for engines whose driver we set it on. */}
-          {['postgresql', 'mysql', 'mariadb'].includes(activeConnectorType) && (
+          {connectorMode === 'cloud' && ['postgresql', 'mysql', 'mariadb'].includes(activeConnectorType) && (
             <label className="flex items-center gap-2 mt-0.5 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -1771,8 +1868,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         <div className="flex flex-col gap-2">
-          {/* Test connection — DB connectors only, before saving. */}
-          {DB_CONNECTORS.has(activeConnectorType) && (
+          {/* Test connection — cloud DB connectors only, before saving. */}
+          {connectorMode === 'cloud' && DB_CONNECTORS.has(activeConnectorType) && (
             <button
               disabled={connectorTesting || connectorSaving}
               onClick={handleTestConnection}
@@ -1786,24 +1883,29 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
 
-          <button
-            disabled={connectorSaving}
-            onClick={handleSaveConnector}
-            className="w-full text-xs px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
-          >
-            {connectorSaving ? (
-              'Saving…'
-            ) : isEdit ? (
-              'Save Changes'
-            ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
-              <>
-                <i className="bi bi-box-arrow-up-right text-[11px]"></i>
-                Connect with {activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft'}
-              </>
-            ) : (
-              'Save Connection'
-            )}
-          </button>
+          {/* Save button — hidden once the local agent command is shown (already created). */}
+          {!agentSetup && (
+            <button
+              disabled={connectorSaving}
+              onClick={handleSaveConnector}
+              className="w-full text-xs px-3 py-2 rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 font-medium transition-colors flex items-center justify-center gap-1.5"
+            >
+              {connectorSaving ? (
+                'Saving…'
+              ) : isEdit ? (
+                'Save Changes'
+              ) : activeConnectorType && OAUTH_CONNECTORS.has(activeConnectorType) ? (
+                <>
+                  <i className="bi bi-box-arrow-up-right text-[11px]"></i>
+                  Connect with {activeConnectorType === 'google_drive' ? 'Google' : activeConnectorType === 'dropbox' ? 'Dropbox' : 'Microsoft'}
+                </>
+              ) : connectorMode === 'local' && DB_CONNECTORS.has(activeConnectorType) ? (
+                <><i className="bi bi-terminal text-[11px]"></i> Créer &amp; générer la commande</>
+              ) : (
+                'Save Connection'
+              )}
+            </button>
+          )}
         </div>
       </div>
     );

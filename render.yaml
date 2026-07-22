@@ -48,6 +48,14 @@ services:
       # SQL MCP server — internal address (host:port), used by Text-to-SQL
       - key: SQL_MCP_URL
         fromService: { type: pserv, name: flexianalyse-mcp-sql, property: hostport }
+      # Dial-home agent gateway (on-prem/local databases)
+      - key: AGENT_GATEWAY_URL                 # internal API→gateway /rpc
+        fromService: { type: web, name: flexianalyse-gateway, property: hostport }
+      - key: AGENT_GATEWAY_PUBLIC_URL          # wss URL agents dial into — set after
+        sync: false                            #   the gateway's first deploy
+      - key: AGENT_IMAGE                        # published agent image for the run command
+        sync: false
+      - fromGroup: flexianalyse-agent
       # Shared config/secrets
       - fromGroup: flexianalyse-shared
 
@@ -78,6 +86,10 @@ services:
       # SQL MCP server — internal address (host:port), used by SQL ingestion
       - key: SQL_MCP_URL
         fromService: { type: pserv, name: flexianalyse-mcp-sql, property: hostport }
+      # Agent gateway — the worker's schema crawl reaches local DBs through it
+      - key: AGENT_GATEWAY_URL
+        fromService: { type: web, name: flexianalyse-gateway, property: hostport }
+      - fromGroup: flexianalyse-agent
       - fromGroup: flexianalyse-shared
 
   # ── SQL MCP server (private Docker service) ──────────────────────────────
@@ -93,6 +105,22 @@ services:
     rootDir: backend/ai/mcp/servers/sql-server
     dockerfilePath: ./Dockerfile
     dockerContext: .
+
+  # ── Agent gateway (dial-home, PUBLIC) ────────────────────────────────────
+  # Holds the WebSocket connections from customers' on-prem agents and forwards
+  # tool calls (POST /rpc) from the API/worker. PUBLIC on purpose: agents dial in
+  # over WSS from their own networks. /rpc is protected by AGENT_GATEWAY_SECRET;
+  # /agent (WS) is authenticated by the signed pairing token.
+  - type: web
+    name: flexianalyse-gateway
+    runtime: docker
+    region: oregon
+    plan: starter
+    rootDir: backend/ai/mcp/servers/agent-gateway
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - fromGroup: flexianalyse-agent
 
 # ── Shared env vars (same values injected into API + worker) ───────────────
 # Values marked `sync: false` are NOT stored in git — Render prompts you for
@@ -125,3 +153,12 @@ envVarGroups:
         sync: false
       - key: FRONTEND_URL           # your Vercel URL, e.g. https://flexianalyse.vercel.app
         sync: false
+
+  # Secrets shared by the API, worker and gateway for the dial-home agent.
+  # Generated once and identical across the three services (JWT signing + /rpc auth).
+  - name: flexianalyse-agent
+    envVars:
+      - key: AGENT_TOKEN_SECRET     # signs/verifies agent pairing tokens (JWT HS256)
+        generateValue: true
+      - key: AGENT_GATEWAY_SECRET   # protects the gateway /rpc endpoint
+        generateValue: true
