@@ -158,30 +158,8 @@ async def execute_tool(request: Request):
         else:
             tools = sql_tools  # défaut global
 
-        if tool_name == "test_connection":
-            return tools.test_connection()
-        elif tool_name == "show_tables":
-            return tools.show_tables()
-        elif tool_name == "show_full_schema":
-            return tools.show_full_schema(params.get("limit"))
-        elif tool_name == "query_database":
-            return tools.query_database(
-                params.get("sql_query", ""),
-                params.get("limit", 1000)
-            )
-        elif tool_name == "execute_write":
-            return tools.execute_write(
-                params.get("sql_query", ""),
-                params.get("dry_run", True),
-            )
-        elif tool_name == "show_table_schema":
-            return tools.show_table_schema(params.get("table_name", ""))
-        elif tool_name == "get_table_row_count":
-            return tools.get_table_row_count(params.get("table_name", ""))
-        elif tool_name == "get_table_indexes":
-            return tools.get_table_indexes(params.get("table_name", ""))
-        else:
-            raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+        from tools import dispatch_tool
+        return dispatch_tool(tools, tool_name, params)
     except HTTPException:
         raise
     except Exception as e:
@@ -224,11 +202,19 @@ async def list_tools():
     }
 
 if __name__ == "__main__":
-    logger.info(f"Initializing SQL MCP Server...")
-    uvicorn.run(
-        app,
-        host=HTTP_HOST,
-        port=HTTP_PORT,
-        log_level="info"
-    )
+    # Dial-home agent mode: run the outbound WebSocket agent instead of the HTTP
+    # server (customer's local/on-prem database).
+    if os.getenv("FLEXI_AGENT_MODE"):
+        import asyncio
+        from agent_client import run_agent
+        logger.info("Starting FlexiAnalyse dial-home agent...")
+        asyncio.run(run_agent())
+    else:
+        logger.info("Initializing SQL MCP Server...")
+        uvicorn.run(
+            app,
+            host=HTTP_HOST,
+            port=HTTP_PORT,
+            log_level="info",
+        )
 

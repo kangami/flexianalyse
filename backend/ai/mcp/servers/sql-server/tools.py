@@ -15,6 +15,30 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT = int(os.getenv("SQL_CONNECT_TIMEOUT", "8"))
 
 
+def dispatch_tool(tools: "SQLTools", tool_name: str, params: dict) -> dict:
+    """Run a named tool against a SQLTools instance. Shared by the HTTP MCP server
+    (/execute) and the dial-home agent (over WebSocket). Returns a dict result;
+    unknown tools yield an error dict rather than raising."""
+    params = params or {}
+    if tool_name == "test_connection":
+        return tools.test_connection()
+    if tool_name == "show_tables":
+        return tools.show_tables()
+    if tool_name == "show_full_schema":
+        return tools.show_full_schema(params.get("limit"))
+    if tool_name == "query_database":
+        return tools.query_database(params.get("sql_query", ""), params.get("limit", 1000))
+    if tool_name == "execute_write":
+        return tools.execute_write(params.get("sql_query", ""), params.get("dry_run", True))
+    if tool_name == "show_table_schema":
+        return tools.show_table_schema(params.get("table_name", ""))
+    if tool_name == "get_table_row_count":
+        return tools.get_table_row_count(params.get("table_name", ""))
+    if tool_name == "get_table_indexes":
+        return tools.get_table_indexes(params.get("table_name", ""))
+    return {"status": "error", "message": f"Tool '{tool_name}' not found"}
+
+
 class SQLTools:
     """Tools for querying various SQL databases"""
     

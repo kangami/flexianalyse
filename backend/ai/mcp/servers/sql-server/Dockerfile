@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY tools.py .
 COPY server.py .
+COPY agent_client.py .
 
 # Make server executable
 RUN chmod +x server.py

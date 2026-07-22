@@ -8,3 +8,4 @@ mysql-connector-python>=8.2.0
 oracledb>=1.0.0
 pymssql>=2.2.11
 python-dotenv>=1.0.0
+websockets>=12.0
