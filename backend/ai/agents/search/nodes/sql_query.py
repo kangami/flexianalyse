@@ -464,6 +464,12 @@ Write a single read-only SQL SELECT query (PostgreSQL dialect) that answers it.
 Rules:
 - SELECT statements ONLY — never INSERT/UPDATE/DELETE/DROP/ALTER/etc.
 - Use only tables and columns that appear in the schema above.
+- VOCABULARY: the user's wording may differ from the schema's names. Map their
+  terms to the closest matching table/column BY MEANING — e.g. a "customer" /
+  "client" / "renter" / "buyer" maps to a customers table, a "movie" to a films
+  table, a "product" to items, etc. Do NOT return an empty string just because the
+  exact word isn't a table name; only return empty if truly NO table plausibly
+  matches the request.
 - JOIN tables ONLY along the [FK: ...] relationships shown. NEVER join two tables
   on columns that are not linked by a foreign key — in particular do NOT join two
   tables on their `id` columns unless an FK explicitly says so.

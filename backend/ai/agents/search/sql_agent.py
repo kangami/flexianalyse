@@ -64,10 +64,14 @@ def _plan_node(state: SqlReActState) -> SqlReActState:
 Question: {state['question']}
 
 Produce a SHORT plan to answer it with SQL — do NOT write SQL yet:
+- FIRST, map the user's terms to the actual tables/columns. Their wording often
+  differs from the schema (synonyms/domain terms): e.g. customer≈client≈renter≈buyer,
+  movie≈film, product≈item. Pick the table that matches BY MEANING, even if the
+  exact word isn't a table name.
 - which tables, and the FK join path between them (join only along [FK: ...]);
 - the exact filters (column and concrete value) implied by the question;
 - the aggregation / grouping / ordering needed.
-Max 4 lines."""
+Max 5 lines."""
     try:
         resp = get_openai_client().chat.completions.create(
             model=PLAN_MODEL,
