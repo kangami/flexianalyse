@@ -16,6 +16,9 @@ class Connector(db.Model):
     engine = db.Column(db.String, nullable=True)
     name = db.Column(db.String, nullable=False)
     status = db.Column(db.String, default='active')
+    # 'cloud' (the API/MCP connects directly) or 'local' (an on-prem dial-home
+    # agent holds the credentials and executes queries; routed via the gateway).
+    connection_mode = db.Column(db.String, nullable=False, default='cloud', server_default='cloud')
     # Crawl du catalogue de schéma (connecteurs SQL) : état du dernier crawl,
     # date, et nombre de tables catalogué. Alimente le retrieval de tables.
     schema_crawl_status = db.Column(db.String, nullable=True)  # pending | running | done | failed

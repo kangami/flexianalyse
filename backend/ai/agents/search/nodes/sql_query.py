@@ -39,6 +39,15 @@ SQL_MCP_URL = os.getenv("SQL_MCP_URL", "http://localhost:3001").strip()
 if SQL_MCP_URL and "://" not in SQL_MCP_URL:
     SQL_MCP_URL = f"http://{SQL_MCP_URL}"
 
+# Dial-home agent gateway (on-prem/local databases). Internal HTTP endpoint the
+# API calls; the gateway forwards to the customer's agent over WebSocket.
+AGENT_GATEWAY_URL = os.getenv("AGENT_GATEWAY_URL", "http://localhost:3010").strip()
+if AGENT_GATEWAY_URL and "://" not in AGENT_GATEWAY_URL:
+    AGENT_GATEWAY_URL = f"http://{AGENT_GATEWAY_URL}"
+AGENT_GATEWAY_SECRET = os.getenv("AGENT_GATEWAY_SECRET", "")
+# database_url marker for a local connector: agent://<connector_id>
+_AGENT_SCHEME = "agent://"
+
 MAX_TABLES_IN_PROMPT = 30    # include enough tables so JOIN targets aren't cut off
 MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context
 # gpt-4o (not -mini) is markedly more reliable at multi-table joins, esp. joining
@@ -223,9 +232,17 @@ def _resolve_sql_connector(org_id: str, connector_id: str | None = None):
 
 
 def _decrypt_connector_url(connector) -> str | None:
-    """Decrypt a connector's stored database URL. None if missing/undecryptable."""
+    """Resolve how to reach a connector's database.
+
+    Local (on-prem) connectors keep their credentials on the customer's agent, so
+    there is nothing to decrypt in the cloud — we return an `agent://<id>` marker
+    that _call_sql_tool routes to the gateway. Cloud connectors decrypt their
+    stored URL as before."""
     from models.connector import ConnectorCredentials
     from services.encryption_service import EncryptionService
+
+    if getattr(connector, "connection_mode", "cloud") == "local":
+        return f"{_AGENT_SCHEME}{connector.id}"
 
     creds = ConnectorCredentials.query.filter_by(
         connector_id=connector.id,
@@ -254,7 +271,23 @@ def _get_database_url(org_id: str, connector_id: str | None = None) -> str | Non
 
 
 def _call_sql_tool(tool_name: str, params: dict, database_url: str, timeout: int = 30) -> dict:
-    """Synchronous call to the SQL MCP server's /execute endpoint."""
+    """Run a SQL tool, routing to the right backend based on the connector:
+
+    - cloud connector → the MCP server's /execute (database_url carries the creds);
+    - local connector → the agent gateway's /rpc (database_url is `agent://<id>`;
+      the creds live on the customer's agent, so only the connector id is sent).
+    """
+    if database_url and database_url.startswith(_AGENT_SCHEME):
+        connector_id = database_url[len(_AGENT_SCHEME):]
+        resp = httpx.post(
+            f"{AGENT_GATEWAY_URL}/rpc",
+            json={"connector_id": connector_id, "tool_name": tool_name, "params": params or {}},
+            headers={"X-Gateway-Secret": AGENT_GATEWAY_SECRET},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     body = {"tool_name": tool_name, "params": params or {}, "database_url": database_url}
     resp = httpx.post(f"{SQL_MCP_URL}/execute", json=body, timeout=timeout)
     resp.raise_for_status()

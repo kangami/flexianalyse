@@ -67,6 +67,7 @@ def _connector_to_dict(c: Connector) -> dict:
         "engine": c.engine,
         "name": c.name,
         "status": c.status,
+        "connection_mode": getattr(c, "connection_mode", "cloud"),
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "schema_crawl_status": c.schema_crawl_status,
         "schema_table_count": c.schema_table_count,
@@ -242,10 +243,16 @@ def register(api_bp) -> None:  # noqa: C901
         if not name:
             return _err("name required")
 
-        try:
-            token = _resolve_sql_token(data)
-        except ValueError as exc:
-            return _err(str(exc))
+        # 'local' → an on-prem dial-home agent holds the credentials; the cloud
+        # stores none and reaches the DB through the agent gateway.
+        connection_mode = "local" if data.get("connection_mode") == "local" else "cloud"
+
+        token = None
+        if connection_mode == "cloud":
+            try:
+                token = _resolve_sql_token(data)
+            except ValueError as exc:
+                return _err(str(exc))
 
         connector = Connector(
             organization_id=UUID(org_id),
@@ -253,10 +260,18 @@ def register(api_bp) -> None:  # noqa: C901
             engine=engine,
             name=name,
             status="active",
+            connection_mode=connection_mode,
         )
         connector = locator.connectors.create(connector)
 
         ingestion_task_id = None
+        # Local connectors are crawled once their agent is online (via the sidebar
+        # "sync schema" button) — the schema isn't reachable at creation time.
+        if connection_mode == "local":
+            payload = _connector_to_dict(connector)
+            payload["ingestion_task_id"] = None
+            return jsonify(payload), 201
+
         if token:
             creds = ConnectorCredentials(
                 connector_id=connector.id,
@@ -410,6 +425,50 @@ def register(api_bp) -> None:  # noqa: C901
             return jsonify(result.to_dict())
         except ValueError as exc:
             return _err(str(exc))
+
+    @api_bp.route("/connectors/<connector_id>/agent-token", methods=["POST"])
+    def connector_agent_token(connector_id: str):
+        """Pairing token + one-line command to run the on-prem dial-home agent."""
+        import os
+        import jwt
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        secret = os.getenv("AGENT_TOKEN_SECRET", "")
+        if not secret:
+            return _err("Agent non configuré (AGENT_TOKEN_SECRET manquant)", 503)
+        token = jwt.encode(
+            {"connector_id": str(connector.id), "org_id": str(connector.organization_id)},
+            secret, algorithm="HS256",
+        )
+        gateway = os.getenv("AGENT_GATEWAY_PUBLIC_URL", "wss://flexianalyse-gateway.onrender.com/agent")
+        image = os.getenv("AGENT_IMAGE", "flexianalyse/agent:latest")
+        command = (
+            'docker run -d --name flexianalyse-agent '
+            '-e FLEXI_AGENT_MODE=1 '
+            f'-e FLEXI_TOKEN="{token}" '
+            f'-e FLEXI_GATEWAY_URL="{gateway}" '
+            '-e DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DBNAME" '
+            f'{image}'
+        )
+        return jsonify({"token": token, "command": command, "gateway": gateway})
+
+    @api_bp.route("/connectors/<connector_id>/agent-status", methods=["GET"])
+    def connector_agent_status(connector_id: str):
+        """Whether the connector's on-prem agent is currently connected."""
+        import os
+        import httpx
+        connector, err = _get_connector_or_404(connector_id)
+        if err:
+            return err
+        gateway = os.getenv("AGENT_GATEWAY_URL", "http://localhost:3010").strip()
+        if gateway and "://" not in gateway:
+            gateway = f"http://{gateway}"
+        try:
+            r = httpx.get(f"{gateway}/status/{connector.id}", timeout=5)
+            return jsonify({"online": bool(r.json().get("online"))})
+        except Exception:
+            return jsonify({"online": False})
 
     @api_bp.route("/connectors/<connector_id>/schema/crawl", methods=["POST"])
     def crawl_connector_schema_route(connector_id: str):
