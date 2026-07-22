@@ -214,6 +214,97 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         return () => window.removeEventListener('conversation:open', onOpen);
     }, [openConversation]);
 
+    const orgHeaders = (): Record<string, string> => {
+        const h: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (account?.organization_id) h['X-Organization-Id'] = account.organization_id;
+        return h;
+    };
+
+    // Detect raw SQL typed directly in the query box vs a natural-language question.
+    const detectSqlKind = (input: string): 'read' | 'write' | 'nl' => {
+        const m = input.trim().match(/^([a-zA-Z]+)/);
+        const kw = m ? m[1].toLowerCase() : '';
+        if (kw === 'select' || kw === 'with') return 'read';
+        if (kw === 'update' || kw === 'insert' || kw === 'delete') return 'write';
+        return 'nl';
+    };
+
+    // Direct SELECT/WITH typed by the user — run read-only and show the grid.
+    const runDirectSql = async (sql: string) => {
+        setEnterpriseLoading(true); setPendingQuery(sql); setQuery(''); setShowDiagram(false);
+        const turnId = `${Date.now()}`;
+        try {
+            const res = await authFetch(`${API_BASE}/api/mcp/sql/run`, {
+                method: 'POST', headers: orgHeaders(),
+                body: JSON.stringify({ sql, connector_id: searchScope }),
+            });
+            const d = await res.json();
+            setPendingQuery(null);
+            if (!res.ok || !d.ok) {
+                setConversation(prev => [...prev, { id: turnId, query: sql, answer: `⚠️ ${d.error || res.statusText}`, sql, sources: [] }]);
+                return;
+            }
+            const cols: string[] = d.columns || [];
+            const rows: Record<string, unknown>[] = d.rows || [];
+            setConversation(prev => [...prev, { id: turnId, query: sql, answer: `${rows.length} ligne${rows.length === 1 ? '' : 's'} retournée${rows.length === 1 ? '' : 's'}.`, sql, sources: [] }]);
+            if (cols.length) { setTableColumns(cols); setTableRows(rows); setTableSql(sql); }
+        } catch (e) {
+            setPendingQuery(null);
+            setConversation(prev => [...prev, { id: turnId, query: sql, answer: `⚠️ ${(e as Error).message}`, sources: [] }]);
+        } finally { setEnterpriseLoading(false); }
+    };
+
+    // A write (UPDATE/INSERT/DELETE), from raw SQL or NL — preview its impact and
+    // show a confirmation card; nothing is executed until the user confirms.
+    const runWritePreview = async (input: string, isDirect: boolean) => {
+        setEnterpriseLoading(true); setPendingQuery(input); setQuery(''); setShowDiagram(false);
+        const turnId = `${Date.now()}`;
+        try {
+            const body = isDirect ? { sql: input, connector_id: searchScope } : { query: input, connector_id: searchScope };
+            const res = await authFetch(`${API_BASE}/api/mcp/write/preview`, {
+                method: 'POST', headers: orgHeaders(), body: JSON.stringify(body),
+            });
+            const d = await res.json();
+            setPendingQuery(null);
+            if (!res.ok || !d.ok) {
+                setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${d.error || 'Écriture refusée.'}`, sql: d.sql, sources: [] }]);
+                return;
+            }
+            setConversation(prev => [...prev, {
+                id: turnId, query: input, answer: '', sources: [],
+                write: { sql: d.sql, rowsAffected: d.rows_affected ?? null, requiresExtraConfirm: !!d.requires_extra_confirm, connectorId: d.connector_id ?? null, status: 'pending' },
+            }]);
+        } catch (e) {
+            setPendingQuery(null);
+            setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${(e as Error).message}`, sources: [] }]);
+        } finally { setEnterpriseLoading(false); }
+    };
+
+    const confirmWrite = async (turnId: string) => {
+        const turn = conversation.find(t => t.id === turnId);
+        if (!turn?.write) return;
+        setConversation(prev => prev.map(t => t.id === turnId && t.write ? { ...t, write: { ...t.write, status: 'confirming' } } : t));
+        try {
+            const res = await authFetch(`${API_BASE}/api/mcp/write/confirm`, {
+                method: 'POST', headers: orgHeaders(),
+                body: JSON.stringify({ sql: turn.write.sql, connector_id: turn.write.connectorId ?? searchScope }),
+            });
+            const d = await res.json();
+            setConversation(prev => prev.map(t => {
+                if (t.id !== turnId || !t.write) return t;
+                if (!res.ok || !d.ok) return { ...t, write: { ...t.write, status: 'error', resultMessage: d.error || 'Échec.' } };
+                const n = d.rows_affected ?? 0;
+                return { ...t, write: { ...t.write, status: 'confirmed', resultMessage: `${n} ligne${n === 1 ? '' : 's'} modifiée${n === 1 ? '' : 's'}.` } };
+            }));
+        } catch (e) {
+            setConversation(prev => prev.map(t => t.id === turnId && t.write ? { ...t, write: { ...t.write, status: 'error', resultMessage: (e as Error).message } } : t));
+        }
+    };
+
+    const cancelWrite = (turnId: string) => {
+        setConversation(prev => prev.map(t => t.id === turnId && t.write ? { ...t, write: { ...t.write, status: 'cancelled' } } : t));
+    };
+
     // Search runs across every connector of the user's first (default)
     // organisation — resolved from the auth context, no manual org selection.
     // Streams the answer over SSE (/api/mcp/search-stream): the `meta` event
@@ -222,6 +313,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const runSearch = async (q: string) => {
         const question = q.trim();
         if (!question || enterpriseLoading) return;
+        // Raw SQL typed directly → run it (SELECT) or preview it (write). NL → SSE.
+        const kind = detectSqlKind(question);
+        if (kind === 'read') { runDirectSql(question); return; }
+        if (kind === 'write') { runWritePreview(question, true); return; }
         setEnterpriseLoading(true);
         setPendingQuery(question);
         setQuery('');
@@ -512,6 +607,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         history={history}
                         activeConversationId={conversationId}
                         onOpenConversation={openConversation}
+                        onConfirmWrite={confirmWrite}
+                        onCancelWrite={cancelWrite}
                     />
                 </div>
             </div>

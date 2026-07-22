@@ -12,6 +12,15 @@ import SearchProgress from './SearchProgress';
  * sources) plus a follow-up input. Theme-aware via the global .theme-* overrides.
  */
 
+export interface WritePreview {
+  sql: string;
+  rowsAffected: number | null;
+  requiresExtraConfirm: boolean;
+  connectorId: string | null;
+  status: 'pending' | 'confirming' | 'confirmed' | 'cancelled' | 'error';
+  resultMessage?: string;
+}
+
 export interface DbTurn {
   id: string;
   query: string;
@@ -19,6 +28,8 @@ export interface DbTurn {
   sql?: string;
   sqlError?: string | null;
   sources: { title: string; type?: string; connector?: string; score?: number }[];
+  // Present when this turn is a pending/decided write awaiting confirmation.
+  write?: WritePreview;
 }
 
 interface DbChatPanelProps {
@@ -36,6 +47,8 @@ interface DbChatPanelProps {
   history?: { id: string; title: string | null; updated_at: string | null }[];
   activeConversationId?: string | null;
   onOpenConversation?: (id: string) => void;
+  onConfirmWrite?: (turnId: string) => void;
+  onCancelWrite?: (turnId: string) => void;
 }
 
 const UserBubble: React.FC<{ text: string }> = ({ text }) => (
@@ -103,7 +116,50 @@ const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, ani
   );
 };
 
-const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, history = [], activeConversationId, onOpenConversation }) => {
+// Confirmation card for a write (UPDATE/INSERT/DELETE) — shows the SQL and the
+// dry-run impact; nothing is executed until the user clicks Confirm.
+const WriteCard: React.FC<{ turn: DbTurn; onConfirm: () => void; onCancel: () => void }> = ({ turn, onConfirm, onCancel }) => {
+  const w = turn.write!;
+  const n = w.rowsAffected;
+  const busy = w.status === 'confirming';
+  return (
+    <div className="max-w-[92%] rounded-2xl rounded-tl-sm border px-3.5 py-3 text-sm bg-amber-50 border-amber-200 text-gray-800">
+      <div className="flex items-center gap-1.5 mb-1.5 text-amber-700 font-semibold text-[11px] uppercase tracking-wide">
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+        </svg>
+        Écriture — confirmation requise
+      </div>
+      <pre className="text-[11px] rounded-lg px-3 py-2 bg-white/70 border border-amber-200 text-gray-700 overflow-x-auto mb-2"><code>{w.sql}</code></pre>
+      {w.status === 'pending' || w.status === 'confirming' ? (
+        <>
+          <p className="text-[12px] mb-2">
+            {n === null ? 'Impact inconnu.' : <>Cette opération modifiera <strong>{n} ligne{n === 1 ? '' : 's'}</strong>.</>}
+            {w.requiresExtraConfirm && (
+              <span className="block text-red-600 font-medium mt-1">⚠️ Impact important (&gt; 1000 lignes) — vérifie bien avant de confirmer.</span>
+            )}
+          </p>
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={onConfirm} className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 font-medium transition-colors">
+              {busy ? 'Exécution…' : 'Confirmer & exécuter'}
+            </button>
+            <button disabled={busy} onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
+              Annuler
+            </button>
+          </div>
+        </>
+      ) : w.status === 'confirmed' ? (
+        <p className="text-[12px] text-green-700 font-medium">✓ {w.resultMessage}</p>
+      ) : w.status === 'cancelled' ? (
+        <p className="text-[12px] text-gray-500">Annulé — aucune modification.</p>
+      ) : (
+        <p className="text-[12px] text-red-600">⚠️ {w.resultMessage || 'Échec.'}</p>
+      )}
+    </div>
+  );
+};
+
+const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, history = [], activeConversationId, onOpenConversation, onConfirmWrite, onCancelWrite }) => {
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -180,7 +236,11 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
             <UserBubble text={turn.query} />
             {/* Answer text arrives live via SSE now, so the client-side typewriter
                 is disabled — animating on top would fight the streaming updates. */}
-            <AssistantTurn turn={turn} animate={false} />
+            {turn.write ? (
+              <WriteCard turn={turn} onConfirm={() => onConfirmWrite?.(turn.id)} onCancel={() => onCancelWrite?.(turn.id)} />
+            ) : (
+              <AssistantTurn turn={turn} animate={false} />
+            )}
           </div>
         ))}
 
