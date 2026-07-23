@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
-  Handle, Position, useReactFlow, type Node, type Edge, type NodeProps,
+  Handle, Position, useReactFlow, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
+  type Node, type Edge, type NodeProps, type EdgeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
@@ -36,6 +37,7 @@ type TableData = {
   cols: number;
   rows: number | null;
   hasPk: boolean;
+  junction: boolean;                 // link table → its two parents are many-to-many
   state: 'normal' | 'focus' | 'dim';
 };
 
@@ -53,7 +55,9 @@ function TableNode({ data }: NodeProps<Node<TableData>>) {
       <div className="flex items-center gap-1.5 min-w-0">
         <i className="bi bi-table text-[11px] text-purple-500 flex-shrink-0" />
         <span className="text-xs font-semibold text-gray-800 truncate">{data.label}</span>
-        {data.hasPk && <span className="text-[8px] font-bold text-amber-600 flex-shrink-0">PK</span>}
+        {data.junction
+          ? <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 rounded px-1 flex-shrink-0" title="Table de jonction (relation N:N)">N:N</span>
+          : data.hasPk && <span className="text-[8px] font-bold text-amber-600 flex-shrink-0">PK</span>}
       </div>
       <div className="mt-0.5 text-[9px] text-gray-400 tabular-nums">
         {data.cols} col{data.cols === 1 ? '' : 's'}
@@ -65,6 +69,44 @@ function TableNode({ data }: NodeProps<Node<TableData>>) {
 }
 
 const nodeTypes = { table: TableNode };
+
+/**
+ * FK edge with crow's-foot cardinality: an "N" badge on the child (FK) end and a
+ * "1" on the parent (PK) end, so every link reads as one-to-many / many-to-one at
+ * a glance. Two such edges into an N:N-badged junction table = many-to-many.
+ */
+function RelEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, data }: EdgeProps) {
+  const [path] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 8 });
+  const on = !!(data as { on?: boolean } | undefined)?.on;
+  // Nudge badges just inside each endpoint so they don't sit under the nodes.
+  const nx = sourceX + (targetX - sourceX) * 0.14, ny = sourceY + (targetY - sourceY) * 0.14;
+  const ox = sourceX + (targetX - sourceX) * 0.86, oy = sourceY + (targetY - sourceY) * 0.86;
+  const chip = (txt: string, x: number, y: number) => (
+    <div
+      className={`nodrag nopan ${on ? 'text-purple-700 bg-purple-100' : 'text-gray-500 bg-white'} border border-gray-200 rounded-full`}
+      style={{
+        position: 'absolute', transform: `translate(-50%,-50%) translate(${x}px,${y}px)`,
+        fontSize: 8, fontWeight: 700, lineHeight: 1, padding: '1px 4px', pointerEvents: 'none',
+      }}
+    >{txt}</div>
+  );
+  return (
+    <>
+      <BaseEdge id={id} path={path} style={style} />
+      <EdgeLabelRenderer>
+        {chip('N', nx, ny)}
+        {chip('1', ox, oy)}
+      </EdgeLabelRenderer>
+    </>
+  );
+}
+
+const edgeTypes = { rel: RelEdge };
+
+/** A pure link table (its rows exist only to connect two others) → many-to-many. */
+function isJunction(t: DiagramTable): boolean {
+  return t.fks.length >= 2 && t.columns.length <= t.fks.length + 2;
+}
 
 /** Dagre left-to-right layout → node positions + edges (deduped, present-only). */
 function buildGraph(tables: DiagramTable[]): { nodes: Node<TableData>[]; edges: Edge[] } {
@@ -85,7 +127,8 @@ function buildGraph(tables: DiagramTable[]): { nodes: Node<TableData>[]; edges: 
       g.setEdge(t.name, ref);
       edges.push({
         id, source: t.name, target: ref,
-        type: 'smoothstep', animated: false,
+        type: 'rel', animated: false,
+        data: { on: false },
         style: { stroke: '#c4b5fd', strokeWidth: 1.5 },
       });
     })
@@ -103,6 +146,7 @@ function buildGraph(tables: DiagramTable[]): { nodes: Node<TableData>[]; edges: 
         cols: t.columns.length,
         rows: t.row_estimate ?? null,
         hasPk: t.pk.length > 0,
+        junction: isJunction(t),
         state: 'normal',
       },
       width: NODE_W,
@@ -162,6 +206,7 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
       const on = focusSet.set.has(e.source) && focusSet.set.has(e.target);
       return {
         ...e,
+        data: { on },
         style: { stroke: on ? '#8b5cf6' : '#e5e7eb', strokeWidth: on ? 2 : 1 },
         animated: on && (focusSet.seeds.has(e.source) || focusSet.seeds.has(e.target)),
       };
@@ -206,10 +251,23 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
         )}
       </div>
 
+      {/* Cardinality legend */}
+      <div className="absolute bottom-2 left-2 z-10 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2.5 py-1.5 text-[9px] text-gray-500 leading-relaxed pointer-events-none">
+        <div className="flex items-center gap-1.5">
+          <span className="font-bold text-gray-600">1</span>—<span className="font-bold text-gray-600">N</span>
+          <span>relation clé étrangère (un → plusieurs)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="font-bold text-indigo-600 bg-indigo-50 rounded px-1">N:N</span>
+          <span>table de jonction (plusieurs ↔ plusieurs)</span>
+        </div>
+      </div>
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={() => setFocused(null)}
         onlyRenderVisibleElements
