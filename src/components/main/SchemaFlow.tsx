@@ -189,6 +189,25 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
     return { seeds, set };
   }, [query, focused, baseNodes, neighbors]);
 
+  // The single best table to recenter on. A query like "contract" matches many
+  // tables on a large schema; fitting ALL of them zooms the camera right out and
+  // nothing looks centered. So we pick ONE target — a clicked node, else the best
+  // name match (exact > prefix > shortest containing) — and center on that.
+  const primary = useMemo(() => {
+    if (focused) return focused;
+    const q = query.trim().toLowerCase();
+    if (!q) return null;
+    const matches = baseNodes
+      .map((n) => n.id)
+      .filter((id) => id.toLowerCase().includes(q))
+      .map((id) => ({ id, l: id.toLowerCase() }));
+    if (!matches.length) return null;
+    const exact = matches.find((m) => m.l === q);
+    const prefix = matches.filter((m) => m.l.startsWith(q)).sort((a, b) => a.l.length - b.l.length)[0];
+    const shortest = [...matches].sort((a, b) => a.l.length - b.l.length)[0];
+    return (exact ?? prefix ?? shortest).id;
+  }, [focused, query, baseNodes]);
+
   const nodes = useMemo(() => {
     if (!focusSet) return baseNodes;
     return baseNodes.map((n) => ({
@@ -213,13 +232,17 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
     });
   }, [baseEdges, focusSet]);
 
-  // Recenter on the focus set whenever it changes.
+  // Recenter on the single primary table whenever it changes. Zoom is capped so a
+  // lone node isn't blown up, and floored so it doesn't stay dezoomed — the table
+  // lands centered and readable regardless of how big the overall schema is.
   useEffect(() => {
-    if (!focusSet) return;
-    const ids = [...focusSet.seeds];
-    const t = setTimeout(() => fitView({ nodes: ids.map((id) => ({ id })), duration: 400, padding: 0.35 }), 30);
+    if (!primary) return;
+    const t = setTimeout(
+      () => fitView({ nodes: [{ id: primary }], duration: 400, padding: 0.5, minZoom: 0.5, maxZoom: 1.2 }),
+      60,
+    );
     return () => clearTimeout(t);
-  }, [focusSet, fitView]);
+  }, [primary, fitView]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
