@@ -11,8 +11,11 @@ config/plans.py). Tourne dans le worker Celery — l'embedder (objet lourd) est
 donc créé ici, jamais à l'import.
 """
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID
+
+from sqlalchemy.exc import OperationalError
 
 from config.extensions import db
 from config.plans import plan_limits
@@ -25,6 +28,37 @@ logger = logging.getLogger(__name__)
 # Repli quand le plan n'impose pas de plafond (entreprise) : on borne quand même
 # à un très grand nombre pour ne pas rapatrier un schéma pathologique d'un coup.
 UNLIMITED_CAP = 100_000
+
+# Écrit le catalogue par petits lots : un unique INSERT de 2000+ lignes portant
+# chacune un vecteur(1536) peut faire redémarrer une petite instance Postgres, et
+# des commits courts et fréquents empêchent la connexion de mourir pendant le crawl.
+INSERT_CHUNK = 250
+COMMIT_RETRIES = 3
+
+
+def _run_with_retry(label: str, work) -> None:
+    """Exécute `work()` puis commit, en tolérant une coupure Postgres transitoire.
+
+    Sur une grosse base, Render peut couper la connexion inactive (SSL EOF) ou
+    passer la base en recovery mode pendant le crawl. On rollback et on réessaie ;
+    pool_pre_ping fournit une connexion neuve au commit suivant. Les objets ORM du
+    lot (PK uuid côté client) sont re-`add`-és tels quels, rien n'ayant été persisté.
+    """
+    for attempt in range(1, COMMIT_RETRIES + 1):
+        try:
+            work()
+            db.session.commit()
+            return
+        except OperationalError as e:
+            db.session.rollback()
+            if attempt == COMMIT_RETRIES:
+                raise
+            wait = 2 ** attempt
+            logger.warning(
+                "Commit '%s' échoué (tentative %d/%d): %r — nouvel essai dans %ds",
+                label, attempt, COMMIT_RETRIES, e, wait,
+            )
+            time.sleep(wait)
 
 
 def table_descriptor(meta: dict) -> str:
@@ -68,16 +102,17 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
         cap = plan_limits(org.plan if org else None)["catalog_max"]
         tables = fetch_tables_meta(db_url, limit=cap if cap is not None else UNLIMITED_CAP)
 
-        # Embed chaque descriptif de table (batché).
+        # Embed chaque descriptif de table (batché). AUCUN accès DB pendant ce
+        # temps : l'embedding peut durer des dizaines de secondes et la connexion
+        # ne doit pas rester ouverte inactive.
         descriptors = [table_descriptor(t) for t in tables]
         embeddings = Embedder().embed_chunks(descriptors) if descriptors else []
 
         from services.audit_tables import is_audit_table
 
-        # Remplace le catalogue existant (delete-then-insert dans la transaction).
-        ConnectorSchemaTable.query.filter_by(connector_id=UUID(connector_id)).delete()
-        for meta, emb in zip(tables, embeddings):
-            db.session.add(ConnectorSchemaTable(
+        now = datetime.now(timezone.utc)
+        rows = [
+            ConnectorSchemaTable(
                 connector_id=UUID(connector_id),
                 organization_id=UUID(org_id),
                 table_name=meta["name"],
@@ -87,13 +122,37 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
                 row_estimate=meta.get("row_estimate"),
                 is_audit=is_audit_table(meta["name"]),
                 embedding=emb,
-                introspected_at=datetime.now(timezone.utc),
-            ))
+                introspected_at=now,
+            )
+            for meta, emb in zip(tables, embeddings)
+        ]
 
-        connector.schema_crawl_status = "done"
-        connector.schema_crawled_at = datetime.now(timezone.utc)
-        connector.schema_table_count = len(tables)
-        db.session.commit()
+        # Remplace le catalogue par lots. La purge est incluse dans le 1er commit
+        # (delete + premières lignes atomiques) pour ne pas laisser le connecteur
+        # sans catalogue si un lot suivant échoue.
+        if not rows:
+            _run_with_retry(
+                "purge-catalogue-vide",
+                lambda: ConnectorSchemaTable.query.filter_by(connector_id=UUID(connector_id)).delete(),
+            )
+        else:
+            for i in range(0, len(rows), INSERT_CHUNK):
+                chunk = rows[i:i + INSERT_CHUNK]
+
+                def _work(chunk=chunk, first=(i == 0)):
+                    if first:
+                        ConnectorSchemaTable.query.filter_by(connector_id=UUID(connector_id)).delete()
+                    db.session.add_all(chunk)
+
+                _run_with_retry(f"catalogue[{i}:{i + len(chunk)}]", _work)
+
+        # Re-fetch : la session a pu expirer/rollback l'instance au fil des commits.
+        connector = Connector.query.get(UUID(connector_id))
+        if connector:
+            connector.schema_crawl_status = "done"
+            connector.schema_crawled_at = now
+            connector.schema_table_count = len(tables)
+        _run_with_retry("statut-crawl", lambda: None)
         logger.info("Schema catalog: connector %s → %d tables", connector_id, len(tables))
         return {"status": "done", "table_count": len(tables)}
 

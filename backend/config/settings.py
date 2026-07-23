@@ -22,3 +22,11 @@ def configure_app(app):
         f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
     )
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Postgres managé (Render) coupe les connexions inactives : pendant un long
+    # crawl/embedding la connexion reste idle et meurt → 'SSL SYSCALL error: EOF
+    # detected' au commit suivant. pool_pre_ping teste/renouvelle la connexion
+    # avant chaque usage ; pool_recycle la recycle avant le timeout idle serveur.
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 280,
+    }
