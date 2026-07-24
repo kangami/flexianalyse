@@ -298,4 +298,21 @@ export const esES = {
   'progress.sql': 'Generando la consulta SQL',
   'progress.run': 'Ejecutando la consulta',
   'progress.compose': 'Componiendo la respuesta',
+
+  // DbResultGrid
+  'grid.result': 'Resultado',
+  'grid.rowsOf': '{shown} de {total} filas',
+  'grid.rows': '{count} fila{plural}',
+  'grid.cols': '{count} col{plural}',
+  'grid.empty': 'Haz una pregunta sobre tus datos y la tabla de resultados aparecerá aquí.',
+
+  // SchemaFlow (diagrama ER)
+  'schema.junctionTooltip': 'Tabla de unión (relación N:N)',
+  'schema.rowsApprox': '~{count} filas',
+  'schema.search': 'Buscar una tabla…',
+  'schema.reset': 'Restablecer',
+  'schema.legend.fk': 'relación de clave foránea (uno → varios)',
+  'schema.legend.junction': 'tabla de unión (varios ↔ varios)',
+  'schema.tip.junction': '{source} → {target}: {target} es una tabla de unión (relación N:N)',
+  'schema.tip.oneToMany': '{source} → {target}: varios {source} para un {target} (1:N)',
 };

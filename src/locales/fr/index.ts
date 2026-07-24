@@ -298,4 +298,21 @@ export const frFR = {
   'progress.sql': 'Génération de la requête SQL',
   'progress.run': 'Exécution de la requête',
   'progress.compose': 'Composition de la réponse',
+
+  // DbResultGrid
+  'grid.result': 'Résultat',
+  'grid.rowsOf': '{shown} sur {total} lignes',
+  'grid.rows': '{count} ligne{plural}',
+  'grid.cols': '{count} col{plural}',
+  'grid.empty': 'Posez une question sur vos données et le tableau de résultats apparaît ici.',
+
+  // SchemaFlow (diagramme ER)
+  'schema.junctionTooltip': 'Table de jonction (relation N:N)',
+  'schema.rowsApprox': '~{count} lignes',
+  'schema.search': 'Rechercher une table…',
+  'schema.reset': 'Réinitialiser',
+  'schema.legend.fk': 'relation clé étrangère (un → plusieurs)',
+  'schema.legend.junction': 'table de jonction (plusieurs ↔ plusieurs)',
+  'schema.tip.junction': '{source} → {target} : {target} est une table de jonction (relation N:N)',
+  'schema.tip.oneToMany': '{source} → {target} : plusieurs {source} pour un {target} (1:N)',
 };

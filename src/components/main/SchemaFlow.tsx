@@ -7,6 +7,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 /**
  * Interactive ER diagram on React Flow. Unlike Mermaid (one giant static SVG that
@@ -42,6 +43,7 @@ type TableData = {
 };
 
 function TableNode({ data }: NodeProps<Node<TableData>>) {
+  const { t } = useLanguage();
   const base =
     'rounded-lg border px-3 py-2 shadow-sm transition-opacity select-none cursor-pointer';
   const tone =
@@ -56,12 +58,12 @@ function TableNode({ data }: NodeProps<Node<TableData>>) {
         <i className="bi bi-table text-[11px] text-purple-500 flex-shrink-0" />
         <span className="text-xs font-semibold text-gray-800 truncate">{data.label}</span>
         {data.junction
-          ? <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 rounded px-1 flex-shrink-0" title="Table de jonction (relation N:N)">N:N</span>
+          ? <span className="text-[8px] font-bold text-indigo-600 bg-indigo-50 rounded px-1 flex-shrink-0" title={t('schema.junctionTooltip')}>N:N</span>
           : data.hasPk && <span className="text-[8px] font-bold text-amber-600 flex-shrink-0">PK</span>}
       </div>
       <div className="mt-0.5 text-[9px] text-gray-400 tabular-nums">
-        {data.cols} col{data.cols === 1 ? '' : 's'}
-        {data.rows != null && <> · ~{data.rows.toLocaleString()} lignes</>}
+        {t('grid.cols', { count: data.cols, plural: data.cols === 1 ? '' : 's' })}
+        {data.rows != null && <> · {t('schema.rowsApprox', { count: data.rows.toLocaleString() })}</>}
       </div>
       <Handle type="source" position={Position.Right} className="!bg-purple-400 !w-1.5 !h-1.5" />
     </div>
@@ -158,6 +160,7 @@ function buildGraph(tables: DiagramTable[]): { nodes: Node<TableData>[]; edges: 
 
 function Flow({ tables, onTableSelect }: SchemaFlowProps) {
   const { theme } = useTheme();
+  const { t } = useLanguage();
   const dark = theme !== 'white';
   const { fitView } = useReactFlow();
 
@@ -183,10 +186,10 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
     const r = wrapRef.current?.getBoundingClientRect();
     const junction = baseNodes.find((n) => n.id === e.target)?.data.junction;
     const text = junction
-      ? `${e.source} → ${e.target} : ${e.target} est une table de jonction (relation N:N)`
-      : `${e.source} → ${e.target} : plusieurs ${e.source} pour un ${e.target} (1:N)`;
+      ? t('schema.tip.junction', { source: e.source, target: e.target })
+      : t('schema.tip.oneToMany', { source: e.source, target: e.target });
     setTip({ x: ev.clientX - (r?.left ?? 0), y: ev.clientY - (r?.top ?? 0), text });
-  }, [baseNodes]);
+  }, [baseNodes, t]);
 
   // The active focus set = the focused/searched table(s) + their neighbours.
   const focusSet = useMemo(() => {
@@ -271,14 +274,14 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Rechercher une table…"
+          placeholder={t('schema.search')}
           className="w-40 text-xs bg-transparent focus:outline-none text-gray-700 placeholder:text-gray-400"
         />
         {(query || focused) && (
           <button
             onClick={() => { setQuery(''); setFocused(null); fitView({ duration: 400, padding: 0.2 }); }}
             className="text-gray-400 hover:text-gray-600"
-            title="Réinitialiser"
+            title={t('schema.reset')}
           >
             <i className="bi bi-x text-sm" />
           </button>
@@ -289,11 +292,11 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2.5 py-1.5 text-[9px] text-gray-500 leading-relaxed pointer-events-none">
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-gray-600">1</span>—<span className="font-bold text-gray-600">N</span>
-          <span>relation clé étrangère (un → plusieurs)</span>
+          <span>{t('schema.legend.fk')}</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-indigo-600 bg-indigo-50 rounded px-1">N:N</span>
-          <span>table de jonction (plusieurs ↔ plusieurs)</span>
+          <span>{t('schema.legend.junction')}</span>
         </div>
       </div>
 

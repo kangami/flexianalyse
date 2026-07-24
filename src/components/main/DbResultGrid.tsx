@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import SearchProgress from './SearchProgress';
 
 /**
@@ -24,6 +25,7 @@ const renderCell = (value: unknown): { text: string; isNull: boolean } => {
 };
 
 const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading, totalRows }) => {
+  const { t } = useLanguage();
   const hasData = columns.length > 0;
   const truncated = typeof totalRows === 'number' && totalRows > rows.length;
   // Collapsed by default so a long analytical query (CTEs/window functions)
@@ -39,13 +41,13 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
             <ellipse cx="12" cy="5" rx="8" ry="3" strokeWidth="1.6" />
             <path strokeWidth="1.6" d="M4 5v14c0 1.66 3.6 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.6 3 8 3s8-1.34 8-3" />
           </svg>
-          <span className="text-xs font-semibold text-gray-700 truncate">Result</span>
+          <span className="text-xs font-semibold text-gray-700 truncate">{t('grid.result')}</span>
           {hasData && (
             <span className="text-[10px] text-gray-400 tabular-nums flex-shrink-0">
               {truncated
-                ? `${rows.length} of ${totalRows!.toLocaleString()} rows`
-                : `${rows.length} row${rows.length === 1 ? '' : 's'}`}
-              {' · '}{columns.length} col{columns.length === 1 ? '' : 's'}
+                ? t('grid.rowsOf', { shown: rows.length, total: totalRows!.toLocaleString() })
+                : t('grid.rows', { count: rows.length, plural: rows.length === 1 ? '' : 's' })}
+              {' · '}{t('grid.cols', { count: columns.length, plural: columns.length === 1 ? '' : 's' })}
             </span>
           )}
         </div>
@@ -62,7 +64,7 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
             <svg className={`w-3 h-3 transition-transform ${showSql ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
             </svg>
-            Live SQL
+            {t('dbchat.liveSql')}
           </button>
           {showSql && (
             <pre className="text-[11px] text-gray-700 overflow-auto max-h-40 px-4 pb-2"><code>{sql}</code></pre>
@@ -82,7 +84,7 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
               <ellipse cx="12" cy="5" rx="8" ry="3" strokeWidth="1.5" />
               <path strokeWidth="1.5" d="M4 5v14c0 1.66 3.6 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.6 3 8 3s8-1.34 8-3" />
             </svg>
-            <p className="text-xs">Ask a data question and the table result appears here.</p>
+            <p className="text-xs">{t('grid.empty')}</p>
           </div>
         ) : (
           <table className="w-full text-xs border-collapse">

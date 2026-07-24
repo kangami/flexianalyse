@@ -296,4 +296,21 @@ export const enUS = {
   'progress.sql': 'Generating the SQL query',
   'progress.run': 'Running the live query',
   'progress.compose': 'Composing the answer',
+
+  // DbResultGrid
+  'grid.result': 'Result',
+  'grid.rowsOf': '{shown} of {total} rows',
+  'grid.rows': '{count} row{plural}',
+  'grid.cols': '{count} col{plural}',
+  'grid.empty': 'Ask a data question and the table result appears here.',
+
+  // SchemaFlow (ER diagram)
+  'schema.junctionTooltip': 'Junction table (N:N relation)',
+  'schema.rowsApprox': '~{count} rows',
+  'schema.search': 'Search for a table…',
+  'schema.reset': 'Reset',
+  'schema.legend.fk': 'foreign key relation (one → many)',
+  'schema.legend.junction': 'junction table (many ↔ many)',
+  'schema.tip.junction': '{source} → {target}: {target} is a junction table (N:N relation)',
+  'schema.tip.oneToMany': '{source} → {target}: many {source} for one {target} (1:N)',
 };
