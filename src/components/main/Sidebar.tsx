@@ -14,7 +14,7 @@ import { auth } from '../../lib/firebase';
 import { authFetch } from '../../lib/apiClient';
 import { DB_ENGINES, DB_ENGINE_IDS, getDbEngine, DbEngineLogo } from '../../lib/dbEngines';
 
-type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'settings' | 'user' | null;
+type SidebarPanel = 'connector' | 'agents' | 'organisation' | 'history' | 'user' | null;
 type OrganisationTab = 'organisation' | 'user' | 'permission';
 type ConnectorType =
   | 'postgresql' | 'mysql' | 'mariadb' | 'oracle' | 'mssql'
@@ -2512,111 +2512,84 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
         );
-      case 'settings':
-        return (
-          <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('sidebar.settings')}</h3>
-            <div className="space-y-4">
-              {/* Theme selection */}
-              <div>
-                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{t('settings.theme')}</p>
-                <div className="flex items-center gap-1.5">
-                  {[
-                    { value: 'white' as const, bgColor: '#ffffff', borderColor: '#e5e7eb' },
-                    { value: 'dark' as const, bgColor: '#1f2937', borderColor: '#374151' },
-                    { value: 'dark-blue' as const, bgColor: '#1e3a8a', borderColor: '#1e40af' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setTheme(opt.value)}
-                      title={`${opt.value.charAt(0).toUpperCase() + opt.value.slice(1).replace('-', ' ')} theme`}
-                      className={`w-6 h-6 rounded transition-all ${
-                        theme === opt.value
-                          ? 'ring-2 ring-purple-500 ring-offset-1'
-                          : 'hover:ring-2 hover:ring-gray-300'
-                      }`}
-                      style={{
-                        backgroundColor: opt.bgColor,
-                        borderColor: opt.borderColor,
-                        border: '1px solid ' + opt.borderColor,
-                      }}
-                    >
-                      {theme === opt.value && (
-                        <i className="bi bi-check text-purple-600 text-xs font-bold"></i>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <hr className="border-gray-200" />
-
-              {/* Language selection */}
-              <div>
-                <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{t('settings.language')}</p>
-                <LanguageSwitcher />
-              </div>
-            </div>
-          </div>
-        );
       case 'user':
         return (
-          <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('account.title')}</h3>
+          <div className="p-4 space-y-5">
+            <h3 className="text-sm font-semibold text-gray-800">{t('account.title')}</h3>
+
             {isAuthenticated && user ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  {user.avatar ? (
-                    <img
-                      src={user.avatar}
-                      alt={user.name || user.email}
-                      className="w-8 h-8 rounded-full object-cover border-2 border-purple-400"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
-                      <i className="bi bi-person-fill text-purple-600"></i>
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-800 truncate">
-                      {user.name || user.email}
-                    </div>
-                    {user.name && (
-                      <div className="text-xs text-gray-500 truncate">{user.email}</div>
-                    )}
+              <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.name || user.email} className="w-10 h-10 rounded-full object-cover border-2 border-purple-400" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                    <i className="bi bi-person-fill text-purple-600 text-lg"></i>
                   </div>
-                </div>
-                {user.plan && (
-                  <p className="text-xs text-gray-500">
-                    {t('account.plan')}: <span className="font-medium capitalize">{user.plan}</span>
-                  </p>
                 )}
-                <button
-                  onClick={() => {
-                    setFiles([]);
-                    setPendingFiles([]);
-                    setRecentDocuments([]);
-                    setError(null);
-                    setActivePanel(null);
-                    if (onLogout) onLogout();
-                    else logout();
-                  }}
-                  className="w-full text-left px-3 py-2 rounded-md text-xs text-red-600 hover:bg-red-50 transition-colors"
-                >
-                  <i className="bi bi-box-arrow-left mr-2"></i>
-                  {t('account.signOut')}
-                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800 truncate">{user.name || user.email}</div>
+                  {user.name && <div className="text-xs text-gray-500 truncate">{user.email}</div>}
+                  {user.plan && (
+                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-semibold capitalize">{user.plan}</span>
+                  )}
+                </div>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 space-y-2">
                 <p className="text-xs text-gray-500">{t('account.notSignedIn')}</p>
                 <button
                   onClick={() => { setIsLoginModalOpen(true); setActivePanel(null); }}
-                  className="w-full px-3 py-2 rounded-md text-sm font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
+                  className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-700 transition-colors"
                 >
                   {t('account.signIn')}
                 </button>
               </div>
+            )}
+
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{t('settings.theme')}</p>
+              <div className="flex items-center gap-1.5">
+                {[
+                  { value: 'white' as const, bgColor: '#ffffff', borderColor: '#e5e7eb' },
+                  { value: 'dark' as const, bgColor: '#1f2937', borderColor: '#374151' },
+                  { value: 'dark-blue' as const, bgColor: '#1e3a8a', borderColor: '#1e40af' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTheme(opt.value)}
+                    title={`${opt.value.charAt(0).toUpperCase() + opt.value.slice(1).replace('-', ' ')} theme`}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      theme === opt.value ? 'ring-2 ring-purple-500 ring-offset-1' : 'hover:ring-2 hover:ring-gray-300'
+                    }`}
+                    style={{ backgroundColor: opt.bgColor, border: '1px solid ' + opt.borderColor }}
+                  >
+                    {theme === opt.value && <i className="bi bi-check text-purple-500 text-sm font-bold"></i>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">{t('settings.language')}</p>
+              <LanguageSwitcher />
+            </div>
+
+            {isAuthenticated && user && (
+              <button
+                onClick={() => {
+                  setFiles([]);
+                  setPendingFiles([]);
+                  setRecentDocuments([]);
+                  setError(null);
+                  setActivePanel(null);
+                  if (onLogout) onLogout();
+                  else logout();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <i className="bi bi-box-arrow-left"></i>
+                {t('account.signOut')}
+              </button>
             )}
           </div>
         );
@@ -2720,28 +2693,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             )})()}
 
-            {/* Settings icon */}
-            {(() => {
-              const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-              const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
-              return (
-              <button
-                onClick={() => handleIconClick('settings')}
-                className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${
-                  activePanel === 'settings' ? 'bg-purple-500/15' : hoverClass
-                }`}
-                style={{
-                  color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
-                }}
-              >
-                {activePanel === 'settings' && (
-                  <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-                )}
-                <i className="bi bi-gear text-lg font-bold"></i>
-                <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
-              </button>
-            )})()}
-
             {/* User icon at bottom */}
             {(() => {
               const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
@@ -2842,29 +2793,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           >
             <i className="bi bi-gem text-lg font-bold"></i>
             <span className="text-[9px] mt-0.5 leading-tight font-bold">Plans</span>
-          </button>
-        )})()}
-
-        {/* Settings icon */}
-        {(() => {
-          const inactiveColor = theme !== 'white' ? '#ffffff' : '#000000';
-          const hoverClass = theme === 'white' ? 'hover:bg-gray-200' : 'hover:bg-white/10';
-          return (
-          <button
-            onClick={() => handleIconClick('settings')}
-            className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 mb-1 ${
-              activePanel === 'settings' ? 'bg-purple-500/15' : hoverClass
-            }`}
-            title={t('sidebar.settings')}
-            style={{
-              color: activePanel === 'settings' ? '#a855f7' : inactiveColor,
-            }}
-          >
-            {activePanel === 'settings' && (
-              <div className="absolute -right-2 top-1 bottom-1 w-0.5 bg-purple-600 rounded-l"></div>
-            )}
-            <i className="bi bi-gear text-lg font-bold"></i>
-            <span className="text-[9px] mt-0.5 leading-tight font-bold">{t('sidebar.settings')}</span>
           </button>
         )})()}
 
