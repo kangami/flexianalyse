@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { getDbEngine, DbEngineLogo } from '../../lib/dbEngines';
 
 /**
@@ -22,6 +23,7 @@ interface ScopeSelectorProps {
 }
 
 const ScopeSelector: React.FC<ScopeSelectorProps> = ({ connectors, value, onChange, compact }) => {
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -42,7 +44,7 @@ const ScopeSelector: React.FC<ScopeSelectorProps> = ({ connectors, value, onChan
         type="button"
         onClick={() => setOpen(o => !o)}
         className={`flex items-center gap-1.5 rounded-md border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors ${compact ? 'px-2 py-1 text-[11px]' : 'px-2.5 py-1.5 text-xs'}`}
-        title="Search perimeter"
+        title={t('scope.perimeter')}
       >
         {selectedEngine ? (
           <DbEngineLogo engine={selectedEngine.id} size={compact ? 13 : 14} className="flex-shrink-0" />
@@ -51,7 +53,7 @@ const ScopeSelector: React.FC<ScopeSelectorProps> = ({ connectors, value, onChan
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         )}
-        <span className="font-medium truncate max-w-[140px]">{selected ? selected.name : 'All context'}</span>
+        <span className="font-medium truncate max-w-[140px]">{selected ? selected.name : t('scope.allContext')}</span>
         <svg className={`${compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
         </svg>
@@ -67,7 +69,7 @@ const ScopeSelector: React.FC<ScopeSelectorProps> = ({ connectors, value, onChan
             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-            All context
+            {t('scope.allContext')}
             {value === null && <span className="ml-auto text-purple-600">✓</span>}
           </button>
 

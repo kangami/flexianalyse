@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 /**
  * Expressive loading indicator for a search. The backend runs a multi-step agent
@@ -10,19 +11,20 @@ import React, { useEffect, useState } from 'react';
  * request actually finishes and the parent unmounts it.
  */
 
-const PHASES = [
-  'Understanding your question',
-  'Reading the database schema',
-  'Generating the SQL query',
-  'Running the live query',
-  'Composing the answer',
+const PHASE_KEYS = [
+  'progress.understand',
+  'progress.schema',
+  'progress.sql',
+  'progress.run',
+  'progress.compose',
 ];
 
 const SearchProgress: React.FC = () => {
+  const { t } = useLanguage();
   const [i, setI] = useState(0);
 
   useEffect(() => {
-    const t = setInterval(() => setI((prev) => Math.min(prev + 1, PHASES.length - 1)), 1700);
+    const timer = setInterval(() => setI((prev) => Math.min(prev + 1, PHASE_KEYS.length - 1)), 1700);
     return () => clearInterval(t);
   }, []);
 
@@ -33,10 +35,10 @@ const SearchProgress: React.FC = () => {
           <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
           <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
         </svg>
-        <span className="transition-opacity">{PHASES[i]}…</span>
+        <span className="transition-opacity">{t(PHASE_KEYS[i])}…</span>
       </div>
       <div className="flex gap-1 pl-6">
-        {PHASES.map((_, k) => (
+        {PHASE_KEYS.map((_, k) => (
           <span
             key={k}
             className={`h-1 rounded-full transition-all duration-300 ${k < i ? 'bg-purple-400 w-4' : k === i ? 'bg-purple-500 w-6 animate-pulse' : 'bg-gray-200 w-3'}`}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 /**
  * Anticipated-question chips shown above a query input. The dbAnalyse agent
@@ -15,6 +16,7 @@ interface SuggestionChipsProps {
 }
 
 const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, onPick, onShowDiagram, compact }) => {
+  const { t } = useLanguage();
   if (loading && questions.length === 0) {
     return (
       <div className={`flex items-center gap-1.5 text-gray-400 ${compact ? 'text-[10px]' : 'text-[11px]'} px-1 mb-2`}>
@@ -22,7 +24,7 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
           <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
           <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75" />
         </svg>
-        Analysing your database…
+        {t('suggest.analysing')}
       </div>
     );
   }
@@ -43,7 +45,7 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
         type="button"
         onClick={onShowDiagram}
         className={`${pill} inline-flex items-center gap-1.5 text-purple-600 border-purple-200`}
-        title="Show the database schema diagram"
+        title={t('suggest.diagramTooltip')}
       >
         <svg className={compact ? 'w-3 h-3' : 'w-3.5 h-3.5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <rect x="3" y="3" width="7" height="5" rx="1" strokeWidth="1.6" />
@@ -51,7 +53,7 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
           <rect x="7" y="16" width="7" height="5" rx="1" strokeWidth="1.6" />
           <path strokeWidth="1.6" d="M10 8v5h7M10.5 13v3" />
         </svg>
-        Database diagram
+        {t('suggest.diagram')}
       </button>
     </div>
   );

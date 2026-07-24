@@ -282,4 +282,20 @@ export const frFR = {
   'dbchat.newSearch.label': 'Nouvelle recherche',
   'dbchat.untitled': 'Sans titre',
   'dbchat.followUp.placeholder': 'Poser une question de suivi…',
+
+  // ScopeSelector
+  'scope.perimeter': 'Périmètre de recherche',
+  'scope.allContext': 'Tout le contexte',
+
+  // SuggestionChips
+  'suggest.analysing': 'Analyse de votre base de données…',
+  'suggest.diagramTooltip': 'Afficher le diagramme du schéma de la base',
+  'suggest.diagram': 'Diagramme de la base',
+
+  // SearchProgress
+  'progress.understand': 'Compréhension de votre question',
+  'progress.schema': 'Lecture du schéma de la base',
+  'progress.sql': 'Génération de la requête SQL',
+  'progress.run': 'Exécution de la requête',
+  'progress.compose': 'Composition de la réponse',
 };

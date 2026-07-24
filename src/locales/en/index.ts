@@ -280,4 +280,20 @@ export const enUS = {
   'dbchat.newSearch.label': 'New search',
   'dbchat.untitled': 'Untitled',
   'dbchat.followUp.placeholder': 'Ask a follow-up…',
+
+  // ScopeSelector
+  'scope.perimeter': 'Search perimeter',
+  'scope.allContext': 'All context',
+
+  // SuggestionChips
+  'suggest.analysing': 'Analysing your database…',
+  'suggest.diagramTooltip': 'Show the database schema diagram',
+  'suggest.diagram': 'Database diagram',
+
+  // SearchProgress
+  'progress.understand': 'Understanding your question',
+  'progress.schema': 'Reading the database schema',
+  'progress.sql': 'Generating the SQL query',
+  'progress.run': 'Running the live query',
+  'progress.compose': 'Composing the answer',
 };
