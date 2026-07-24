@@ -5,6 +5,7 @@ import { ChevronDown } from 'lucide-react';
 interface NavDropdownItem {
   label: string;
   description?: string;
+  to?: string;
 }
 
 interface NavItem {
@@ -19,7 +20,7 @@ const navItems: NavItem[] = [
     hasDropdown: true,
     dropdownItems: [
       { label: 'Natural-language to SQL', description: 'Ask in plain language, get real queries' },
-      { label: 'Schema explorer', description: 'Interactive ER diagram of your database' },
+      { label: 'Schema explorer', description: 'Interactive ER diagram of your database', to: '/schema-explorer' },
       { label: 'On-prem agent', description: 'Reach private databases, no open ports' },
       { label: 'Audit & governance', description: 'Full trail, read-only by default' },
     ],
@@ -113,7 +114,14 @@ const Navbar: React.FC = () => {
                     {item.dropdownItems?.map((dropItem) => (
                       <a
                         key={dropItem.label}
-                        href="#"
+                        href={dropItem.to || '#'}
+                        onClick={(e) => {
+                          if (dropItem.to) {
+                            e.preventDefault();
+                            setOpenDropdown(null);
+                            navigate(dropItem.to);
+                          }
+                        }}
                         className="block px-4 py-3 hover:bg-violet-50 transition-colors"
                       >
                         <span className="block text-sm font-medium text-gray-900">{dropItem.label}</span>

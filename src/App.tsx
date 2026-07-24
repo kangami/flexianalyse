@@ -11,6 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import GetStarted from './pages/GetStarted';
+import SchemaExplorer from './pages/SchemaExplorer';
 
 // Composant qui gère l'affichage conditionnel
 const AppContent: React.FC = () => {
@@ -55,6 +56,9 @@ const AppContent: React.FC = () => {
       
       {/* Get Started / Lead form */}
       <Route path="/get-started" element={<GetStarted />} />
+
+      {/* Feature pages */}
+      <Route path="/schema-explorer" element={<SchemaExplorer />} />
     </Routes>
   );
 };
