@@ -262,4 +262,20 @@ export const enUS = {
   'reasoning.finalizing.description': 'Adding final touches and formatting',
   'reasoning.step': 'Step {current} of {total}',
   'reasoning.powered.by': 'Powered by',
+
+  // FlexiAnalyseApp — alerts & errors
+  'flexiapp.error.noSupportedFile': 'No supported file found',
+  'flexiapp.error.processingFiles': 'Error while processing files: {message}',
+  'flexiapp.error.unknown': 'Unknown error',
+  'flexiapp.error.extractEndpointUnavailable': '⚠️ The /extract-structured endpoint is not available on the production server.\n\nCheck that the backend was deployed with all required endpoints.',
+  'flexiapp.error.structuredExtraction': 'Error extracting structured data: {message}',
+  'flexiapp.error.extraction': 'Extraction error: {message}',
+  'flexiapp.error.noEditableFile': 'No editable file available. Please first select a code or DOCX file in the sidebar.',
+  'flexiapp.error.fileNotFoundEditable': 'File not found among editable files',
+  'flexiapp.error.docxInsert': 'Error inserting into the DOCX file: {message}',
+  'flexiapp.error.unsupportedInsert': 'Unsupported file type for insertion',
+  'flexiapp.error.localModeNeedsFile': 'Local mode requires a selected file or an indexed directory',
+  'flexiapp.error.indexingFailed': 'Server indexing failed',
+  'flexiapp.error.requestFailed': 'Request processing failed',
+  'flexiapp.error.endpoint405': 'Endpoint not accessible (405). Check that the production backend has the {endpoint} endpoint deployed and that the POST method is allowed.',
 };

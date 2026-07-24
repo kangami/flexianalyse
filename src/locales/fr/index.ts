@@ -264,4 +264,20 @@ export const frFR = {
   'model.provider.OpenAI': 'OpenAI',
   'model.provider.MistralAI': 'Mistral AI',
   'model.provider.Local': 'Local',
+
+  // FlexiAnalyseApp — alertes & erreurs
+  'flexiapp.error.noSupportedFile': 'Aucun fichier supporté trouvé',
+  'flexiapp.error.processingFiles': 'Erreur lors du traitement des fichiers : {message}',
+  'flexiapp.error.unknown': 'Erreur inconnue',
+  'flexiapp.error.extractEndpointUnavailable': '⚠️ L\'endpoint /extract-structured n\'est pas disponible sur le serveur de production.\n\nVérifiez que le backend a bien été déployé avec tous les endpoints nécessaires.',
+  'flexiapp.error.structuredExtraction': 'Erreur lors de l\'extraction des données structurées : {message}',
+  'flexiapp.error.extraction': 'Erreur lors de l\'extraction : {message}',
+  'flexiapp.error.noEditableFile': 'Aucun fichier éditable disponible. Veuillez d\'abord sélectionner un fichier code ou DOCX dans la sidebar.',
+  'flexiapp.error.fileNotFoundEditable': 'Fichier non trouvé dans les fichiers éditables',
+  'flexiapp.error.docxInsert': 'Erreur lors de l\'insertion dans le fichier DOCX : {message}',
+  'flexiapp.error.unsupportedInsert': 'Type de fichier non supporté pour l\'insertion',
+  'flexiapp.error.localModeNeedsFile': 'Mode local nécessite un fichier sélectionné ou un répertoire indexé',
+  'flexiapp.error.indexingFailed': 'Échec de l\'indexation sur le serveur',
+  'flexiapp.error.requestFailed': 'Échec du traitement de la requête',
+  'flexiapp.error.endpoint405': 'Endpoint non accessible (405). Vérifiez que le backend de production a bien l\'endpoint {endpoint} déployé et que la méthode POST est autorisée.',
 };
