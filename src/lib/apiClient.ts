@@ -89,6 +89,8 @@ export interface UserContext {
   id: string;
   email: string;
   full_name: string | null;
+  theme: string | null;
+  language: string | null;
   organizations: OrganizationSummary[];
   organization_id: string | null;
 }
@@ -122,3 +124,10 @@ export const provisionAccount = (fullName?: string) => {
 };
 
 export const fetchMe = () => apiFetch<UserContext>('/api/v2/auth/me');
+
+/** Persiste le thème / la langue de l'utilisateur côté serveur. */
+export const savePreferences = (prefs: { theme?: string; language?: string }) =>
+  apiFetch<UserContext>('/api/v2/auth/preferences', {
+    method: 'PATCH',
+    body: JSON.stringify(prefs),
+  });

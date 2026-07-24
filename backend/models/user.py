@@ -17,6 +17,8 @@ class User(db.Model):
     firebase_uid = db.Column(db.String, nullable=True, unique=True, index=True)
     password_hash = db.Column(db.Text, nullable=True)
     full_name = db.Column(db.String, nullable=True)
+    theme = db.Column(db.String, nullable=False, default='white', server_default='white')
+    language = db.Column(db.String(8), nullable=False, default='en', server_default='en')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     deleted_at = db.Column(db.DateTime, nullable=True)
 

@@ -18,6 +18,8 @@ import { useTheme } from './contexts/ThemeContext';
 
 import { useLanguage } from './contexts/LanguageContext';
 
+import { usePreferenceSync } from './hooks/usePreferenceSync';
+
 interface FileDetails {
 
   content: string | ArrayBuffer;
@@ -95,6 +97,8 @@ const FlexiAnalyseApp: React.FC = () => {
   const { theme } = useTheme();
 
   const { language, t } = useLanguage();
+
+  usePreferenceSync();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
@@ -408,7 +412,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
   }, []);
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'https://flexianalyse.com';
+  const apiUrl = import.meta.env.VITE_API_URL ||  'http://localhost:5000' //'https://flexianalyse.com';
 
   // Fonction pour générer un résumé d'un fichier avec streaming et animation de typing
 

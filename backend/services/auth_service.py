@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Rôle créé d'office pour le premier membre d'une organisation.
 OWNER_ROLE_NAME = "owner"
 
+ALLOWED_THEMES = {"white", "dark", "dark-blue"}
+ALLOWED_LANGUAGES = {"en", "fr", "es"}
+
 _ORG_SUFFIX = "workspace"
 
 
@@ -55,6 +58,19 @@ class AuthService:
         payload["organizations"] = orgs
         payload["organization_id"] = orgs[0]["id"] if orgs else None
         return payload
+
+    def update_preferences(self, user: User, theme: str | None = None, language: str | None = None) -> dict:
+        """Met à jour le thème / la langue de l'utilisateur et renvoie son contexte."""
+        if theme is not None:
+            if theme not in ALLOWED_THEMES:
+                raise ValueError(f"thème invalide: {theme}")
+            user.theme = theme
+        if language is not None:
+            if language not in ALLOWED_LANGUAGES:
+                raise ValueError(f"langue invalide: {language}")
+            user.language = language
+        self._loc.users.update(user)
+        return self.context_for(user)
 
     def organization_ids_for(self, user: User) -> set[str]:
         """Organisations dont l'utilisateur est membre actif — base de l'autorisation."""

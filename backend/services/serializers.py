@@ -12,7 +12,7 @@ def dept_to_dict(d: Department) -> dict:
 
 
 def user_to_dict(u: User) -> dict:
-    return {"id": str(u.id), "email": u.email, "full_name": u.full_name, "created_at": u.created_at.isoformat() if u.created_at else None}
+    return {"id": str(u.id), "email": u.email, "full_name": u.full_name, "theme": u.theme, "language": u.language, "created_at": u.created_at.isoformat() if u.created_at else None}
 
 
 def role_to_dict(r: Role) -> dict:

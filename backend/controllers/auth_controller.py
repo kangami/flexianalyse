@@ -51,3 +51,17 @@ def register(api_bp):
     def auth_me():
         """Utilisateur courant + organisations. Exige un compte déjà provisionné."""
         return jsonify(auth_service.context_for(g.current_user))
+
+    @api_bp.route("/auth/preferences", methods=["PATCH"])
+    def update_preferences():
+        """Met à jour le thème / la langue de l'utilisateur courant."""
+        data = request.get_json(silent=True) or {}
+        try:
+            context = auth_service.update_preferences(
+                g.current_user,
+                theme=data.get("theme"),
+                language=data.get("language"),
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(context)
