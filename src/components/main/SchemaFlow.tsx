@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, MiniMap,
   Handle, Position, useReactFlow, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
@@ -176,6 +176,17 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
 
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  const showTip = useCallback((ev: React.MouseEvent, e: Edge) => {
+    const r = wrapRef.current?.getBoundingClientRect();
+    const junction = baseNodes.find((n) => n.id === e.target)?.data.junction;
+    const text = junction
+      ? `${e.source} → ${e.target} : ${e.target} est une table de jonction (relation N:N)`
+      : `${e.source} → ${e.target} : plusieurs ${e.source} pour un ${e.target} (1:N)`;
+    setTip({ x: ev.clientX - (r?.left ?? 0), y: ev.clientY - (r?.top ?? 0), text });
+  }, [baseNodes]);
 
   // The active focus set = the focused/searched table(s) + their neighbours.
   const focusSet = useMemo(() => {
@@ -253,7 +264,7 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
   );
 
   return (
-    <div className="w-full h-full relative">
+    <div ref={wrapRef} className="w-full h-full relative">
       {/* Search box */}
       <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2 py-1">
         <i className="bi bi-search text-[11px] text-gray-400" />
@@ -275,7 +286,7 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
       </div>
 
       {/* Cardinality legend */}
-      <div className="absolute bottom-2 left-2 z-10 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2.5 py-1.5 text-[9px] text-gray-500 leading-relaxed pointer-events-none">
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-10 bg-white/95 border border-gray-200 rounded-lg shadow-sm px-2.5 py-1.5 text-[9px] text-gray-500 leading-relaxed pointer-events-none">
         <div className="flex items-center gap-1.5">
           <span className="font-bold text-gray-600">1</span>—<span className="font-bold text-gray-600">N</span>
           <span>relation clé étrangère (un → plusieurs)</span>
@@ -293,6 +304,9 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={() => setFocused(null)}
+        onEdgeMouseEnter={showTip}
+        onEdgeMouseMove={showTip}
+        onEdgeMouseLeave={() => setTip(null)}
         onlyRenderVisibleElements
         fitView
         minZoom={0.05}
@@ -306,6 +320,15 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable nodeStrokeWidth={2} nodeColor={() => '#c4b5fd'} />
       </ReactFlow>
+
+      {tip && (
+        <div
+          className="absolute z-20 pointer-events-none max-w-[240px] rounded-md bg-gray-900/95 text-white text-[10px] leading-snug px-2 py-1 shadow-lg"
+          style={{ left: tip.x, top: tip.y + 14, transform: 'translateX(-50%)' }}
+        >
+          {tip.text}
+        </div>
+      )}
     </div>
   );
 }
