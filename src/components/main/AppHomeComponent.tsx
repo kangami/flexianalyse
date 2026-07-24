@@ -316,7 +316,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const d = await res.json();
             setPendingQuery(null);
             if (!res.ok || !d.ok) {
-                setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${d.error || 'Écriture refusée.'}`, sql: d.sql, sources: [] }]);
+                setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${d.error || t('home.write.refused')}`, sql: d.sql, sources: [] }]);
                 return;
             }
             setConversation(prev => [...prev, {
@@ -341,9 +341,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const d = await res.json();
             setConversation(prev => prev.map(t => {
                 if (t.id !== turnId || !t.write) return t;
-                if (!res.ok || !d.ok) return { ...t, write: { ...t.write, status: 'error', resultMessage: d.error || 'Échec.' } };
+                if (!res.ok || !d.ok) return { ...t, write: { ...t.write, status: 'error', resultMessage: d.error || t('dbchat.write.failed') } };
                 const n = d.rows_affected ?? 0;
-                return { ...t, write: { ...t.write, status: 'confirmed', resultMessage: `${n} ligne${n === 1 ? '' : 's'} modifiée${n === 1 ? '' : 's'}.` } };
+                return { ...t, write: { ...t.write, status: 'confirmed', resultMessage: t('home.write.rowsModified', { count: n, plural: n === 1 ? '' : 's' }) } };
             }));
         } catch (e) {
             setConversation(prev => prev.map(t => t.id === turnId && t.write ? { ...t, write: { ...t.write, status: 'error', resultMessage: (e as Error).message } } : t));
@@ -581,9 +581,9 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         try {
             const connection: Record<string, string> = {};
             engine.fields.forEach(f => { if (connectorForm[f.key]) connection[f.key] = connectorForm[f.key]; });
-            if (!connection.host) throw new Error('Host is required');
+            if (!connection.host) throw new Error(t('home.error.hostRequired'));
             const dbKey = engine.id === 'oracle' ? 'service_name' : 'database';
-            if (!connection[dbKey]) throw new Error(engine.id === 'oracle' ? 'Service name is required' : 'Database is required');
+            if (!connection[dbKey]) throw new Error(engine.id === 'oracle' ? t('home.error.serviceNameRequired') : t('home.error.databaseRequired'));
 
             const body = {
                 type: 'sql',
@@ -638,10 +638,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                     {showDiagram ? (
                         <>
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                                <span className="text-xs font-semibold text-gray-700">Database schema</span>
+                                <span className="text-xs font-semibold text-gray-700">{t('home.diagram.title')}</span>
                                 <div className="flex items-center gap-3">
                                     <label
-                                        title="Masque les tables d'audit / log / système du diagramme et les exclut des réponses de l'agent"
+                                        title={t('home.diagram.hideAuditTooltip')}
                                         className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer select-none hover:text-purple-600"
                                     >
                                         <input
@@ -651,27 +651,27 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                             onChange={(e) => toggleHideAudit(e.target.checked)}
                                             className="accent-purple-600 w-3 h-3"
                                         />
-                                        Masquer les tables d'audit
+                                        {t('home.diagram.hideAudit')}
                                     </label>
-                                    <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">← Back to results</button>
+                                    <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">{t('home.diagram.backToResults')}</button>
                                 </div>
                             </div>
                             <div className="flex-1 min-h-0 relative">
                                 {insights.tables.length
                                     ? <SchemaFlow tables={insights.tables} onTableSelect={openTableDetail} />
-                                    : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? 'Analysing your database…' : 'No schema available'}</div>}
+                                    : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? t('suggest.analysing') : t('home.diagram.noSchema')}</div>}
 
                                 {/* Table detail panel — appears when a table is clicked. */}
                                 {(tableDetail || tableDetailLoading) && (
                                     <div className="absolute top-0 right-0 h-full w-72 bg-white border-l border-gray-200 shadow-lg z-20 flex flex-col animate-in slide-in-from-right-2 duration-200">
                                         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                                            <span className="text-xs font-bold text-purple-600 truncate">{tableDetail?.table || 'Table'}</span>
+                                            <span className="text-xs font-bold text-purple-600 truncate">{tableDetail?.table || t('home.detail.table')}</span>
                                             <button onClick={() => { setTableDetail(null); setTableDetailLoading(false); }} className="text-gray-400 hover:text-gray-600">
                                                 <i className="bi bi-x text-lg"></i>
                                             </button>
                                         </div>
                                         {tableDetailLoading && !tableDetail ? (
-                                            <div className="flex-1 flex items-center justify-center text-gray-400 text-xs">Analyse…</div>
+                                            <div className="flex-1 flex items-center justify-center text-gray-400 text-xs">{t('home.detail.loading')}</div>
                                         ) : tableDetail ? (
                                             <div className="flex-1 overflow-y-auto p-3 text-xs">
                                                 {tableDetail.description && (
@@ -680,7 +680,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                                 <div className="flex gap-3 mb-3">
                                                     <div className="flex-1 rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5 text-center">
                                                         <div className="text-sm font-bold text-gray-800 tabular-nums">{tableDetail.column_count}</div>
-                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Colonnes</div>
+                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">{t('home.detail.columns')}</div>
                                                     </div>
                                                     <div className="flex-1 rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5 text-center">
                                                         <div className="text-sm font-bold text-gray-800 tabular-nums">
@@ -688,12 +688,12 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                                                 ? `${tableDetail.row_estimated ? '~' : ''}${tableDetail.row_count.toLocaleString()}`
                                                                 : '—'}
                                                         </div>
-                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">Lignes{tableDetail.row_estimated ? ' (est.)' : ''}</div>
+                                                        <div className="text-[9px] text-gray-400 uppercase tracking-wide">{t('home.detail.rows')}{tableDetail.row_estimated ? ' (est.)' : ''}</div>
                                                     </div>
                                                 </div>
-                                                <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Colonnes · nuls / non-nuls</p>
+                                                <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mb-1">{t('home.detail.columnsNulls')}</p>
                                                 {tableDetail.stats_skipped && (
-                                                    <p className="text-[9px] text-gray-400 mb-1 italic">Stats nuls non calculées (table volumineuse).</p>
+                                                    <p className="text-[9px] text-gray-400 mb-1 italic">{t('home.detail.statsSkipped')}</p>
                                                 )}
                                                 <div className="flex flex-col gap-1">
                                                     {tableDetail.columns.map((c) => {
@@ -714,8 +714,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                                                             <div className="h-full bg-green-400" style={{ width: `${pct}%` }} />
                                                                         </div>
                                                                         <div className="mt-0.5 flex justify-between text-[9px] text-gray-400 tabular-nums">
-                                                                            <span className="text-green-600">{c.non_null} non-nuls</span>
-                                                                            <span className="text-red-500">{c.null_count} nuls</span>
+                                                                            <span className="text-green-600">{t('home.detail.nonNull', { count: c.non_null })}</span>
+                                                                            <span className="text-red-500">{t('home.detail.null', { count: c.null_count })}</span>
                                                                         </div>
                                                                     </>
                                                                 )}
