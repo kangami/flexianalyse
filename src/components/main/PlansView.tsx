@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch, API_BASE } from '../../lib/apiClient';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 /**
  * Plans / pricing overlay — driven entirely by the backend catalogue
@@ -25,13 +26,14 @@ interface PlansViewProps {
   orgId: string | null;
 }
 
-const priceLabel = (p: PlanCard): string => {
-  if (p.price === null) return 'Sur devis';
-  if (p.price === 0) return 'Gratuit';
+const priceLabel = (p: PlanCard, t: (k: string) => string): string => {
+  if (p.price === null) return t('plans.onQuote');
+  if (p.price === 0) return t('plans.free');
   return `${p.price} €`;
 };
 
 const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
+  const { t } = useLanguage();
   const [plans, setPlans] = useState<PlanCard[]>([]);
   const [currentPlan, setCurrentPlan] = useState<string>('free');
   const [loading, setLoading] = useState(false);
@@ -55,7 +57,7 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
   if (!open) return null;
 
   const upgrade = (p: PlanCard) => {
-    const subject = encodeURIComponent(`FlexiAnalyse — Passer au plan ${p.name}`);
+    const subject = encodeURIComponent(t('plans.emailSubject', { plan: p.name }));
     window.location.href = `mailto:contact@flexianalyse.com?subject=${subject}`;
   };
 
@@ -65,8 +67,8 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
       <div className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white shadow-2xl p-6">
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Plans & tarifs</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Choisissez le palier adapté à votre usage.</p>
+            <h2 className="text-xl font-bold text-gray-900">{t('plans.title')}</h2>
+            <p className="text-sm text-gray-500 mt-0.5">{t('plans.subtitle')}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100">
             <i className="bi bi-x text-2xl"></i>
@@ -74,7 +76,7 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
         </div>
 
         {loading ? (
-          <p className="text-sm text-gray-400 py-12 text-center">Chargement…</p>
+          <p className="text-sm text-gray-400 py-12 text-center">{t('plans.loading')}</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {plans.map(p => {
@@ -90,13 +92,13 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
                     <h3 className="text-base font-bold text-gray-900">{p.name}</h3>
                     {isCurrent && (
                       <span className="text-[9px] font-bold uppercase tracking-wide text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
-                        Actuel
+                        {t('plans.current')}
                       </span>
                     )}
                   </div>
                   <p className="text-[11px] text-gray-500 mt-0.5 min-h-[28px]">{p.tagline}</p>
                   <div className="mt-2 mb-3">
-                    <span className="text-2xl font-extrabold text-gray-900">{priceLabel(p)}</span>
+                    <span className="text-2xl font-extrabold text-gray-900">{priceLabel(p, t)}</span>
                     {p.price !== null && p.price !== 0 && (
                       <span className="text-[11px] text-gray-400"> / {p.period}</span>
                     )}
@@ -118,7 +120,7 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
                         : 'bg-purple-600 text-white hover:bg-purple-700'
                     }`}
                   >
-                    {isCurrent ? 'Plan actuel' : p.cta}
+                    {isCurrent ? t('plans.currentPlan') : p.cta}
                   </button>
                 </div>
               );
@@ -127,7 +129,7 @@ const PlansView: React.FC<PlansViewProps> = ({ open, onClose, orgId }) => {
         )}
 
         <p className="text-[10px] text-gray-400 text-center mt-5">
-          Le paiement en ligne arrive bientôt — pour changer de plan, contactez-nous.
+          {t('plans.paymentSoon')}
         </p>
       </div>
     </div>

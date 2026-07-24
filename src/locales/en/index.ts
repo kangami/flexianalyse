@@ -333,4 +333,15 @@ export const enUS = {
   'home.error.databaseRequired': 'Database is required',
   'home.write.refused': 'Write refused.',
   'home.write.rowsModified': '{count} row{plural} modified.',
+
+  // PlansView
+  'plans.title': 'Plans & pricing',
+  'plans.subtitle': 'Choose the tier that fits your usage.',
+  'plans.loading': 'Loading…',
+  'plans.current': 'Current',
+  'plans.currentPlan': 'Current plan',
+  'plans.onQuote': 'Custom quote',
+  'plans.free': 'Free',
+  'plans.paymentSoon': 'Online payment is coming soon — to change plans, contact us.',
+  'plans.emailSubject': 'FlexiAnalyse — Upgrade to the {plan} plan',
 };

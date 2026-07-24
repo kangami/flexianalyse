@@ -335,4 +335,15 @@ export const frFR = {
   'home.error.databaseRequired': 'La base de données est requise',
   'home.write.refused': 'Écriture refusée.',
   'home.write.rowsModified': '{count} ligne{plural} modifiée{plural}.',
+
+  // PlansView
+  'plans.title': 'Plans & tarifs',
+  'plans.subtitle': 'Choisissez le palier adapté à votre usage.',
+  'plans.loading': 'Chargement…',
+  'plans.current': 'Actuel',
+  'plans.currentPlan': 'Plan actuel',
+  'plans.onQuote': 'Sur devis',
+  'plans.free': 'Gratuit',
+  'plans.paymentSoon': 'Le paiement en ligne arrive bientôt — pour changer de plan, contactez-nous.',
+  'plans.emailSubject': 'FlexiAnalyse — Passer au plan {plan}',
 };

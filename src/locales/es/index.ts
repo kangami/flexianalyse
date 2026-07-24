@@ -335,4 +335,15 @@ export const esES = {
   'home.error.databaseRequired': 'La base de datos es requerida',
   'home.write.refused': 'Escritura rechazada.',
   'home.write.rowsModified': '{count} fila{plural} modificada{plural}.',
+
+  // PlansView
+  'plans.title': 'Planes y precios',
+  'plans.subtitle': 'Elige el plan que se adapte a tu uso.',
+  'plans.loading': 'Cargando…',
+  'plans.current': 'Actual',
+  'plans.currentPlan': 'Plan actual',
+  'plans.onQuote': 'Presupuesto personalizado',
+  'plans.free': 'Gratis',
+  'plans.paymentSoon': 'El pago en línea llegará pronto — para cambiar de plan, contáctanos.',
+  'plans.emailSubject': 'FlexiAnalyse — Cambiar al plan {plan}',
 };
