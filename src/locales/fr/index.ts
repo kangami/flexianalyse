@@ -264,4 +264,22 @@ export const frFR = {
   'model.provider.OpenAI': 'OpenAI',
   'model.provider.MistralAI': 'Mistral AI',
   'model.provider.Local': 'Local',
+
+  // DbChatPanel (agent base de données)
+  'dbchat.liveSql': 'SQL exécuté',
+  'dbchat.write.title': 'Écriture — confirmation requise',
+  'dbchat.write.impactUnknown': 'Impact inconnu.',
+  'dbchat.write.willModify': 'Cette opération modifiera',
+  'dbchat.write.rowsBold': '{count} ligne{plural}',
+  'dbchat.write.bigImpact': '⚠️ Impact important (> 1000 lignes) — vérifie bien avant de confirmer.',
+  'dbchat.write.executing': 'Exécution…',
+  'dbchat.write.confirm': 'Confirmer & exécuter',
+  'dbchat.write.cancelled': 'Annulé — aucune modification.',
+  'dbchat.write.failed': 'Échec.',
+  'dbchat.history.tooltip': 'Historique des conversations',
+  'dbchat.history.empty': 'Aucune conversation passée.',
+  'dbchat.newSearch.tooltip': 'Démarrer une nouvelle recherche',
+  'dbchat.newSearch.label': 'Nouvelle recherche',
+  'dbchat.untitled': 'Sans titre',
+  'dbchat.followUp.placeholder': 'Poser une question de suivi…',
 };

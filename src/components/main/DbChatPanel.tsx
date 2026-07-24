@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import MarkdownResponse from './MarkdownResponse';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 import SuggestionChips from './SuggestionChips';
@@ -79,6 +80,7 @@ const TypingMarkdown: React.FC<{ text: string; animate: boolean }> = ({ text, an
 };
 
 const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, animate }) => {
+  const { t } = useLanguage();
   const [showSql, setShowSql] = useState(false);
   return (
     <div className="flex flex-col gap-2">
@@ -95,7 +97,7 @@ const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, ani
             <svg className={`w-3 h-3 transition-transform ${showSql ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
             </svg>
-            Live SQL
+            {t('dbchat.liveSql')}
           </button>
           {showSql && (
             <pre className="mt-1 text-[11px] rounded-lg px-3 py-2 bg-gray-50 border border-gray-200 text-gray-700 overflow-x-auto"><code>{turn.sql}</code></pre>
@@ -119,6 +121,7 @@ const AssistantTurn: React.FC<{ turn: DbTurn; animate: boolean }> = ({ turn, ani
 // Confirmation card for a write (UPDATE/INSERT/DELETE) — shows the SQL and the
 // dry-run impact; nothing is executed until the user clicks Confirm.
 const WriteCard: React.FC<{ turn: DbTurn; onConfirm: () => void; onCancel: () => void }> = ({ turn, onConfirm, onCancel }) => {
+  const { t } = useLanguage();
   const w = turn.write!;
   const n = w.rowsAffected;
   const busy = w.status === 'confirming';
@@ -128,38 +131,39 @@ const WriteCard: React.FC<{ turn: DbTurn; onConfirm: () => void; onCancel: () =>
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
         </svg>
-        Écriture — confirmation requise
+        {t('dbchat.write.title')}
       </div>
       <pre className="text-[11px] rounded-lg px-3 py-2 bg-white/70 border border-amber-200 text-gray-700 overflow-x-auto mb-2"><code>{w.sql}</code></pre>
       {w.status === 'pending' || w.status === 'confirming' ? (
         <>
           <p className="text-[12px] mb-2">
-            {n === null ? 'Impact inconnu.' : <>Cette opération modifiera <strong>{n} ligne{n === 1 ? '' : 's'}</strong>.</>}
+            {n === null ? t('dbchat.write.impactUnknown') : <>{t('dbchat.write.willModify')} <strong>{t('dbchat.write.rowsBold', { count: n, plural: n === 1 ? '' : 's' })}</strong>.</>}
             {w.requiresExtraConfirm && (
-              <span className="block text-red-600 font-medium mt-1">⚠️ Impact important (&gt; 1000 lignes) — vérifie bien avant de confirmer.</span>
+              <span className="block text-red-600 font-medium mt-1">{t('dbchat.write.bigImpact')}</span>
             )}
           </p>
           <div className="flex gap-2">
             <button disabled={busy} onClick={onConfirm} className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 font-medium transition-colors">
-              {busy ? 'Exécution…' : 'Confirmer & exécuter'}
+              {busy ? t('dbchat.write.executing') : t('dbchat.write.confirm')}
             </button>
             <button disabled={busy} onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors">
-              Annuler
+              {t('common.cancel')}
             </button>
           </div>
         </>
       ) : w.status === 'confirmed' ? (
         <p className="text-[12px] text-green-700 font-medium">✓ {w.resultMessage}</p>
       ) : w.status === 'cancelled' ? (
-        <p className="text-[12px] text-gray-500">Annulé — aucune modification.</p>
+        <p className="text-[12px] text-gray-500">{t('dbchat.write.cancelled')}</p>
       ) : (
-        <p className="text-[12px] text-red-600">⚠️ {w.resultMessage || 'Échec.'}</p>
+        <p className="text-[12px] text-red-600">⚠️ {w.resultMessage || t('dbchat.write.failed')}</p>
       )}
     </div>
   );
 };
 
 const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, history = [], activeConversationId, onOpenConversation, onConfirmWrite, onCancelWrite }) => {
+  const { t } = useLanguage();
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -188,29 +192,29 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
           <button
             onClick={() => setShowHistory(s => !s)}
             className="text-[11px] font-medium text-gray-500 hover:text-purple-600 inline-flex items-center gap-1 transition-colors"
-            title="Conversation history"
+            title={t('dbchat.history.tooltip')}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            History
+            {t('sidebar.history')}
           </button>
           <button
             onClick={onNewSearch}
             className="text-[11px] font-medium text-gray-500 hover:text-purple-600 inline-flex items-center gap-1 transition-colors"
-            title="Start a new search"
+            title={t('dbchat.newSearch.tooltip')}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
-            New search
+            {t('dbchat.newSearch.label')}
           </button>
         </div>
 
         {showHistory && (
           <div className="absolute right-3 top-11 z-20 w-64 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1">
             {history.length === 0 ? (
-              <p className="px-3 py-2 text-[11px] text-gray-400">No past conversations.</p>
+              <p className="px-3 py-2 text-[11px] text-gray-400">{t('dbchat.history.empty')}</p>
             ) : (
               history.map(h => (
                 <button
@@ -219,9 +223,9 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
                   className={`w-full text-left px-3 py-1.5 text-[11px] truncate hover:bg-purple-50 ${
                     h.id === activeConversationId ? 'text-purple-700 font-semibold bg-purple-50' : 'text-gray-600'
                   }`}
-                  title={h.title || 'Untitled'}
+                  title={h.title || t('dbchat.untitled')}
                 >
-                  {h.title || 'Untitled'}
+                  {h.title || t('dbchat.untitled')}
                 </button>
               ))
             )}
@@ -267,7 +271,7 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
-            placeholder="Ask a follow-up…"
+            placeholder={t('dbchat.followUp.placeholder')}
             rows={2}
             className="w-full bg-transparent resize-none text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none px-3 pt-2.5 max-h-40"
           />
@@ -277,7 +281,7 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
               onClick={submit}
               disabled={!input.trim() || loading}
               className="flex-shrink-0 rounded-lg p-1.5 bg-gradient-to-br from-blue-600 to-purple-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md active:scale-90 transition-all"
-              aria-label="Send"
+              aria-label={t('query.send')}
             >
               {loading ? (
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

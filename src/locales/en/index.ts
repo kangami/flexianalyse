@@ -262,4 +262,22 @@ export const enUS = {
   'reasoning.finalizing.description': 'Adding final touches and formatting',
   'reasoning.step': 'Step {current} of {total}',
   'reasoning.powered.by': 'Powered by',
+
+  // DbChatPanel (database agent)
+  'dbchat.liveSql': 'Live SQL',
+  'dbchat.write.title': 'Write — confirmation required',
+  'dbchat.write.impactUnknown': 'Unknown impact.',
+  'dbchat.write.willModify': 'This operation will modify',
+  'dbchat.write.rowsBold': '{count} row{plural}',
+  'dbchat.write.bigImpact': '⚠️ Large impact (> 1000 rows) — double-check before confirming.',
+  'dbchat.write.executing': 'Executing…',
+  'dbchat.write.confirm': 'Confirm & run',
+  'dbchat.write.cancelled': 'Cancelled — no changes.',
+  'dbchat.write.failed': 'Failed.',
+  'dbchat.history.tooltip': 'Conversation history',
+  'dbchat.history.empty': 'No past conversations.',
+  'dbchat.newSearch.tooltip': 'Start a new search',
+  'dbchat.newSearch.label': 'New search',
+  'dbchat.untitled': 'Untitled',
+  'dbchat.followUp.placeholder': 'Ask a follow-up…',
 };
