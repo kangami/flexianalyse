@@ -264,20 +264,4 @@ export const esES = {
   'model.provider.OpenAI': 'OpenAI',
   'model.provider.MistralAI': 'Mistral AI',
   'model.provider.Local': 'Local',
-
-  // FlexiAnalyseApp — alertas y errores
-  'flexiapp.error.noSupportedFile': 'No se encontró ningún archivo compatible',
-  'flexiapp.error.processingFiles': 'Error al procesar los archivos: {message}',
-  'flexiapp.error.unknown': 'Error desconocido',
-  'flexiapp.error.extractEndpointUnavailable': '⚠️ El endpoint /extract-structured no está disponible en el servidor de producción.\n\nVerifique que el backend se haya desplegado con todos los endpoints necesarios.',
-  'flexiapp.error.structuredExtraction': 'Error al extraer los datos estructurados: {message}',
-  'flexiapp.error.extraction': 'Error de extracción: {message}',
-  'flexiapp.error.noEditableFile': 'No hay ningún archivo editable disponible. Seleccione primero un archivo de código o DOCX en la barra lateral.',
-  'flexiapp.error.fileNotFoundEditable': 'Archivo no encontrado entre los archivos editables',
-  'flexiapp.error.docxInsert': 'Error al insertar en el archivo DOCX: {message}',
-  'flexiapp.error.unsupportedInsert': 'Tipo de archivo no compatible para la inserción',
-  'flexiapp.error.localModeNeedsFile': 'El modo local requiere un archivo seleccionado o un directorio indexado',
-  'flexiapp.error.indexingFailed': 'Error de indexación en el servidor',
-  'flexiapp.error.requestFailed': 'Error al procesar la solicitud',
-  'flexiapp.error.endpoint405': 'Endpoint no accesible (405). Verifique que el backend de producción tenga el endpoint {endpoint} desplegado y que el método POST esté permitido.',
 };

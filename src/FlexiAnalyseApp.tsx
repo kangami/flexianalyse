@@ -480,7 +480,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (response.status === 405) {
 
-          throw new Error(t('flexiapp.error.endpoint405', { endpoint: '/summarize_file_stream' }));
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /summarize_file_stream déployé et que la méthode POST est autorisée.`);
 
         }
 
@@ -736,7 +736,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (response.status === 405) {
 
-          throw new Error(t('flexiapp.error.endpoint405', { endpoint: '/summarize_repository_stream' }));
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /summarize_repository_stream déployé et que la méthode POST est autorisée.`);
 
         }
 
@@ -1176,7 +1176,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       if (supportedFiles.length === 0) {
 
-        alert(t('flexiapp.error.noSupportedFile'));
+        alert('Aucun fichier supporté trouvé');
 
         setIsProcessingDrop(false);
 
@@ -1296,7 +1296,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       console.error('Error handling drop:', error);
 
-      alert(t('flexiapp.error.processingFiles', { message: error instanceof Error ? error.message : t('flexiapp.error.unknown') }));
+      alert('Erreur lors du traitement des fichiers: ' + (error instanceof Error ? error.message : 'Erreur inconnue'));
 
       setIsProcessingDrop(false);
 
@@ -1344,7 +1344,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         const errorData = await response.json().catch(() => ({}));
 
-        throw new Error(errorData.error || t('flexiapp.error.indexingFailed'));
+        throw new Error(errorData.error || "Échec de l'indexation sur le serveur");
 
       }
 
@@ -1606,7 +1606,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (!selectedFile && (!isDirectoryIndexed || directoryFiles.length === 0)) {
 
-          throw new Error(t('flexiapp.error.localModeNeedsFile'));
+          throw new Error('Mode local nécessite un fichier sélectionné ou un répertoire indexé');
 
         }
 
@@ -1782,7 +1782,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         setIsSearchingOnline(false);
 
-        throw new Error(errorData.error || t('flexiapp.error.requestFailed'));
+        throw new Error(errorData.error || 'Échec du traitement de la requête');
 
       }
 
@@ -2216,7 +2216,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (healthData.endpoints && healthData.endpoints['/extract-structured'] && !healthData.endpoints['/extract-structured'].exists) {
 
-          alert(t('flexiapp.error.extractEndpointUnavailable'));
+          alert(`⚠️ L'endpoint /extract-structured n'est pas disponible sur le serveur de production.\n\nVérifiez que le backend a bien été déployé avec tous les endpoints nécessaires.`);
 
           return;
 
@@ -2298,7 +2298,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         if (response.status === 405) {
 
-          throw new Error(t('flexiapp.error.endpoint405', { endpoint: '/extract-structured' }));
+          throw new Error(`Endpoint non accessible (405). Vérifiez que le backend de production a bien l'endpoint /extract-structured déployé et que la méthode POST est autorisée.`);
 
         }
 
@@ -2318,7 +2318,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
         console.error('Erreur lors de l\'extraction:', result.error);
 
-        alert(t('flexiapp.error.structuredExtraction', { message: result.error || t('flexiapp.error.unknown') }));
+        alert('Erreur lors de l\'extraction des données structurées: ' + (result.error || 'Erreur inconnue'));
 
       }
 
@@ -2326,7 +2326,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
       console.error('Erreur lors de l\'extraction structurée:', error);
 
-      alert(t('flexiapp.error.extraction', { message: error instanceof Error ? error.message : t('flexiapp.error.unknown') }));
+      alert('Erreur lors de l\'extraction: ' + (error instanceof Error ? error.message : 'Erreur inconnue'));
 
     } finally {
 
@@ -2504,7 +2504,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     if (editableFiles.length === 0) {
 
-      alert(t('flexiapp.error.noEditableFile'));
+      alert('Aucun fichier éditable disponible. Veuillez d\'abord sélectionner un fichier code ou DOCX dans la sidebar.');
 
       return;
 
@@ -2530,7 +2530,7 @@ const FlexiAnalyseApp: React.FC = () => {
 
     if (!fileData) {
 
-      alert(t('flexiapp.error.fileNotFoundEditable'));
+      alert('Fichier non trouvé dans les fichiers éditables');
 
       return;
 
@@ -2746,13 +2746,13 @@ const FlexiAnalyseApp: React.FC = () => {
 
           console.error('Erreur lors de l\'insertion dans DOCX:', err);
 
-          alert(t('flexiapp.error.docxInsert', { message: err.message }));
+          alert('Erreur lors de l\'insertion dans le fichier DOCX: ' + err.message);
 
         });
 
     } else {
 
-      alert(t('flexiapp.error.unsupportedInsert'));
+      alert('Type de fichier non supporté pour l\'insertion');
 
     }
 
