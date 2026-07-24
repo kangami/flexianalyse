@@ -18,23 +18,22 @@ const navItems: NavItem[] = [
     label: 'Platform',
     hasDropdown: true,
     dropdownItems: [
-      { label: 'AI-Powered Analysis', description: 'Document understanding & data extraction' },
-      { label: 'Unified Knowledge Layer', description: 'Connect all your enterprise data' },
-      { label: 'AI Agent Workforce', description: 'Autonomous agents that execute tasks' },
-      { label: 'Insights & Intelligence', description: 'Risk detection, bottlenecks & trends' },
+      { label: 'Natural-language to SQL', description: 'Ask in plain language, get real queries' },
+      { label: 'Schema explorer', description: 'Interactive ER diagram of your database' },
+      { label: 'On-prem agent', description: 'Reach private databases, no open ports' },
+      { label: 'Audit & governance', description: 'Full trail, read-only by default' },
     ],
   },
   {
     label: 'Solutions',
     hasDropdown: true,
     dropdownItems: [
-      { label: 'Contract Management', description: 'Automate contract lifecycle' },
-      { label: 'Invoice Processing', description: 'Streamline AP workflows' },
-      { label: 'Employee Onboarding', description: 'Accelerate HR processes' },
-      { label: 'Vendor Management', description: 'Centralize vendor operations' },
+      { label: 'Analysts & data teams', description: 'Clear the ad-hoc query backlog' },
+      { label: 'Product & operations', description: 'Self-serve metrics, no SQL needed' },
+      { label: 'Finance & revenue', description: 'Figures you can verify' },
+      { label: 'Founders & SMBs', description: 'Your database, on tap' },
     ],
   },
-  { label: 'Customer Stories' },
   { label: 'Resources' },
   { label: 'Company' },
   { label: 'Blog' },
@@ -59,6 +58,17 @@ const Navbar: React.FC = () => {
     setOpenDropdown(openDropdown === label ? null : label);
   };
 
+  const goToHowItWorks = () => {
+    setOpenDropdown(null);
+    const el = document.getElementById('how-it-works');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      navigate('/');
+      setTimeout(() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+  };
+
   return (
     <nav className="fixed top-0 w-full bg-white/95 backdrop-blur-md border-b border-gray-100 z-50" ref={navRef}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -71,6 +81,12 @@ const Navbar: React.FC = () => {
 
           {/* Center Nav Links */}
           <div className="hidden lg:flex items-center space-x-1">
+            <button
+              onClick={goToHowItWorks}
+              className="flex items-center gap-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:text-violet-700 hover:bg-gray-50"
+            >
+              How it works
+            </button>
             {navItems.map((item) => (
               <div key={item.label} className="relative">
                 <button
@@ -78,8 +94,8 @@ const Navbar: React.FC = () => {
                   onMouseEnter={() => item.hasDropdown && setOpenDropdown(item.label)}
                   className={`flex items-center gap-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
                     openDropdown === item.label
-                      ? 'text-blue-600 bg-blue-50'
-                      : 'text-gray-700 hover:text-blue-600 hover:bg-gray-50'
+                      ? 'text-violet-700 bg-violet-50'
+                      : 'text-gray-700 hover:text-violet-700 hover:bg-gray-50'
                   }`}
                 >
                   {item.label}
@@ -98,7 +114,7 @@ const Navbar: React.FC = () => {
                       <a
                         key={dropItem.label}
                         href="#"
-                        className="block px-4 py-3 hover:bg-blue-50 transition-colors"
+                        className="block px-4 py-3 hover:bg-violet-50 transition-colors"
                       >
                         <span className="block text-sm font-medium text-gray-900">{dropItem.label}</span>
                         {dropItem.description && (
@@ -116,14 +132,14 @@ const Navbar: React.FC = () => {
           <div className="flex items-center">
             <button onClick={() => navigate('/get-started')} className="relative px-5 py-2 text-sm font-semibold rounded-full border-2 border-transparent bg-clip-padding transition-all duration-200 hover:scale-105 hover:shadow-lg"
               style={{
-                backgroundImage: 'linear-gradient(white, white), linear-gradient(-45deg, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #10b981)',
+                backgroundImage: 'linear-gradient(white, white), linear-gradient(-45deg, #a78bfa, #8b5cf6, #7c3aed, #6d28d9, #4c1d95)',
                 backgroundOrigin: 'border-box',
                 backgroundClip: 'padding-box, border-box',
                 backgroundSize: '100% 100%, 400% 400%',
                 animation: 'gradientFlow 3s ease-in-out infinite',
               }}
             >
-              <span className="font-bold text-blue-800">Get Started</span>
+              <span className="font-bold text-violet-800">Get Started</span>
             </button>
           </div>
         </div>

@@ -4,17 +4,17 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Play } from 'lucide-react';
 import LoginModal from '../auth/LoginModal';
 import Navbar from './Navbar';
-import OperationsDiagram from './OperationsDiagram';
 import FeaturesSection from './FeaturesSection';
 import UseCasesSection from './UseCasesSection';
 import TestimonialsSection from './TestimonialsSection';
 import FAQSection from './FAQSection';
+import HowItWorks from './HowItWorks';
 
 const heroStats = [
-  { v: '10x',  l: 'Productivity per role' },
-  { v: '50+',  l: 'Data connectors' },
-  { v: '90%',  l: 'Less manual work' },
-  { v: '24/7', l: 'AI intelligence' },
+  { v: '2 modes', l: 'Cloud & on-prem connection' },
+  { v: '0',       l: 'Inbound ports for on-prem' },
+  { v: '100%',    l: 'Answers grounded in real SQL' },
+  { v: 'Full',    l: 'Audit trail on every query' },
 ];
 
 const HERO_VIDEOS = ['/flexi-back1.mp4', '/flexi-back2.mp4', '/flexi-back3.mp4'];
@@ -56,7 +56,7 @@ const LandingPage: React.FC = () => {
       {/* ── Hero ──────────────────────────────────────────── */}
       <section
         className="relative min-h-[100svh] flex items-center justify-center overflow-hidden pt-16"
-        style={{ background: 'linear-gradient(135deg,#04091e 0%,#0a1640 45%,#0d1a50 70%,#120d35 100%)' }}
+        style={{ background: 'linear-gradient(135deg,#000000 0%,#0a0612 45%,#150a2e 75%,#0a0a0f 100%)' }}
       >
         {/* ── Background videos (crossfade) ── */}
         {HERO_VIDEOS.map((src, idx) => (
@@ -86,39 +86,40 @@ const LandingPage: React.FC = () => {
 
         {/* Ambient orbs */}
         <div className="absolute -top-20 -left-32 w-[700px] h-[700px] rounded-full pointer-events-none"
-             style={{ background: 'radial-gradient(circle,rgba(59,130,246,0.22),transparent 65%)', filter: 'blur(60px)' }} />
+             style={{ background: 'radial-gradient(circle,rgba(139,92,246,0.28),transparent 65%)', filter: 'blur(60px)' }} />
         <div className="absolute bottom-0 right-0 w-[500px] h-[500px] rounded-full pointer-events-none"
-             style={{ background: 'radial-gradient(circle,rgba(139,92,246,0.18),transparent 65%)', filter: 'blur(60px)' }} />
+             style={{ background: 'radial-gradient(circle,rgba(124,58,237,0.22),transparent 65%)', filter: 'blur(60px)' }} />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/3 w-[900px] h-[400px] rounded-full pointer-events-none"
-             style={{ background: 'radial-gradient(circle,rgba(6,182,212,0.08),transparent 65%)', filter: 'blur(80px)' }} />
+             style={{ background: 'radial-gradient(circle,rgba(167,139,250,0.10),transparent 65%)', filter: 'blur(80px)' }} />
         {/* Subtle grid */}
         <div className="absolute inset-0 pointer-events-none"
              style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px)', backgroundSize: '64px 64px' }} />
 
         <div className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-16 text-center">
           {/* Status badge */}
-          <div className="inline-flex items-center gap-2.5 mb-8 px-5 py-2 rounded-full border border-blue-400/20 bg-blue-500/10 backdrop-blur-sm">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 8px #34d399' }} />
-            <span className="text-blue-300 text-sm font-semibold tracking-wide">Enterprise Operations Intelligence</span>
+          <div className="inline-flex items-center gap-2.5 mb-8 px-5 py-2 rounded-full border border-violet-400/25 bg-violet-500/10 backdrop-blur-sm">
+            <span className="w-2 h-2 rounded-full bg-violet-400" style={{ boxShadow: '0 0 8px #a78bfa' }} />
+            <span className="text-violet-200 text-sm font-semibold tracking-wide">Your AI Database Assistant</span>
           </div>
 
           {/* Headline */}
           <h1 className="text-5xl sm:text-6xl lg:text-[78px] font-black leading-[1.03] tracking-tight text-white mb-6">
-            Your entire organisation.<br />
+            Your AI database assistant.<br />
             <span style={{
-              background: 'linear-gradient(90deg,#60a5fa 0%,#a78bfa 50%,#f472b6 100%)',
+              background: 'linear-gradient(90deg,#e9d5ff 0%,#a78bfa 50%,#7c3aed 100%)',
               WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
             }}>
-              One single truth.
+              Built for the whole team.
             </span>
           </h1>
 
           {/* Sub-headline */}
           <p className="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto mb-10 leading-relaxed">
-            A{' '}
-            <span className="text-white font-semibold">dedicated AI agent for every role</span>
-            {' '}- connecting all your data, surfacing hidden insights, and making every employee{' '}
-            <span className="text-white font-semibold">10X more effective</span>.
+            From your{' '}
+            <span className="text-white font-semibold">developers and DBAs</span>
+            {' '}to your{' '}
+            <span className="text-white font-semibold">CFO and CS team</span>
+            , FlexiAnalyse turns any SQL database, cloud or on-prem, into answers everyone can trust. Ask in plain language or write SQL directly; every answer is grounded in the exact query that ran.
           </p>
 
           {/* CTAs */}
@@ -126,19 +127,20 @@ const LandingPage: React.FC = () => {
             <Link
               to="/get-started"
               className="group inline-flex items-center gap-2 px-8 py-4 rounded-xl text-white font-bold text-lg transition-all duration-200 hover:scale-105"
-              style={{ background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', boxShadow: '0 8px 40px rgba(139,92,246,0.45)' }}
+              style={{ background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', boxShadow: '0 8px 40px rgba(124,58,237,0.5)' }}
             >
               Start For Free
               <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
             </Link>
             <button
+              onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
               className="inline-flex items-center gap-3 px-8 py-4 rounded-xl text-white font-semibold text-lg border border-white/15 backdrop-blur-sm hover:bg-white/10 transition-all duration-200"
               style={{ background: 'rgba(255,255,255,0.06)' }}
             >
               <span className="w-9 h-9 flex items-center justify-center rounded-full" style={{ background: 'rgba(255,255,255,0.15)' }}>
                 <Play className="w-4 h-4 fill-white text-white" />
               </span>
-              Watch Demo
+              See how it works
             </button>
           </div>
 
@@ -152,7 +154,7 @@ const LandingPage: React.FC = () => {
               >
                 <div
                   className="text-3xl sm:text-4xl font-black mb-1"
-                  style={{ background: 'linear-gradient(135deg,#60a5fa,#a78bfa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}
+                  style={{ background: 'linear-gradient(135deg,#a78bfa,#7c3aed)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}
                 >
                   {s.v}
                 </div>
@@ -172,7 +174,7 @@ const LandingPage: React.FC = () => {
 
       {/* ── Main page sections (white bg) ── */}
       <div className="bg-white pt-4">
-        <OperationsDiagram />
+        <HowItWorks />
         <FeaturesSection />
         <UseCasesSection />
         <TestimonialsSection />
@@ -180,26 +182,26 @@ const LandingPage: React.FC = () => {
 
         {/* ── Final CTA Banner ─────────────────────────────── */}
         <section
-          className="py-16 px-4"
-          style={{ background: 'linear-gradient(135deg,#04091e 0%,#0a1640 50%,#120d35 100%)' }}
+          className="py-16 px-4 relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg,#000000 0%,#100823 50%,#0a0a0f 100%)' }}
         >
           {/* Orbs */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div style={{ position: 'absolute', top: '-80px', left: '20%', width: '400px', height: '400px', background: 'radial-gradient(circle,rgba(59,130,246,0.15),transparent 65%)', filter: 'blur(60px)' }} />
-            <div style={{ position: 'absolute', bottom: '-80px', right: '20%', width: '400px', height: '400px', background: 'radial-gradient(circle,rgba(139,92,246,0.15),transparent 65%)', filter: 'blur(60px)' }} />
+            <div style={{ position: 'absolute', top: '-80px', left: '20%', width: '400px', height: '400px', background: 'radial-gradient(circle,rgba(139,92,246,0.2),transparent 65%)', filter: 'blur(60px)' }} />
+            <div style={{ position: 'absolute', bottom: '-80px', right: '20%', width: '400px', height: '400px', background: 'radial-gradient(circle,rgba(124,58,237,0.18),transparent 65%)', filter: 'blur(60px)' }} />
           </div>
           <div className="relative max-w-3xl mx-auto text-center">
-            <p className="text-blue-400 text-sm font-semibold uppercase tracking-widest mb-4">Get Started Today</p>
+            <p className="text-violet-400 text-sm font-semibold uppercase tracking-widest mb-4">Get Started Today</p>
             <h2 className="text-4xl sm:text-5xl font-black text-white mb-5 leading-tight">
-              Ready to 10X your team?
+              Ready to talk to your data?
             </h2>
             <p className="text-xl text-gray-300 mb-8 leading-relaxed">
-              Connect your data, deploy AI agents for every role, and get operational intelligence — in minutes, not months.
+              Connect a database, cloud or on-prem, and start asking questions in plain language, with answers you can trust and audit. In minutes, not months.
             </p>
             <Link
               to="/get-started"
               className="inline-flex items-center gap-2 px-10 py-4 rounded-xl text-white font-bold text-lg transition-all hover:scale-105"
-              style={{ background: 'linear-gradient(135deg,#3b82f6,#8b5cf6)', boxShadow: '0 8px 40px rgba(139,92,246,0.45)' }}
+              style={{ background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)', boxShadow: '0 8px 40px rgba(124,58,237,0.5)' }}
             >
               Get Started Free <ArrowRight className="w-5 h-5" />
             </Link>

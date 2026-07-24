@@ -1,79 +1,68 @@
 import React from 'react';
-import { Star, Quote } from 'lucide-react';
+import { Terminal, Lock, History } from 'lucide-react';
 
-const testimonials = [
+/**
+ * "Why teams choose FlexiAnalyse" — the trust principles behind the product.
+ * (Replaced the earlier placeholder testimonials; add real customer quotes here
+ * once they're available, rather than fabricated ones.)
+ */
+
+const principles = [
   {
-    name: "Sarah Johnson",
-    title: "CEO, HealthTech Solutions",
-    company: "MedAI Inc.",
-    rating: 5,
-    quote: "FlexiAnalyse transformed our patient outcome predictions. The accuracy and speed are unmatched in the industry. Our team couldn't be happier with the results."
+    icon: <Terminal className="w-7 h-7" />,
+    title: 'Grounded, not guessed',
+    body: 'Every answer is produced by real SQL run against your data, and the query is shown right next to the result. If the question can’t be answered from your data, the agent says so instead of inventing a number.',
+    grad: 'linear-gradient(135deg,#a78bfa,#8b5cf6)',
+    tint: '#f5f3ff',
   },
   {
-    name: "Michael Chen",
-    title: "Chief Data Officer",
-    company: "Global Retail Analytics",
-    rating: 5,
-    quote: "Since implementing FlexiAnalyse, we've seen a 30% increase in sales through personalized recommendations. The platform is intuitive and powerful."
+    icon: <Lock className="w-7 h-7" />,
+    title: 'Your data stays yours',
+    body: 'On-prem databases never leave your network: a lightweight agent dials out, so no ports are opened and only results transit. Credentials are encrypted at rest, or kept entirely on your side. Read-only by default.',
+    grad: 'linear-gradient(135deg,#818cf8,#6366f1)',
+    tint: '#eef2ff',
   },
   {
-    name: "Emily Rodriguez",
-    title: "Director of Operations",
-    company: "EcoManufacturing Corp.",
-    rating: 5,
-    quote: "FlexiAnalyse helped us predict equipment failures before they happened, saving us millions in downtime costs. It's a game-changer for our industry."
-  }
+    icon: <History className="w-7 h-7" />,
+    title: 'Every action is traceable',
+    body: 'Who asked what, which query ran, and when, recorded as a full audit trail across your organisation. And any write is previewed and gated behind your explicit confirmation before it commits.',
+    grad: 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
+    tint: '#f5f3ff',
+  },
 ];
 
 const TestimonialsSection: React.FC = () => {
   return (
     <section className="py-14 sm:py-18 bg-gradient-to-br from-gray-50 to-white overflow-hidden">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16 sm:mb-20">
-          <h2 className="text-4xl sm:text-5xl font-extrabold text-gray-900 leading-tight mb-4">
-            What Our Users Say
+        <div className="text-center mb-16">
+          <span className="inline-block px-4 py-1.5 rounded-full text-sm font-semibold mb-5 text-violet-700" style={{ background: '#f5f3ff' }}>
+            Why teams choose FlexiAnalyse
+          </span>
+          <h2 className="text-4xl sm:text-5xl font-black text-gray-900 leading-tight mb-4">
+            Powerful access,{' '}
+            <span style={{ background: 'linear-gradient(90deg,#8b5cf6,#6d28d9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+              earned trust
+            </span>
           </h2>
           <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-            Hear directly from the leaders and innovators who are transforming their operations with FlexiAnalyse.
+            Letting an AI touch your production database is a big ask. These are the guarantees that make it safe.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 auto-rows-fr">
-          {testimonials.map((testimonial, index) => (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 auto-rows-fr">
+          {principles.map((p) => (
             <div
-              key={index}
-              className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col justify-between border border-gray-100"
+              key={p.title}
+              className="bg-white p-8 rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 border border-gray-100 flex flex-col"
             >
-              <div>
-                <div className="flex items-center mb-4">
-                  <Quote className="text-indigo-400 w-8 h-8 mr-2 opacity-75" />
-                  <div className="flex text-yellow-500">
-                    {[...Array(testimonial.rating)].map((_, i) => (
-                      <Star key={i} className="w-5 h-5 fill-yellow-500 stroke-yellow-500" />
-                    ))}
-                  </div>
-                </div>
-                <p className="text-gray-800 text-lg italic mb-6 leading-relaxed">
-                  "{testimonial.quote}"
-                </p>
+              <div className="w-14 h-14 rounded-2xl text-white flex items-center justify-center shadow-md mb-5" style={{ background: p.grad }}>
+                {p.icon}
               </div>
-              <div className="flex items-center mt-auto pt-4 border-t border-gray-50">
-                <div className="flex-shrink-0 h-14 w-14 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xl uppercase ring-2 ring-indigo-300 ring-opacity-50">
-                  {testimonial.name.split(' ').map(n => n[0]).join('')}
-                </div>
-                <div className="ml-4">
-                  <p className="text-xl font-bold text-gray-900">{testimonial.name}</p>
-                  <p className="text-indigo-600 text-md">{testimonial.title}</p>
-                  <p className="text-gray-500 text-sm">{testimonial.company}</p>
-                </div>
-              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">{p.title}</h3>
+              <p className="text-gray-600 leading-relaxed">{p.body}</p>
             </div>
           ))}
-        </div>
-
-        <div className="mt-20 text-center">
-          <p className="text-gray-700 text-xl font-medium mb-3">Join thousands of satisfied customers</p>
-          <p className="text-indigo-700 text-2xl font-bold">Trusted by <span className="text-indigo-500">5,000+</span> businesses worldwide</p>
         </div>
       </div>
     </section>

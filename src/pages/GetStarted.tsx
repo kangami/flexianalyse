@@ -10,10 +10,10 @@ import {
   ArrowRight,
   ArrowLeft,
   CheckCircle2,
-  Shield,
-  Network,
-  Zap,
-  Users,
+  ShieldCheck,
+  MessagesSquare,
+  Terminal,
+  ServerCog,
   User as UserIcon,
   Building2,
 } from 'lucide-react';
@@ -55,7 +55,7 @@ const friendlyAuthError = (error: unknown): string => {
     case 'auth/email-already-in-use':
       return 'An account already exists with this email. Try signing in instead.';
     case 'auth/weak-password':
-      return 'Password is too weak — use at least 6 characters.';
+      return 'Password is too weak. Use at least 6 characters.';
     case 'auth/invalid-email':
       return 'That email address looks invalid.';
     case 'auth/too-many-requests':
@@ -214,10 +214,10 @@ const GetStarted: React.FC = () => {
   };
 
   const inputClass =
-    'w-full px-4 py-3 rounded-xl border border-gray-200 bg-white/80 backdrop-blur-sm text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder:text-gray-400';
+    'w-full px-4 py-3 rounded-xl border border-gray-200 bg-white/80 backdrop-blur-sm text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent transition-all duration-200 placeholder:text-gray-400';
   const labelClass = 'block text-sm font-medium text-gray-700 mb-1.5';
   const primaryBtn =
-    'px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full font-semibold text-sm inline-flex items-center gap-2 hover:shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100';
+    'px-8 py-3 bg-gradient-to-r from-violet-600 to-purple-700 text-white rounded-full font-semibold text-sm inline-flex items-center gap-2 hover:shadow-lg hover:scale-105 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100';
 
   const errorBox = error ? (
     <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
@@ -226,7 +226,7 @@ const GetStarted: React.FC = () => {
   ) : null;
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-blue-50 to-purple-50 flex flex-col">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-violet-50 to-purple-50 flex flex-col">
       <Navbar />
 
       <div className="flex-1 flex items-center justify-center px-4 pt-24 pb-12">
@@ -236,24 +236,24 @@ const GetStarted: React.FC = () => {
           <div className="space-y-8">
             <div>
               <h2 className="text-3xl sm:text-4xl font-extrabold text-gray-900 leading-tight mb-4">
-                You bring your systems.{' '}
-                <span className="gradient-text-flow">We make them work together — intelligently.</span>
+                Your AI database assistant.{' '}
+                <span className="gradient-text-flow">Built for the whole team.</span>
               </h2>
               <p className="text-lg text-gray-600 leading-relaxed">
-                FlexiAnalyse connects your data sources, enforces your access control policies,
-                and orchestrates AI agents so every operation runs seamlessly.
+                From developers and DBAs to CFOs and CS teams, connect a database, ask in plain
+                language or write SQL, and get answers you can trust and audit.
               </p>
             </div>
 
             <div className="space-y-4">
               {[
-                { icon: <Network className="w-5 h-5" />, title: 'Unified Connectivity', desc: 'Bring together Google Drive, Dropbox, SharePoint, SQL and more in one place.' },
-                { icon: <Shield className="w-5 h-5" />, title: 'Your Policies, Enforced', desc: 'Role-based access, encryption, and audit logs — security built in, not bolted on.' },
-                { icon: <Zap className="w-5 h-5" />, title: 'AI-Powered Orchestration', desc: 'Intelligent agents that understand, plan, and execute work across your enterprise.' },
-                { icon: <Users className="w-5 h-5" />, title: 'Human-in-the-Loop', desc: 'Stay in control with approvals, oversight, and guardrails at every step.' },
+                { icon: <MessagesSquare className="w-5 h-5" />, title: 'Ask in plain language or SQL', desc: 'The agent maps your words to your schema and writes the query; or write SQL directly.' },
+                { icon: <Terminal className="w-5 h-5" />, title: 'Grounded, verifiable answers', desc: 'Every answer ships with the exact SQL that produced it, run against your real data.' },
+                { icon: <ServerCog className="w-5 h-5" />, title: 'Cloud or on-prem', desc: 'Reach a managed database, or a private one via a secure agent, no ports opened.' },
+                { icon: <ShieldCheck className="w-5 h-5" />, title: 'Safe & traceable', desc: 'Read-only by default, writes gated behind confirmation, and a full audit trail.' },
               ].map((item) => (
                 <div key={item.title} className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <div className="w-9 h-9 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center flex-shrink-0 mt-0.5">
                     {item.icon}
                   </div>
                   <div>
@@ -274,15 +274,15 @@ const GetStarted: React.FC = () => {
                 className="flex flex-col items-center justify-center text-center py-8"
                 style={{ animation: 'fadeInUp 0.5s ease-out forwards' }}
               >
-                <div className={`w-16 h-16 ${alreadyExists ? 'bg-blue-100' : 'bg-green-100'} rounded-full flex items-center justify-center mb-5`}>
-                  <CheckCircle2 className={`w-9 h-9 ${alreadyExists ? 'text-blue-600' : 'text-green-600'}`} />
+                <div className={`w-16 h-16 ${alreadyExists ? 'bg-violet-50' : 'bg-violet-100'} rounded-full flex items-center justify-center mb-5`}>
+                  <CheckCircle2 className={`w-9 h-9 ${alreadyExists ? 'text-violet-500' : 'text-violet-600'}`} />
                 </div>
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">
                   {alreadyExists ? 'We know you!' : "You're all set!"}
                 </h3>
                 <p className="text-gray-600 mb-6 max-w-xs">
                   {alreadyExists ? (
-                    <>We already have your information — we will connect with you <strong>ASAP</strong>!</>
+                    <>We already have your information, we will connect with you <strong>ASAP</strong>!</>
                   ) : (
                     <>Thank you, {firstName}. Our team will reach out to <strong>{workEmail}</strong> shortly.</>
                   )}
@@ -358,7 +358,7 @@ const GetStarted: React.FC = () => {
                   <button
                     type="button"
                     onClick={startSignup}
-                    className="text-blue-600 hover:underline font-medium"
+                    className="text-violet-600 hover:underline font-medium"
                   >
                     Create an account
                   </button>
@@ -373,11 +373,11 @@ const GetStarted: React.FC = () => {
                   {[1, 2, 3].map((n, i) => (
                     <React.Fragment key={n}>
                       {i > 0 && (
-                        <div className={`h-0.5 flex-1 rounded transition-colors duration-300 ${step >= n ? 'bg-blue-600' : 'bg-gray-200'}`} />
+                        <div className={`h-0.5 flex-1 rounded transition-colors duration-300 ${step >= n ? 'bg-violet-600' : 'bg-gray-200'}`} />
                       )}
                       <div
                         className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors duration-300 ${
-                          step === n ? 'bg-blue-600 text-white' : step > n ? 'bg-blue-100 text-blue-600' : 'bg-gray-200 text-gray-400'
+                          step === n ? 'bg-violet-600 text-white' : step > n ? 'bg-violet-100 text-violet-600' : 'bg-gray-200 text-gray-400'
                         }`}
                       >
                         {n}
@@ -458,9 +458,9 @@ const GetStarted: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => chooseAccountType('personal')}
-                        className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-blue-400 hover:bg-blue-50/50 transition-all duration-200 flex items-start gap-3 group"
+                        className="w-full text-left p-4 rounded-xl border border-gray-200 hover:border-violet-400 hover:bg-violet-50/50 transition-all duration-200 flex items-start gap-3 group"
                       >
-                        <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center flex-shrink-0">
+                        <div className="w-10 h-10 rounded-lg bg-violet-100 text-violet-600 flex items-center justify-center flex-shrink-0">
                           <UserIcon className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
@@ -469,7 +469,7 @@ const GetStarted: React.FC = () => {
                             Get your own workspace right away. Choose a password and start using the app.
                           </p>
                         </div>
-                        <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-blue-600 flex-shrink-0 mt-1 transition-colors" />
+                        <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-violet-600 flex-shrink-0 mt-1 transition-colors" />
                       </button>
 
                       <button
@@ -483,7 +483,7 @@ const GetStarted: React.FC = () => {
                         <div className="min-w-0">
                           <h4 className="text-sm font-bold text-gray-800">Company account</h4>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            Tell us about your organisation — our team will set things up with you.
+                            Tell us about your organisation, our team will set things up with you.
                           </p>
                         </div>
                         <ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-purple-600 flex-shrink-0 mt-1 transition-colors" />
@@ -504,7 +504,7 @@ const GetStarted: React.FC = () => {
                   <div style={{ animation: 'fadeInLeft 0.4s ease-out forwards' }}>
                     <h3 className="text-xl font-bold text-gray-900 mb-1">Choose your password</h3>
                     <p className="text-sm text-gray-500 mb-6">
-                      Your workspace is created automatically — you can start right after.
+                      Your workspace is created automatically; you can start right after.
                     </p>
 
                     <div className="space-y-4">
@@ -609,7 +609,7 @@ const GetStarted: React.FC = () => {
             {/* Contact line */}
             <p className="mt-6 pt-6 border-t border-gray-100 text-center text-xs text-gray-500">
               Prefer email? Reach us at{' '}
-              <a href="mailto:contact@flexianalyse.com" className="text-blue-600 hover:underline font-medium">
+              <a href="mailto:contact@flexianalyse.com" className="text-violet-600 hover:underline font-medium">
                 contact@flexianalyse.com
               </a>
             </p>

@@ -1,66 +1,66 @@
 import React, { useState } from 'react';
-import { Users, DollarSign, Scale, Settings, BarChart3, Shield, CheckCircle2, ArrowRight } from 'lucide-react';
+import { MessagesSquare, Terminal, Network, ShieldCheck, ServerCog, Gauge, CheckCircle2, ArrowRight } from 'lucide-react';
 
 const roles = [
   {
-    role: 'CEO & Executives',
-    agent: 'Executive Agent',
-    icon: <BarChart3 className="w-6 h-6" />,
-    metric: '10x', metricLabel: 'faster decisions',
-    grad: 'linear-gradient(135deg,#f59e0b,#f97316)',
-    bg: '#fffbeb', border: '#fef3c7',
-    description: 'Real-time visibility into every operation. Ask in plain English — get board-ready summaries, exception reports and strategic insights instantly.',
-    capabilities: ['Cross-department dashboards', 'Exception & risk alerts', 'Natural language Q&A across all data'],
+    role: 'Natural-language to SQL',
+    agent: 'Ask, don\'t query',
+    icon: <MessagesSquare className="w-6 h-6" />,
+    metric: 'EN / FR', metricLabel: 'plain language',
+    grad: 'linear-gradient(135deg,#a78bfa,#8b5cf6)',
+    bg: '#f5f3ff', border: '#ddd6fe',
+    description: 'Ask a question in plain English or French. FlexiAnalyse reads your schema, maps your words to your tables, and writes the SQL for you, joins and all.',
+    capabilities: ['Schema-aware query generation', 'Maps your vocabulary to the data', 'Handles multi-table joins & analytics'],
   },
   {
-    role: 'Finance & CFO',
-    agent: 'Finance Agent',
-    icon: <DollarSign className="w-6 h-6" />,
-    metric: '80%', metricLabel: 'AP automation',
-    grad: 'linear-gradient(135deg,#10b981,#059669)',
-    bg: '#f0fdf4', border: '#bbf7d0',
-    description: 'Automate invoice processing, detect anomalies, forecast cash flow and instantly reconcile accounts across all your financial systems.',
-    capabilities: ['Invoice extraction & matching', 'Anomaly & fraud detection', 'Real-time cash flow forecasting'],
+    role: 'Grounded, verifiable answers',
+    agent: 'No black box',
+    icon: <Terminal className="w-6 h-6" />,
+    metric: '100%', metricLabel: 'answers show their SQL',
+    grad: 'linear-gradient(135deg,#818cf8,#6366f1)',
+    bg: '#eef2ff', border: '#c7d2fe',
+    description: 'Every answer ships with the exact query that produced it, run against your real data. Figures you can check, never invented.',
+    capabilities: ['Exact SQL shown with every result', 'Answers grounded in live data', 'Interprets your question back to you'],
   },
   {
-    role: 'Legal & Compliance',
-    agent: 'Legal Agent',
-    icon: <Scale className="w-6 h-6" />,
-    metric: '3x', metricLabel: 'faster contract review',
+    role: 'Interactive schema explorer',
+    agent: 'See your whole database',
+    icon: <Network className="w-6 h-6" />,
+    metric: '500+', metricLabel: 'tables, fluid',
     grad: 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
     bg: '#faf5ff', border: '#e9d5ff',
-    description: 'AI-powered contract analysis, obligation tracking and risk flagging across your entire legal portfolio — in seconds, not days.',
-    capabilities: ['Contract risk scoring', 'Obligation & renewal alerts', 'Clause extraction & redlining'],
+    description: 'A live ER diagram of your database. Search and focus a table, click to see its columns, row counts and relationships, even on hundreds of tables.',
+    capabilities: ['Searchable, focusable ER diagram', 'Click a table for columns & row stats', 'Reads one-to-many and many-to-many relations at a glance'],
   },
   {
-    role: 'HR & People Ops',
-    agent: 'HR Agent',
-    icon: <Users className="w-6 h-6" />,
-    metric: '70%', metricLabel: 'onboarding time saved',
-    grad: 'linear-gradient(135deg,#3b82f6,#0ea5e9)',
-    bg: '#eff6ff', border: '#bfdbfe',
-    description: 'Automate the full employee lifecycle — from onboarding paperwork to compliance tracking, leave management and offboarding workflows.',
-    capabilities: ['Automated onboarding flows', 'Policy compliance tracking', 'Employee document management'],
+    role: 'Safe writes with confirmation',
+    agent: 'Read-only by default',
+    icon: <ShieldCheck className="w-6 h-6" />,
+    metric: '2-step', metricLabel: 'confirm before commit',
+    grad: 'linear-gradient(135deg,#7c3aed,#5b21b6)',
+    bg: '#f5f3ff', border: '#ddd6fe',
+    description: 'The agent only reads unless you allow more. Any UPDATE / INSERT / DELETE is previewed first and commits only after your explicit approval.',
+    capabilities: ['Read-only unless explicitly enabled', 'Preview the impact before it runs', 'Explicit approval on every write'],
   },
   {
-    role: 'Operations',
-    agent: 'Ops Agent',
-    icon: <Settings className="w-6 h-6" />,
-    metric: '5x', metricLabel: 'workflow velocity',
-    grad: 'linear-gradient(135deg,#f97316,#ef4444)',
-    bg: '#fff7ed', border: '#fed7aa',
-    description: 'Identify bottlenecks, orchestrate cross-functional workflows, track KPIs in real time and surface operational insights before they become problems.',
-    capabilities: ['Bottleneck detection', 'Cross-system automation', 'SLA & KPI monitoring'],
+    role: 'On-prem & private databases',
+    agent: 'Your data stays home',
+    icon: <ServerCog className="w-6 h-6" />,
+    metric: '0', metricLabel: 'inbound ports',
+    grad: 'linear-gradient(135deg,#8b5cf6,#6366f1)',
+    bg: '#f5f3ff', border: '#ddd6fe',
+    description: 'A lightweight agent runs inside your network and dials out to FlexiAnalyse: no open ports, no VPN. Credentials never leave your side; only results transit.',
+    capabilities: ['Outbound-only dial-home agent', 'Credentials stay in your network', 'One Docker command to run it'],
   },
   {
-    role: 'IT & Security',
-    agent: 'IT Agent',
-    icon: <Shield className="w-6 h-6" />,
-    metric: '60%', metricLabel: 'ticket resolution time',
-    grad: 'linear-gradient(135deg,#475569,#1e40af)',
+    role: 'Built to scale',
+    agent: 'Large databases',
+    icon: <Gauge className="w-6 h-6" />,
+    metric: 'sec', metricLabel: 'on big schemas',
+    grad: 'linear-gradient(135deg,#4b5563,#1f2937)',
     bg: '#f8fafc', border: '#e2e8f0',
-    description: 'Automate IT service requests, monitor system health, enforce security policies and get instant answers on access, compliance and audit trails.',
-    capabilities: ['Auto-triage service tickets', 'Access & compliance auditing', 'Security policy enforcement'],
+    description: 'A persistent schema catalog and per-query table retrieval keep answers fast and accurate on databases with hundreds of tables and millions of rows.',
+    capabilities: ['Schema catalog + smart table retrieval', 'Relevant tables picked per question', 'Tiered by plan, from small DBs to enterprise'],
   },
 ];
 
@@ -69,22 +69,22 @@ const FeaturesSection: React.FC = () => {
 
   return (
     <section className="py-16 relative overflow-hidden" style={{ background: '#f8fafc' }}>
-      <div className="absolute top-0 inset-x-0 h-px" style={{ background: 'linear-gradient(90deg,transparent,#bfdbfe,transparent)' }} />
+      <div className="absolute top-0 inset-x-0 h-px" style={{ background: 'linear-gradient(90deg,transparent,#ddd6fe,transparent)' }} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-16">
           <span className="inline-block px-4 py-1.5 rounded-full text-sm font-semibold mb-5 text-purple-700" style={{ background: '#f3e8ff' }}>
-            Role-Based Intelligence
+            What it does
           </span>
           <h2 className="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
-            A Dedicated AI Agent<br />
-            <span style={{ background: 'linear-gradient(90deg,#3b82f6,#8b5cf6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-              for Every Role
+            Everything you need to<br />
+            <span style={{ background: 'linear-gradient(90deg,#8b5cf6,#6d28d9)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
+              trust your data
             </span>
           </h2>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto">
-            Not a generic chatbot. FlexiAnalyse deploys specialised AI agents trained for each function, so every employee works like an expert.
+            Not a generic chatbot. A database agent that writes real SQL, shows its work, and keeps your data safe, wherever it lives.
           </p>
         </div>
 
@@ -150,9 +150,9 @@ const FeaturesSection: React.FC = () => {
 
         {/* Bottom note */}
         <p className="text-center text-sm text-gray-400 mt-12">
-          Need a custom agent?{' '}
+          Works with PostgreSQL, MySQL, SQL Server, Oracle and more.{' '}
           <span className="text-purple-600 font-semibold cursor-pointer hover:underline">
-            Build your own with our Agent Builder →
+            See how it connects →
           </span>
         </p>
       </div>
