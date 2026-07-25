@@ -615,6 +615,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [roles, setRoles] = useState<{ id: string; organization_id: string; name: string }[]>([]);
   const [users, setUsers] = useState<{ id: string; email: string; full_name: string; role_id: string }[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  const [orgPlan, setOrgPlan] = useState<{ plan: string; name: string } | null>(null);
   const [orgName, setOrgName] = useState('');
   const [deptName, setDeptName] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -718,6 +719,18 @@ const Sidebar: React.FC<SidebarProps> = ({
       authFetch(`${API}/api/v2/departments?organization_id=${selectedOrgId}`).then(r => r.json()).then(d => setDepartments(d.data || [])).catch(() => {});
     }
   }, [selectedOrgId]);
+
+  // Organisation plan shown in the Account panel. Without an org header the
+  // backend falls back to the user's default org, so it works before any org is picked.
+  useEffect(() => {
+    if (!isAuthenticated) { setOrgPlan(null); return; }
+    const headers: Record<string, string> = {};
+    if (selectedOrgId) headers['X-Organization-Id'] = selectedOrgId;
+    authFetch(`${API}/api/v2/plan`, { headers })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d?.plan) setOrgPlan({ plan: d.plan, name: d.name || d.plan }); })
+      .catch(() => {});
+  }, [API, selectedOrgId, isAuthenticated]);
   useEffect(() => {
     if (error) {
       const timer = setTimeout(() => {
@@ -2528,8 +2541,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-gray-800 truncate">{user.name || user.email}</div>
                   {user.name && <div className="text-xs text-gray-500 truncate">{user.email}</div>}
-                  {user.plan && (
-                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-semibold capitalize">{user.plan}</span>
+                  {(orgPlan?.name || user.plan) && (
+                    <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-semibold capitalize">{orgPlan?.name || user.plan}</span>
                   )}
                 </div>
               </div>
