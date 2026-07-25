@@ -291,6 +291,8 @@ export const esES = {
   'suggest.analysing': 'Analizando tu base de datos…',
   'suggest.diagramTooltip': 'Mostrar el diagrama del esquema de la base de datos',
   'suggest.diagram': 'Diagrama de la base de datos',
+  'suggest.reportTooltip': 'Mostrar el informe de estado de la base de datos',
+  'suggest.report': 'Informe de la base de datos',
 
   // SearchProgress
   'progress.understand': 'Entendiendo tu pregunta',

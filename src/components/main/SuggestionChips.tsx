@@ -12,10 +12,11 @@ interface SuggestionChipsProps {
   loading?: boolean;
   onPick: (q: string) => void;
   onShowDiagram: () => void;
+  onShowReport?: () => void;
   compact?: boolean;
 }
 
-const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, onPick, onShowDiagram, compact }) => {
+const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, onPick, onShowDiagram, onShowReport, compact }) => {
   const { t } = useLanguage();
   if (loading && questions.length === 0) {
     return (
@@ -41,6 +42,18 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
           {q}
         </button>
       ))}
+      {onShowReport && (
+        <button
+          type="button"
+          onClick={onShowReport}
+          className={`flex-shrink-0 whitespace-nowrap rounded-full inline-flex items-center gap-1.5 text-white transition-colors ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`}
+          style={{ background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)' }}
+          title={t('suggest.reportTooltip')}
+        >
+          <i className={`bi bi-clipboard-data ${compact ? 'text-[10px]' : 'text-xs'}`} />
+          {t('suggest.report')}
+        </button>
+      )}
       <button
         type="button"
         onClick={onShowDiagram}

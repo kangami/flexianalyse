@@ -9,6 +9,7 @@ import DbChatPanel, { DbTurn } from './DbChatPanel';
 import ScopeSelector, { ScopeConnector } from './ScopeSelector';
 import SuggestionChips from './SuggestionChips';
 import SchemaFlow, { DiagramTable } from './SchemaFlow';
+import DatabaseReport, { ReportData } from './DatabaseReport';
 
 interface AppHomeComponentProps {
     onQuerySubmit: (query: string, mode: 'online' | 'local') => void;
@@ -137,6 +138,17 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [showDiagram, setShowDiagram] = useState(false);
     const [hideAudit, setHideAudit] = useState(true);
     const [diagramConnectorId, setDiagramConnectorId] = useState<string | null>(null);
+
+    // Database Report — default view once a database is connected.
+    const [showReport, setShowReport] = useState(false);
+    const [report, setReport] = useState<ReportData | null>(null);
+    const [reportStatus, setReportStatus] = useState<string>('none');
+    const [reportGeneratedAt, setReportGeneratedAt] = useState<string | null>(null);
+    const [reportGenerating, setReportGenerating] = useState(false);
+    const reportAutoOpened = useRef(false);
+
+    const openDiagram = useCallback(() => { setShowReport(false); setShowDiagram(true); }, []);
+    const openReport = useCallback(() => { setShowDiagram(false); setShowReport(true); }, []);
     // Click-a-table detail panel (description + null/non-null stats).
     interface TableColStat { name: string; type: string; pk: boolean; non_null: number | null; null_count: number | null }
     interface TableDetail { table: string; description: string; column_count: number; row_count: number | null; row_estimated?: boolean; stats_skipped?: boolean; columns: TableColStat[] }
@@ -195,6 +207,62 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         } catch { /* keep optimistic state */ }
         finally { setInsightsLoading(false); }
     }, [diagramConnectorId, account?.organization_id, searchScope]);
+
+    // ── Database Report: fetch (+ poll while generating) and generate on demand ──
+    const fetchReport = useCallback(async (): Promise<string | null> => {
+        if (!account?.organization_id) return null;
+        const q = searchScope ? `?connector_id=${encodeURIComponent(searchScope)}` : '';
+        try {
+            const r = await authFetch(`${API_BASE}/api/mcp/db-report${q}`, {
+                headers: { 'X-Organization-Id': account.organization_id },
+            });
+            const d = await r.json();
+            const st = (d.status as string) || 'none';
+            setReportStatus(st);
+            setReport((d.data as ReportData) || null);
+            setReportGeneratedAt((d.generated_at as string) || null);
+            if (st !== 'pending' && st !== 'running') setReportGenerating(false);
+            return st;
+        } catch { return null; }
+    }, [account?.organization_id, searchScope]);
+
+    // Load the report for the current scope; keep polling while it's building.
+    useEffect(() => {
+        let alive = true; let timer: ReturnType<typeof setTimeout> | undefined;
+        const tick = async () => {
+            const st = await fetchReport();
+            if (!alive) return;
+            if (st === 'pending' || st === 'running') timer = setTimeout(tick, 3000);
+        };
+        tick();
+        return () => { alive = false; if (timer) clearTimeout(timer); };
+    }, [fetchReport]);
+
+    const generateReport = useCallback(async () => {
+        if (!account?.organization_id) return;
+        setReportGenerating(true); setReportStatus('running');
+        try {
+            await authFetch(`${API_BASE}/api/mcp/db-report/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Organization-Id': account.organization_id },
+                body: JSON.stringify({ connector_id: searchScope }),
+            });
+            const poll = async () => {
+                const st = await fetchReport();
+                if (st === 'pending' || st === 'running') setTimeout(poll, 3000);
+            };
+            setTimeout(poll, 1500);
+        } catch { setReportGenerating(false); }
+    }, [account?.organization_id, searchScope, fetchReport]);
+
+    // As soon as a database is connected, land on the report (once).
+    useEffect(() => {
+        if (reportAutoOpened.current) return;
+        if (connectors.length > 0 && conversation.length === 0 && !enterpriseLoading) {
+            reportAutoOpened.current = true;
+            setShowReport(true);
+        }
+    }, [connectors.length, conversation.length, enterpriseLoading]);
 
     // Persisted conversation history for the current org (titles + order).
     const loadHistory = useCallback(() => {
@@ -505,6 +573,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setTableRows([]);
         setTableSql('');
         setQuery('');
+        setShowDiagram(false);
+        setShowReport(true);   // land back on the database report
     };
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -630,12 +700,23 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     // Once a search is submitted (or the schema diagram is opened), swap the
     // centered hero for the two-pane view: result grid / ER diagram on the LEFT,
     // running discussion on the RIGHT.
-    if (conversation.length > 0 || enterpriseLoading || showDiagram) {
+    const reportView = showReport && conversation.length === 0 && !enterpriseLoading;
+    if (conversation.length > 0 || enterpriseLoading || showDiagram || showReport) {
         return (
             <div className="h-full w-full flex overflow-hidden">
-                {/* LEFT: schema diagram or DBeaver-style grid — desktop only (needs width) */}
+                {/* LEFT: database report / schema diagram / result grid — desktop only (needs width) */}
                 <div className="hidden md:flex flex-col flex-1 min-w-0 border-r border-gray-200 h-full bg-white">
-                    {showDiagram ? (
+                    {reportView ? (
+                        <DatabaseReport
+                            data={report}
+                            status={reportStatus}
+                            generatedAt={reportGeneratedAt}
+                            generating={reportGenerating}
+                            onGenerate={generateReport}
+                            onAsk={() => setShowReport(false)}
+                            onDiagram={openDiagram}
+                        />
+                    ) : showDiagram ? (
                         <>
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
                                 <span className="text-xs font-semibold text-gray-700">{t('home.diagram.title')}</span>
@@ -653,6 +734,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                                         />
                                         {t('home.diagram.hideAudit')}
                                     </label>
+                                    <button onClick={() => { setTableDetail(null); openReport(); }} className="text-[11px] text-purple-600 font-medium hover:underline">{t('suggest.report')}</button>
                                     <button onClick={() => { setShowDiagram(false); setTableDetail(null); }} className="text-[11px] text-gray-500 hover:text-purple-600">{t('home.diagram.backToResults')}</button>
                                 </div>
                             </div>
@@ -752,7 +834,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         onScopeChange={setSearchScope}
                         questions={insights.questions}
                         insightsLoading={insightsLoading}
-                        onShowDiagram={() => setShowDiagram(true)}
+                        onShowDiagram={openDiagram}
                         history={history}
                         activeConversationId={conversationId}
                         onOpenConversation={openConversation}
@@ -922,7 +1004,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             questions={insights.questions}
                             loading={insightsLoading}
                             onPick={runSearch}
-                            onShowDiagram={() => setShowDiagram(true)}
+                            onShowReport={openReport}
+                            onShowDiagram={openDiagram}
                         />
                     </div>
 

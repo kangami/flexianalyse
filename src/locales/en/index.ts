@@ -289,6 +289,8 @@ export const enUS = {
   'suggest.analysing': 'Analysing your database…',
   'suggest.diagramTooltip': 'Show the database schema diagram',
   'suggest.diagram': 'Database diagram',
+  'suggest.reportTooltip': 'Show the database health report',
+  'suggest.report': 'Database report',
 
   // SearchProgress
   'progress.understand': 'Understanding your question',

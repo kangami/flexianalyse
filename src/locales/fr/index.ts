@@ -291,6 +291,8 @@ export const frFR = {
   'suggest.analysing': 'Analyse de votre base de données…',
   'suggest.diagramTooltip': 'Afficher le diagramme du schéma de la base',
   'suggest.diagram': 'Diagramme de la base',
+  'suggest.reportTooltip': 'Afficher le rapport de santé de la base',
+  'suggest.report': 'Rapport de la base',
 
   // SearchProgress
   'progress.understand': 'Compréhension de votre question',
