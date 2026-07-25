@@ -927,7 +927,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                     </div>
 
                     {/* Integrated textarea with controls - Modern Stylish Design */}
-                    <div className="group relative mx-auto w-full max-w-2xl rounded-2xl backdrop-blur-xl shadow-[0_2px_12px_-2px_rgba(0,0,0,0.12)] overflow-hidden transition-all duration-300 border"
+                    <div className="group relative mx-auto w-full max-w-2xl rounded-2xl backdrop-blur-xl shadow-[0_2px_12px_-2px_rgba(0,0,0,0.12)] transition-all duration-300 border"
                          style={{ background: tc.formBg, borderColor: tc.formBorder }}>
                         {/* Subtle gradient accent on top */}
                         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-400/50 to-transparent" />
@@ -954,7 +954,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         />
 
                         {/* Controls bar inside the textarea container */}
-                        <div className="border-t px-3 py-2 flex flex-wrap items-center justify-between gap-2" style={{ background: tc.ctrlBg, borderColor: tc.ctrlBorder }}>
+                        <div className="border-t px-3 py-2 flex flex-wrap items-center justify-between gap-2 rounded-b-2xl" style={{ background: tc.ctrlBg, borderColor: tc.ctrlBorder }}>
                             {/* Left controls */}
                             <div className="flex flex-wrap gap-2">
                                 {/* Search perimeter — which database (or all context) to search */}
