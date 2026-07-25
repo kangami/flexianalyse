@@ -217,12 +217,21 @@ Generated SQL:
 Columns: {state.get('columns')}
 Result: {len(rows)} row(s). Sample: {sample}
 
-Does this SQL correctly and completely answer the question? Verify:
-- Right tables and FK join path (NEVER joins unrelated tables on id = id).
-- Correct filters — the column and value match the question's intent and time range.
-- Correct aggregation / grouping / ordering.
-- The result is plausible (not empty or all-null when data is expected; figures sane).
-Be strict: if anything is off, it is NOT valid.
+This SQL ALREADY EXECUTED SUCCESSFULLY and returned the result above — so it is
+syntactically valid. Do NOT judge SQL legality or style. In particular do NOT flag:
+selecting columns that are functionally dependent on a GROUP BY primary key
+(valid in PostgreSQL), CTEs, aliases, or formatting.
+
+Judge ONLY whether it answers the question in MEANING:
+- Right entities: the tables/columns match what the question asks about.
+- Right relationships: joins follow real foreign keys (not two unrelated tables on
+  id = id).
+- Right filters: the column and value match the question's intent and time range.
+- Right aggregation / grouping / ordering for what was asked.
+- The result is plausible for the question (not obviously the wrong thing).
+
+Default to valid. Mark it INVALID only if there is a concrete SEMANTIC error that
+would give the user a wrong answer — and say exactly what.
 Return JSON exactly: {{"valid": true/false, "reason": "...", "fix_hint": "..."}}"""
     try:
         resp = get_openai_client().chat.completions.create(
