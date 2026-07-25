@@ -228,8 +228,11 @@ def run_search_stream(
         # SQL-first: try the database. If it answers, DON'T also run document
         # search — blending unrelated document chunks into a DB answer made the
         # model contradict a correct SQL result and cite the wrong connector.
+        # "Answered" includes a valid query that returned 0 rows (no match is an
+        # answer), so we don't fall back to docs and mislabel it "no information".
         state = sql_query(state)
-        if state.get("sql_rows"):
+        sql_answered = bool(state.get("generated_sql")) and not state.get("sql_error")
+        if sql_answered:
             state = {**state, "kg_nodes": [], "chunks": [], "reranked_chunks": []}
         else:
             state = retrieve(state)

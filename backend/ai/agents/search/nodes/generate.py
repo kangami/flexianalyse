@@ -51,10 +51,13 @@ def assemble_context(state: SearchState) -> SearchState:
 
     sql_rows = state.get("sql_rows", [])
     has_sql  = bool(sql_rows)
+    # A query that was generated and ran without error "answered" — even with 0
+    # rows (that is itself the answer: nothing matches). Don't blend documents in.
+    sql_answered = bool(state.get("generated_sql")) and not state.get("sql_error")
 
     # KG context — structural information (skipped when SQL answered)
     kg_nodes = state.get("kg_nodes", [])
-    if kg_nodes and not has_sql:
+    if kg_nodes and not sql_answered:
         parts.append("## Structural Context (Knowledge Graph)")
         for node in kg_nodes[:5]:
             parts.append(
@@ -64,7 +67,7 @@ def assemble_context(state: SearchState) -> SearchState:
 
     # Chunk context — actual content (skipped when SQL answered)
     reranked = state.get("reranked_chunks", [])
-    if reranked and not has_sql:
+    if reranked and not sql_answered:
         parts.append("\n## Document/Data Content")
         for chunk in reranked:
             title    = chunk.get("resource_title", "Unknown")
@@ -116,6 +119,18 @@ def assemble_context(state: SearchState) -> SearchState:
         parts.append(
             f"\n## Live Database Query\n(No data returned — {state['sql_error']})"
         )
+    elif sql_answered:
+        # The query ran fine but matched nothing — that IS the answer.
+        parts.append("\n## Live Database Query Result")
+        parts.append(f"Query: `{state.get('generated_sql', '')}`")
+        parts.append(
+            "The query executed successfully and returned 0 rows: NO records in the "
+            "database match the question's criteria. Tell the user plainly that no "
+            "matching records were found, naming the specific criteria they asked for "
+            "(e.g. the period, entity or filter). Do NOT say you found no information "
+            "or that the query failed — it ran correctly; there is simply no such data."
+        )
+        sources.append({"title": "Live SQL query", "type": "sql", "connector": "sql", "score": 10})
 
     context = "\n".join(parts)
 
