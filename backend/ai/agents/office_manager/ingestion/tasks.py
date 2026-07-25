@@ -974,7 +974,76 @@ def start_ingestion(connector_id: str, org_id: str) -> str | None:
 def crawl_connector_schema_task(self, connector_id: str, org_id: str):
     """Crawl + catalogue le schéma d'un connecteur SQL (tâche de fond)."""
     from services.schema_catalog import crawl_connector_schema
-    return crawl_connector_schema(connector_id, org_id)
+    result = crawl_connector_schema(connector_id, org_id)
+    # Chain the Database Report off a successful crawl (fresh catalogue → fresh report).
+    if result.get("status") == "done":
+        try:
+            _mark_report_pending(connector_id, org_id)
+            generate_connector_report_task.delay(str(connector_id), str(org_id))
+        except Exception as e:
+            logger.warning("Could not chain report generation for %s: %s", connector_id, e)
+    return result
+
+
+def _mark_report_pending(connector_id: str, org_id: str) -> None:
+    from models.connector_report import ConnectorReport
+    rep = ConnectorReport.query.filter_by(connector_id=UUID(str(connector_id))).first()
+    if not rep:
+        rep = ConnectorReport(
+            connector_id=UUID(str(connector_id)),
+            organization_id=UUID(str(org_id)),
+            status="pending",
+        )
+        db.session.add(rep)
+    else:
+        rep.status = "pending"
+    db.session.commit()
+
+
+@celery_app.task(bind=True, max_retries=1)
+def generate_connector_report_task(self, connector_id: str, org_id: str):
+    """Build + cache the Database Report for a SQL connector (background)."""
+    from datetime import datetime, timezone
+    from models.connector_report import ConnectorReport
+    from services.report_builder import build_connector_report
+
+    rep = ConnectorReport.query.filter_by(connector_id=UUID(str(connector_id))).first()
+    if rep:
+        rep.status = "running"
+        db.session.commit()
+    try:
+        data = build_connector_report(str(connector_id), str(org_id))
+        rep = ConnectorReport.query.filter_by(connector_id=UUID(str(connector_id))).first()
+        if not rep:
+            rep = ConnectorReport(connector_id=UUID(str(connector_id)),
+                                  organization_id=UUID(str(org_id)))
+            db.session.add(rep)
+        rep.data = data
+        rep.status = "done"
+        rep.generated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        logger.info("Database report generated for connector %s", connector_id)
+        return {"status": "done"}
+    except Exception as e:
+        db.session.rollback()
+        rep = ConnectorReport.query.filter_by(connector_id=UUID(str(connector_id))).first()
+        if rep:
+            rep.status = "failed"
+            db.session.commit()
+        logger.error("Report generation failed for %s: %r", connector_id, e)
+        return {"status": "failed", "reason": str(e)}
+
+
+def start_report_generation(connector_id: str, org_id: str) -> str | None:
+    """Enqueue a Database Report build. Never raises (safe from an HTTP handler)."""
+    try:
+        _mark_report_pending(connector_id, org_id)
+        task = generate_connector_report_task.delay(str(connector_id), str(org_id))
+        logger.info("Report generation enqueued for connector %s (task %s)", connector_id, task.id)
+        return task.id
+    except Exception as e:
+        logger.error("Failed to enqueue report for %s: %s", connector_id, e, exc_info=True)
+        return None
 
 
 def start_schema_crawl(connector_id: str, org_id: str) -> str | None:

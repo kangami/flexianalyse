@@ -113,3 +113,53 @@ class SchemaGraph:
         edges, on = self.connect(targets)
         conds = [f"{u}.{uc} = {v}.{vc}" for (u, v, pairs) in edges for (uc, vc) in pairs]
         return "; ".join(conds), on
+
+    # ── structural analysis (for the database report) ────────────────────────
+    def referenced_by(self) -> dict:
+        """table -> number of DISTINCT other tables whose FK points at it (in-degree).
+        This is the "referenced by N tables" of the critical-tables ranking."""
+        counts = {name: set() for name in self._cols}
+        for child, fks in self._fks.items():
+            for fk in fks:
+                parent = fk.get("referred_table")
+                if parent in counts and parent != child:
+                    counts[parent].add(child)
+        return {name: len(refs) for name, refs in counts.items()}
+
+    def fk_out_count(self) -> dict:
+        """table -> number of foreign keys it declares (out-degree)."""
+        return {name: len(fks) for name, fks in self._fks.items()}
+
+    def orphans(self) -> list:
+        """Tables with no foreign key in or out (isolated in the graph)."""
+        connected = set(self._adj)
+        return [t for t in self._cols if t not in connected]
+
+    def junctions(self) -> list:
+        """Pure link tables: >=2 FKs and few other columns → many-to-many bridges."""
+        out = []
+        for name, fks in self._fks.items():
+            ncols = len(self._cols.get(name, []))
+            if len(fks) >= 2 and ncols <= len(fks) + 2:
+                out.append(name)
+        return out
+
+    def components(self) -> list:
+        """Connected components (undirected) → rough business domains. Returns a list
+        of table-name lists, largest first."""
+        seen, comps = set(), []
+        for start in self._cols:
+            if start in seen:
+                continue
+            comp, q = [], deque([start])
+            seen.add(start)
+            while q:
+                u = q.popleft()
+                comp.append(u)
+                for v, _ in self._adj.get(u, []):
+                    if v not in seen:
+                        seen.add(v)
+                        q.append(v)
+            comps.append(comp)
+        comps.sort(key=len, reverse=True)
+        return comps

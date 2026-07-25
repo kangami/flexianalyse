@@ -65,6 +65,8 @@ def dispatch_tool(tools: "SQLTools", tool_name: str, params: dict) -> dict:
         return tools.get_table_row_count(params.get("table_name", ""))
     if tool_name == "get_table_indexes":
         return tools.get_table_indexes(params.get("table_name", ""))
+    if tool_name == "database_stats":
+        return tools.database_stats()
     return {"status": "error", "message": f"Tool '{tool_name}' not found"}
 
 
@@ -227,6 +229,124 @@ class SQLTools:
         except Exception as e:
             logger.warning("row-estimate query failed (%s): %s", d, e)
             return {}
+
+    def _scalar(self, conn, sql: str):
+        """Run a single-value query; return the value or None (best-effort, so one
+        unsupported metric never breaks the whole stats collection)."""
+        try:
+            row = conn.execute(text(sql)).first()
+            return None if row is None else row[0]
+        except Exception as e:
+            logger.debug("stat query failed (%s): %s", self.dialect, e)
+            return None
+
+    def database_stats(self) -> dict[str, Any]:
+        """Catalog-level metrics for the Database Report — counts + size + comment
+        coverage + FK-without-index. Per-dialect; unavailable metrics come back as
+        None (n/a) rather than a fabricated 0. Instant: no table scans."""
+        d = self.dialect
+        # Per-dialect scalar queries. Missing key = the concept doesn't exist for
+        # that engine → the metric stays None.
+        Q = {
+            "postgresql": {
+                "version": "SELECT current_setting('server_version')",
+                "schemas": "SELECT count(*) FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog','information_schema') AND schema_name NOT LIKE 'pg_%'",
+                "tables": "SELECT count(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')",
+                "columns": "SELECT count(*) FROM information_schema.columns WHERE table_schema NOT IN ('pg_catalog','information_schema')",
+                "views": "SELECT count(*) FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog','information_schema')",
+                "materialized_views": "SELECT count(*) FROM pg_matviews",
+                "sequences": "SELECT count(*) FROM information_schema.sequences",
+                "functions": "SELECT count(*) FROM information_schema.routines WHERE routine_type='FUNCTION' AND specific_schema NOT IN ('pg_catalog','information_schema')",
+                "procedures": "SELECT count(*) FROM information_schema.routines WHERE routine_type='PROCEDURE' AND specific_schema NOT IN ('pg_catalog','information_schema')",
+                "triggers": "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal",
+                "foreign_keys": "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY' AND table_schema NOT IN ('pg_catalog','information_schema')",
+                "indexes": "SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema')",
+                "db_size_bytes": "SELECT pg_database_size(current_database())",
+                "documented_tables": "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND obj_description(c.oid,'pg_class') IS NOT NULL",
+                "documented_columns": "SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND col_description(c.oid,a.attnum) IS NOT NULL",
+                "fk_without_index": (
+                    "SELECT count(*) FROM pg_constraint c WHERE c.contype='f' AND NOT EXISTS ("
+                    "  SELECT 1 FROM pg_index i WHERE i.indrelid=c.conrelid "
+                    "  AND (i.indkey::int2[])[0:array_length(c.conkey,1)-1] @> c.conkey "
+                    "  AND c.conkey @> (i.indkey::int2[])[0:array_length(c.conkey,1)-1])"
+                ),
+            },
+            "mysql": {
+                "version": "SELECT version()",
+                "schemas": "SELECT count(*) FROM information_schema.schemata WHERE schema_name = DATABASE()",
+                "tables": "SELECT count(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema = DATABASE()",
+                "columns": "SELECT count(*) FROM information_schema.columns WHERE table_schema = DATABASE()",
+                "views": "SELECT count(*) FROM information_schema.views WHERE table_schema = DATABASE()",
+                "functions": "SELECT count(*) FROM information_schema.routines WHERE routine_type='FUNCTION' AND routine_schema = DATABASE()",
+                "procedures": "SELECT count(*) FROM information_schema.routines WHERE routine_type='PROCEDURE' AND routine_schema = DATABASE()",
+                "triggers": "SELECT count(*) FROM information_schema.triggers WHERE trigger_schema = DATABASE()",
+                "foreign_keys": "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY' AND table_schema = DATABASE()",
+                "indexes": "SELECT count(DISTINCT table_name, index_name) FROM information_schema.statistics WHERE table_schema = DATABASE()",
+                "db_size_bytes": "SELECT COALESCE(SUM(data_length+index_length),0) FROM information_schema.tables WHERE table_schema = DATABASE()",
+                "documented_tables": "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_comment <> ''",
+                "documented_columns": "SELECT count(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND column_comment <> ''",
+                "fk_without_index": (
+                    "SELECT count(*) FROM information_schema.table_constraints tc "
+                    "WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema = DATABASE() "
+                    "AND NOT EXISTS (SELECT 1 FROM information_schema.key_column_usage k "
+                    "  JOIN information_schema.statistics s ON s.table_schema=k.table_schema "
+                    "   AND s.table_name=k.table_name AND s.column_name=k.column_name AND s.seq_in_index=1 "
+                    "  WHERE k.constraint_name=tc.constraint_name AND k.table_schema=tc.table_schema)"
+                ),
+            },
+            "mssql": {
+                "version": "SELECT CAST(SERVERPROPERTY('ProductVersion') AS varchar(64))",
+                "schemas": "SELECT count(*) FROM sys.schemas WHERE schema_id < 16384",
+                "tables": "SELECT count(*) FROM sys.tables",
+                "columns": "SELECT count(*) FROM sys.columns c JOIN sys.tables t ON t.object_id=c.object_id",
+                "views": "SELECT count(*) FROM sys.views",
+                "sequences": "SELECT count(*) FROM sys.sequences",
+                "functions": "SELECT count(*) FROM sys.objects WHERE type IN ('FN','IF','TF')",
+                "procedures": "SELECT count(*) FROM sys.procedures",
+                "triggers": "SELECT count(*) FROM sys.triggers",
+                "foreign_keys": "SELECT count(*) FROM sys.foreign_keys",
+                "indexes": "SELECT count(*) FROM sys.indexes WHERE index_id > 0 AND is_hypothetical = 0",
+                "db_size_bytes": "SELECT CAST(SUM(size) AS bigint)*8192 FROM sys.database_files",
+                "documented_tables": "SELECT count(*) FROM sys.extended_properties WHERE name='MS_Description' AND minor_id=0 AND class=1",
+                "documented_columns": "SELECT count(*) FROM sys.extended_properties WHERE name='MS_Description' AND minor_id>0 AND class=1",
+            },
+            "oracle": {
+                "version": "SELECT version FROM product_component_version WHERE ROWNUM=1",
+                "schemas": "SELECT 1 FROM dual",
+                "tables": "SELECT count(*) FROM user_tables",
+                "columns": "SELECT count(*) FROM user_tab_columns",
+                "views": "SELECT count(*) FROM user_views",
+                "materialized_views": "SELECT count(*) FROM user_mviews",
+                "sequences": "SELECT count(*) FROM user_sequences",
+                "functions": "SELECT count(*) FROM user_objects WHERE object_type='FUNCTION'",
+                "procedures": "SELECT count(*) FROM user_objects WHERE object_type='PROCEDURE'",
+                "triggers": "SELECT count(*) FROM user_triggers",
+                "foreign_keys": "SELECT count(*) FROM user_constraints WHERE constraint_type='R'",
+                "indexes": "SELECT count(*) FROM user_indexes",
+                "db_size_bytes": "SELECT SUM(bytes) FROM user_segments",
+                "documented_tables": "SELECT count(*) FROM user_tab_comments WHERE comments IS NOT NULL",
+                "documented_columns": "SELECT count(*) FROM user_col_comments WHERE comments IS NOT NULL",
+            },
+        }
+        # mariadb shares MySQL's catalog.
+        queries = Q.get("mysql" if d == "mariadb" else d, {})
+        metric_keys = [
+            "schemas", "tables", "columns", "views", "materialized_views", "sequences",
+            "functions", "procedures", "triggers", "foreign_keys", "indexes",
+            "db_size_bytes", "documented_tables", "documented_columns", "fk_without_index",
+        ]
+        version = None
+        metrics = {k: None for k in metric_keys}
+        try:
+            with self.engine.connect() as conn:
+                version = self._scalar(conn, queries["version"]) if "version" in queries else None
+                for k in metric_keys:
+                    if k in queries:
+                        v = self._scalar(conn, queries[k])
+                        metrics[k] = int(v) if v is not None else None
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+        return {"status": "success", "engine": d, "version": (str(version) if version else None), "metrics": metrics}
 
     def show_full_schema(self, limit: int | None = None) -> dict[str, Any]:
         """Every table's columns + PK + FK.

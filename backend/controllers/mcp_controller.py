@@ -868,6 +868,46 @@ def db_insights():
         return jsonify({'error': str(e)}), 500
 
 
+@mcp_bp.route('/db-report', methods=['GET'])
+def db_report():
+    """Return the cached Database Report for the org's SQL connector (+ status)."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    from ai.agents.search.nodes.sql_query import _resolve_sql_connector
+    from models.connector_report import ConnectorReport
+    connector = _resolve_sql_connector(org_id, request.args.get('connector_id'))
+    if not connector:
+        return jsonify({'status': 'none', 'error': 'No active SQL connector'}), 404
+    rep = ConnectorReport.query.filter_by(connector_id=connector.id).first()
+    if not rep:
+        return jsonify({'status': 'none', 'connector_id': str(connector.id)})
+    return jsonify({
+        'status': rep.status,
+        'connector_id': str(connector.id),
+        'generated_at': rep.generated_at.isoformat() if rep.generated_at else None,
+        'data': rep.data,
+    })
+
+
+@mcp_bp.route('/db-report/generate', methods=['POST'])
+def db_report_generate():
+    """Trigger (re)generation of the Database Report for the org's SQL connector."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    data = request.get_json(silent=True) or {}
+    from ai.agents.search.nodes.sql_query import _resolve_sql_connector
+    from ai.agents.office_manager.ingestion.tasks import start_report_generation
+    connector = _resolve_sql_connector(org_id, data.get('connector_id'))
+    if not connector:
+        return jsonify({'error': 'No active SQL connector'}), 404
+    task_id = start_report_generation(str(connector.id), org_id)
+    if not task_id:
+        return jsonify({'error': 'Failed to start report generation (is the Celery worker running?)'}), 503
+    return jsonify({'status': 'started', 'task_id': task_id, 'connector_id': str(connector.id)})
+
+
 # KNOWLEDGE GRAPH
 # ============================================================================
 @mcp_bp.route('/knowledge-graph/build', methods=['POST'])
