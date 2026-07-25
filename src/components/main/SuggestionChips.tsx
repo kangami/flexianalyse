@@ -18,7 +18,10 @@ interface SuggestionChipsProps {
 
 const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, onPick, onShowDiagram, onShowReport, compact }) => {
   const { t } = useLanguage();
-  if (loading && questions.length === 0) {
+  const hasActions = !!(onShowReport || onShowDiagram);
+  // With no questions and no report/diagram actions, only show the analysing hint.
+  if (questions.length === 0 && !hasActions) {
+    if (!loading) return null;
     return (
       <div className={`flex items-center gap-1.5 text-gray-400 ${compact ? 'text-[10px]' : 'text-[11px]'} px-1 mb-2`}>
         <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
@@ -30,18 +33,12 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
     );
   }
 
-  if (questions.length === 0) return null;
-
   const pill = `flex-shrink-0 whitespace-nowrap rounded-full border border-gray-200 bg-white hover:border-purple-400 hover:bg-purple-50/40 text-gray-700 transition-colors ${compact ? 'px-2.5 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`;
 
   return (
     // Single horizontally-scrollable row — chips never wrap.
     <div className="flex flex-nowrap gap-1.5 mb-2 overflow-x-auto scrollbar-thin pb-1 -mb-1">
-      {questions.slice(0, 4).map((q, i) => (
-        <button key={i} type="button" onClick={() => onPick(q)} className={`${pill} truncate max-w-[240px]`} title={q}>
-          {q}
-        </button>
-      ))}
+      {/* Report + Diagram first for quick access, then the anticipated questions. */}
       {onShowReport && (
         <button
           type="button"
@@ -68,6 +65,11 @@ const SuggestionChips: React.FC<SuggestionChipsProps> = ({ questions, loading, o
         </svg>
         {t('suggest.diagram')}
       </button>
+      {questions.slice(0, 4).map((q, i) => (
+        <button key={i} type="button" onClick={() => onPick(q)} className={`${pill} truncate max-w-[240px]`} title={q}>
+          {q}
+        </button>
+      ))}
     </div>
   );
 };

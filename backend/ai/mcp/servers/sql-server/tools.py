@@ -248,24 +248,30 @@ class SQLTools:
         # Per-dialect scalar queries. Missing key = the concept doesn't exist for
         # that engine → the metric stays None.
         Q = {
+            # Scoped to current_schema() so the counts match what the crawl catalogues
+            # (which reflects the default schema). A DB with many schemas otherwise
+            # reports far more tables than the analysis actually covers.
             "postgresql": {
                 "version": "SELECT current_setting('server_version')",
                 "schemas": "SELECT count(*) FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog','information_schema') AND schema_name NOT LIKE 'pg_%'",
-                "tables": "SELECT count(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema NOT IN ('pg_catalog','information_schema')",
-                "columns": "SELECT count(*) FROM information_schema.columns WHERE table_schema NOT IN ('pg_catalog','information_schema')",
-                "views": "SELECT count(*) FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog','information_schema')",
-                "materialized_views": "SELECT count(*) FROM pg_matviews",
-                "sequences": "SELECT count(*) FROM information_schema.sequences",
-                "functions": "SELECT count(*) FROM information_schema.routines WHERE routine_type='FUNCTION' AND specific_schema NOT IN ('pg_catalog','information_schema')",
-                "procedures": "SELECT count(*) FROM information_schema.routines WHERE routine_type='PROCEDURE' AND specific_schema NOT IN ('pg_catalog','information_schema')",
-                "triggers": "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal",
-                "foreign_keys": "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY' AND table_schema NOT IN ('pg_catalog','information_schema')",
-                "indexes": "SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog','information_schema')",
+                "tables": "SELECT count(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema = current_schema()",
+                "columns": "SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema()",
+                "views": "SELECT count(*) FROM information_schema.views WHERE table_schema = current_schema()",
+                "materialized_views": "SELECT count(*) FROM pg_matviews WHERE schemaname = current_schema()",
+                "sequences": "SELECT count(*) FROM information_schema.sequences WHERE sequence_schema = current_schema()",
+                "functions": "SELECT count(*) FROM information_schema.routines WHERE routine_type='FUNCTION' AND specific_schema = current_schema()",
+                "procedures": "SELECT count(*) FROM information_schema.routines WHERE routine_type='PROCEDURE' AND specific_schema = current_schema()",
+                "triggers": "SELECT count(*) FROM pg_trigger tg JOIN pg_class c ON c.oid=tg.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT tg.tgisinternal AND n.nspname = current_schema()",
+                "foreign_keys": "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY' AND table_schema = current_schema()",
+                "indexes": "SELECT count(*) FROM pg_indexes WHERE schemaname = current_schema()",
                 "db_size_bytes": "SELECT pg_database_size(current_database())",
-                "documented_tables": "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND obj_description(c.oid,'pg_class') IS NOT NULL",
-                "documented_columns": "SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_%' AND col_description(c.oid,a.attnum) IS NOT NULL",
+                "documented_tables": "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND n.nspname = current_schema() AND obj_description(c.oid,'pg_class') IS NOT NULL",
+                "documented_columns": "SELECT count(*) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped AND n.nspname = current_schema() AND col_description(c.oid,a.attnum) IS NOT NULL",
                 "fk_without_index": (
-                    "SELECT count(*) FROM pg_constraint c WHERE c.contype='f' AND NOT EXISTS ("
+                    "SELECT count(*) FROM pg_constraint c "
+                    "JOIN pg_class rel ON rel.oid=c.conrelid "
+                    "JOIN pg_namespace n ON n.oid=rel.relnamespace "
+                    "WHERE c.contype='f' AND n.nspname = current_schema() AND NOT EXISTS ("
                     "  SELECT 1 FROM pg_index i WHERE i.indrelid=c.conrelid "
                     "  AND (i.indkey::int2[])[0:array_length(c.conkey,1)-1] @> c.conkey "
                     "  AND c.conkey @> (i.indkey::int2[])[0:array_length(c.conkey,1)-1])"
