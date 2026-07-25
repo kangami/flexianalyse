@@ -17,6 +17,7 @@ the streaming path get validated results. Only a query that survives the review
 (or the best effort after the retry budget, flagged `uncertain`) reaches the user.
 """
 import os
+import re
 import json
 import logging
 from typing import TypedDict, Optional
@@ -26,6 +27,53 @@ from langgraph.graph import StateGraph, END
 from ai.observability import get_openai_client
 
 logger = logging.getLogger(__name__)
+
+# Errors that mean the SQL referenced a column/relation not in the schema — the
+# signal to re-teach the model the real columns + join path from the graph.
+_SCHEMA_ERR_RE = re.compile(
+    r"does not exist|unknown column|no such column|invalid column|"
+    r"no such table|doesn't exist|unknown table",
+    re.IGNORECASE,
+)
+
+
+def _targets_from_text(text: str, known: list) -> list:
+    """Table names from `known` that appear as whole words in `text` (the plan),
+    in order of first appearance. These are the tables the query needs to connect."""
+    low = (text or "").lower()
+    found = []
+    for name in known:
+        if name and re.search(rf"(?<![\w]){re.escape(name.lower())}(?![\w])", low):
+            found.append(name)
+    return found
+
+
+def _tables_in_sql(sql: str, known: set) -> list:
+    """Known table names referenced after FROM/JOIN in the SQL (base name, no alias)."""
+    out, seen = [], set()
+    for m in re.finditer(r"(?is)\b(?:from|join)\s+([a-zA-Z_][\w]*)", sql or ""):
+        t = m.group(1)
+        if t in known and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+def _schema_hint_for_error(msg: str, sql: str, graph) -> str:
+    """On a missing-column/relation error, hand back the real columns + FK of the
+    tables the query used, plus the only valid join path between them."""
+    if graph is None or not _SCHEMA_ERR_RE.search(msg or ""):
+        return ""
+    tables = _tables_in_sql(sql, set(graph.tables()))
+    if not tables:
+        return ""
+    lines = [graph.table_line(t) for t in tables]
+    path, _ = graph.render_join_path(tables)
+    hint = ("Here is the REAL schema for the tables you used (use only these columns "
+            "and foreign keys):\n" + "\n".join(lines))
+    if path:
+        hint += f"\nThe ONLY valid join path between them is: {path}"
+    return hint
 
 MAX_SQL_ATTEMPTS = int(os.getenv("SQL_REACT_MAX_ATTEMPTS", "3"))
 PLAN_MODEL       = os.getenv("SQL_PLAN_MODEL", "gpt-4o-mini")
@@ -40,8 +88,10 @@ class SqlReActState(TypedDict):
     database_url: str
     model: str           # SQL generation model (from the org's plan tier)
     max_rows: int
+    schema_graph: object  # SchemaGraph | None — FK graph for join paths / error hints
     # working state
     plan: str
+    join_paths: str      # exact FK join conditions between the tables the question needs
     sql: str
     columns: list
     rows: list
@@ -82,10 +132,31 @@ Max 5 lines."""
             max_tokens=250,
             temperature=0,
         )
-        return {**state, "plan": (resp.choices[0].message.content or "").strip()}
+        plan = (resp.choices[0].message.content or "").strip()
     except Exception as e:
         logger.warning("SQL plan step failed: %s", e)
-        return {**state, "plan": ""}
+        plan = ""
+
+    # Compute the exact FK join path between the tables the plan names, straight
+    # from the schema graph — so the generator follows the real route (e.g. through
+    # `conversation`) instead of inventing a direct foreign key.
+    graph = state.get("schema_graph")
+    join_paths, schema = "", state["db_schema"]
+    if graph is not None:
+        targets = _targets_from_text(plan + " " + state["question"], graph.tables())
+        join_paths, on_tables = graph.render_join_path(targets)
+        # Make sure every table on the path is in the schema text (a bridge table
+        # may have been dropped by retrieval on a large schema).
+        additions = [
+            graph.table_line(t) for t in on_tables
+            if t and not re.search(rf"(?m)^{re.escape(t)}\(", schema)
+        ]
+        if additions:
+            schema = schema + "\n" + "\n".join(additions)
+        if join_paths:
+            logger.info("SQL join path: %s", join_paths)
+
+    return {**state, "plan": plan, "join_paths": join_paths, "db_schema": schema}
 
 
 def _generate_node(state: SqlReActState) -> SqlReActState:
@@ -94,6 +165,7 @@ def _generate_node(state: SqlReActState) -> SqlReActState:
     sql = _generate_sql(
         state["question"], state["db_schema"], state["model"],
         plan=state.get("plan", ""), feedback=state.get("feedback", ""),
+        join_paths=state.get("join_paths", ""),
     )
     return {**state, "sql": sql, "attempts": state.get("attempts", 0) + 1,
             "sql_error": None, "feedback": ""}
@@ -119,12 +191,16 @@ def _execute_node(state: SqlReActState) -> SqlReActState:
             timeout=QUERY_EXEC_TIMEOUT,
         )
     except Exception as e:
+        hint = _schema_hint_for_error(str(e), sql, state.get("schema_graph"))
+        fb = f"The query raised an error: {e}. Fix the SQL."
         return {**state, "rows": [], "columns": [], "sql_error": str(e),
-                "feedback": f"The query raised an error: {e}. Fix the SQL."}
+                "feedback": f"{fb}\n{hint}" if hint else fb}
     if result.get("status") != "success":
         msg = result.get("message", "query execution failed")
+        hint = _schema_hint_for_error(msg, sql, state.get("schema_graph"))
+        fb = f"The query failed: {msg}. Fix the SQL."
         return {**state, "rows": [], "columns": [], "sql_error": msg,
-                "feedback": f"The query failed: {msg}. Fix the SQL."}
+                "feedback": f"{fb}\n{hint}" if hint else fb}
     return {**state, "sql_error": None,
             "columns": result.get("columns", []), "rows": result.get("rows", [])}
 
@@ -224,13 +300,14 @@ def _build_sql_react_graph():
 sql_react_agent = _build_sql_react_graph()
 
 
-def run_sql_react(question: str, schema: str, database_url: str, model: str, max_rows: int) -> dict:
+def run_sql_react(question: str, schema: str, database_url: str, model: str,
+                  max_rows: int, schema_graph=None) -> dict:
     """Run the Plan→Act→Reflect SQL loop; returns the final working state."""
     initial: SqlReActState = {
         "question": question, "db_schema": schema, "database_url": database_url,
-        "model": model, "max_rows": max_rows,
-        "plan": "", "sql": "", "columns": [], "rows": [], "sql_error": None,
-        "feedback": "", "attempts": 0, "valid": False, "verdict_reason": "",
-        "uncertain": False,
+        "model": model, "max_rows": max_rows, "schema_graph": schema_graph,
+        "plan": "", "join_paths": "", "sql": "", "columns": [], "rows": [],
+        "sql_error": None, "feedback": "", "attempts": 0, "valid": False,
+        "verdict_reason": "", "uncertain": False,
     }
     return sql_react_agent.invoke(initial)

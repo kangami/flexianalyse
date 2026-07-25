@@ -117,6 +117,7 @@ def sql_query(state: SearchState) -> SearchState:
             database_url=database_url,
             model=limits["sql_model"],
             max_rows=limits.get("max_rows", MAX_RESULT_ROWS),
+            schema_graph=_build_schema_graph(connector, database_url),
         )
 
         sql = result.get("sql", "")
@@ -388,6 +389,30 @@ def _fetch_schema(database_url: str) -> str:
 # Schema catalog + per-query table retrieval (schema-linking)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _build_schema_graph(connector, database_url: str):
+    """FK graph of the whole schema (from the catalog, or live if not crawled).
+    Powers the join-path hint and the schema-aware error feedback in the ReAct
+    loop. Uses the FULL schema (not the retrieved subset) so paths can traverse
+    bridge tables that weren't selected. Returns None on any failure."""
+    from ai.agents.search.schema_graph import SchemaGraph
+    try:
+        tables = None
+        if connector is not None:
+            from models.connector_schema import ConnectorSchemaTable
+            rows = ConnectorSchemaTable.query.filter_by(connector_id=connector.id).all()
+            if rows:
+                tables = [
+                    {"name": r.table_name, "columns": r.columns or [], "foreign_keys": r.foreign_keys or []}
+                    for r in rows
+                ]
+        if tables is None:
+            tables = fetch_tables_meta(database_url, limit=100000)
+        return SchemaGraph(tables)
+    except Exception as e:
+        logger.warning("Schema graph build failed (%s) — join-path hints disabled", e)
+        return None
+
+
 def _fetch_schema_smart(connector, question: str, database_url: str, limits: dict) -> str:
     """Schema string for the SQL generator, from the persistent catalog when it
     exists, with per-query table retrieval on large schemas.
@@ -555,13 +580,20 @@ def _render_catalog_schema(rows) -> str:
 
 
 def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
-                  plan: str = "", feedback: str = "") -> str:
+                  plan: str = "", feedback: str = "", join_paths: str = "") -> str:
     """Translate a natural-language question into a single read-only SELECT.
 
     `plan` (from the ReAct planner) and `feedback` (a critique/error from a prior
     attempt) steer the generation when present — used by the SQL ReAct sub-agent.
+    `join_paths` are exact FK join conditions computed from the schema graph, so the
+    model joins along the real path instead of inventing a direct foreign key.
     """
     plan_block = f"\nApproach to follow:\n{plan}\n" if plan else ""
+    path_block = (
+        "\nVERIFIED JOIN PATH — these are the ONLY correct join conditions between the\n"
+        "tables this question needs (computed from real foreign keys). Use them exactly;\n"
+        f"do NOT invent any other join:\n{join_paths}\n" if join_paths else ""
+    )
     feedback_block = (
         f"\nIMPORTANT — your previous attempt was rejected. {feedback}\n"
         "Produce a corrected query that fixes this.\n" if feedback else ""
@@ -569,7 +601,7 @@ def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
     prompt = f"""Database schema. Each line is `table(column type, ...)` and may
 end with `[FK: col -> other_table(col)]` describing foreign-key relationships:
 {schema}
-{plan_block}{feedback_block}
+{plan_block}{path_block}{feedback_block}
 User question: {question}
 
 Write a single read-only SQL SELECT query (PostgreSQL dialect) that answers it.
