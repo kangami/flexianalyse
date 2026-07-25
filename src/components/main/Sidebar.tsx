@@ -1472,10 +1472,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       if (!data || data.type !== 'connector_oauth') return;
       if (data.status === 'success') {
         resetConnectorForm();
-        setConnectorMsg({ text: 'Connector authorized — ingestion started!', ok: true });
+        setConnectorMsg({ text: t('sb.msg.authorized'), ok: true });
         loadConnectors();
       } else {
-        setConnectorMsg({ text: `Authorization failed: ${data.reason || 'error'}`, ok: false });
+        setConnectorMsg({ text: t('sb.msg.authFailed', { reason: data.reason || 'error' }), ok: false });
       }
     };
     window.addEventListener('message', onMessage);
@@ -1491,9 +1491,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         headers: { 'X-Organization-Id': selectedOrgId },
       });
       if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
-      setConnectorMsg({ text: 'Ingestion started!', ok: true });
+      setConnectorMsg({ text: t('sb.msg.ingestionStarted'), ok: true });
     } catch (e: any) {
-      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+      setConnectorMsg({ text: t('connector.error', { message: e.message || e }), ok: false });
     } finally {
       setConnectorBusyId(null);
     }
@@ -1510,9 +1510,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         headers: { 'X-Organization-Id': selectedOrgId },
       });
       if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
-      setConnectorMsg({ text: 'Schema re-sync started!', ok: true });
+      setConnectorMsg({ text: t('sb.msg.resyncStarted'), ok: true });
     } catch (e: any) {
-      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+      setConnectorMsg({ text: t('connector.error', { message: e.message || e }), ok: false });
     } finally {
       setConnectorBusyId(null);
     }
@@ -1554,7 +1554,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setConnectorTesting(true);
     setConnectorMsg(null);
     try {
-      if (!selectedOrgId) throw new Error('Select an organisation first (Organisation tab)');
+      if (!selectedOrgId) throw new Error(t('sb.error.selectOrg'));
       const engine = getDbEngine(activeConnectorType);
       const connection: Record<string, string> = {};
       engine?.fields.forEach(f => {
@@ -1562,9 +1562,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (v) connection[f.key] = v;
       });
       if (connectorForm.ssl === 'true') connection.ssl = 'true';
-      if (!connection.host) throw new Error('Host is required');
+      if (!connection.host) throw new Error(t('home.error.hostRequired'));
       const dbKey = activeConnectorType === 'oracle' ? 'service_name' : 'database';
-      if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? 'Service name is required' : 'Database is required');
+      if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? t('home.error.serviceNameRequired') : t('home.error.databaseRequired'));
 
       const r = await authFetch(`${API}/api/v2/connectors/test-connection`, {
         method: 'POST',
@@ -1574,9 +1574,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       const res = await r.json();
       if (res.ok) {
         const n = res.table_count ?? 0;
-        setConnectorMsg({ text: `Connecté (${res.dialect}) — ${n} table${n === 1 ? '' : 's'} détectée${n === 1 ? '' : 's'}.`, ok: true });
+        setConnectorMsg({ text: t('sb.msg.connected', { dialect: res.dialect, count: n, plural: n === 1 ? '' : 's' }), ok: true });
       } else {
-        setConnectorMsg({ text: res.error || 'Connexion échouée.', ok: false });
+        setConnectorMsg({ text: res.error || t('sb.msg.connectionFailed'), ok: false });
       }
     } catch (e: any) {
       setConnectorMsg({ text: `${e.message || e}`, ok: false });
@@ -1599,7 +1599,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
 
     try {
-      if (!selectedOrgId) throw new Error('Select an organisation first (Organisation tab)');
+      if (!selectedOrgId) throw new Error(t('sb.error.selectOrg'));
 
       const apiType = CONNECTOR_META[activeConnectorType].apiType;
 
@@ -1620,7 +1620,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         setAgentOnline(false);
         await loadConnectors();
         window.dispatchEvent(new CustomEvent('connectors:changed'));
-        setConnectorMsg({ text: "Connecteur local créé — lance la commande de l'agent.", ok: true });
+        setConnectorMsg({ text: t('sb.msg.localCreated'), ok: true });
         return;
       }
 
@@ -1642,9 +1642,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         });
         if (connectorForm.ssl === 'true') connection.ssl = 'true';
         if (!isEdit) {
-          if (!connection.host) throw new Error('Host is required');
+          if (!connection.host) throw new Error(t('home.error.hostRequired'));
           const dbKey = activeConnectorType === 'oracle' ? 'service_name' : 'database';
-          if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? 'Service name is required' : 'Database is required');
+          if (!connection[dbKey]) throw new Error(activeConnectorType === 'oracle' ? t('home.error.serviceNameRequired') : t('home.error.databaseRequired'));
         }
         // Only send credentials when the user actually filled the connection in
         // (on edit, leaving it blank keeps the stored credentials).
@@ -1652,7 +1652,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       } else if (activeConnectorType === 'sharepoint') {
         if (!isEdit && (!connectorForm.tenant_id || !connectorForm.site_url))
-          throw new Error('Tenant ID and Site URL are required');
+          throw new Error(t('sb.error.tenantSiteRequired'));
         if (connectorForm.tenant_id && connectorForm.site_url) {
           body.token = JSON.stringify({
             tenant_id: connectorForm.tenant_id,
@@ -1673,7 +1673,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           body: JSON.stringify(body),
         });
         if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
-        setConnectorMsg({ text: 'Connection updated!', ok: true });
+        setConnectorMsg({ text: t('sb.msg.updated'), ok: true });
         await loadConnectors();
         window.dispatchEvent(new CustomEvent('connectors:changed'));
         setTimeout(resetConnectorForm, 1500);
@@ -1705,7 +1705,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           // Popup was blocked — fall back to a new tab.
           window.open(authUrl, '_blank');
         }
-        setConnectorMsg({ text: `Opening ${provider} authorization…`, ok: true });
+        setConnectorMsg({ text: t('sb.msg.opening', { provider }), ok: true });
         // The form stays open; the 'message' listener closes it on success.
       } else {
         setConnectorMsg({
@@ -1719,7 +1719,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     } catch (e: any) {
       if (oauthPopup && !oauthPopup.closed) oauthPopup.close();
-      setConnectorMsg({ text: `Error: ${e.message || e}`, ok: false });
+      setConnectorMsg({ text: t('connector.error', { message: e.message || e }), ok: false });
     } finally {
       setConnectorSaving(false);
     }
@@ -1774,9 +1774,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-2">
               <i className="bi bi-shield-lock text-blue-500 text-sm mt-0.5 flex-shrink-0"></i>
               <p className="text-[10px] text-blue-700 leading-snug">
-                Authorization happens via{' '}
-                {activeConnectorType === 'google_drive' ? 'Google OAuth' : activeConnectorType === 'dropbox' ? 'Dropbox OAuth' : 'Microsoft OAuth'}.
-                Fill in the name{activeConnectorType === 'sharepoint' ? ' and tenant details' : ''}, then click <strong>Connect</strong>.
+                {t('sb.oauth.via', { provider: activeConnectorType === 'google_drive' ? 'Google OAuth' : activeConnectorType === 'dropbox' ? 'Dropbox OAuth' : 'Microsoft OAuth' })}{' '}
+                {t('sb.oauth.fillPrefix', { details: activeConnectorType === 'sharepoint' ? t('sb.oauth.tenantDetails') : '' })}<strong>{t('connector.connect')}</strong>.
               </p>
             </div>
           )}
@@ -1787,11 +1786,11 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={() => { setConnectorMode('cloud'); setAgentSetup(null); }}
                 className={`flex-1 px-2 py-1.5 transition-colors ${connectorMode === 'cloud' ? 'bg-purple-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-              >Base accessible</button>
+              >{t('sb.mode.cloud')}</button>
               <button
                 onClick={() => setConnectorMode('local')}
                 className={`flex-1 px-2 py-1.5 transition-colors ${connectorMode === 'local' ? 'bg-purple-600 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
-              >Base locale / on-prem</button>
+              >{t('sb.mode.local')}</button>
             </div>
           )}
 
@@ -1799,18 +1798,18 @@ const Sidebar: React.FC<SidebarProps> = ({
           {!isEdit && DB_CONNECTORS.has(activeConnectorType) && connectorMode === 'local' && !agentSetup && (
             <>
               <div>
-                <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wide">Nom</label>
+                <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wide">{t('sb.local.name')}</label>
                 <input
                   value={connectorForm.name || ''}
                   onChange={e => setConnectorForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Ma base locale"
+                  placeholder={t('sb.local.namePlaceholder')}
                   className="w-full text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-400 focus:ring-1 focus:ring-purple-200 placeholder:text-gray-300"
                 />
               </div>
               <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-2">
                 <i className="bi bi-hdd-network text-blue-500 text-sm mt-0.5 flex-shrink-0"></i>
                 <p className="text-[10px] text-blue-700 leading-snug">
-                  Ta base reste chez toi. On génère une commande Docker à lancer sur une machine de ton réseau ; l'agent se connecte à nous en <strong>sortant</strong> (aucun port à ouvrir). Les identifiants ne quittent jamais ta machine.
+                  {t('sb.local.explainPrefix')}<strong>{t('sb.local.explainStrong')}</strong>{t('sb.local.explainSuffix')}
                 </p>
               </div>
             </>
@@ -1821,15 +1820,15 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="rounded-lg border border-gray-200 p-2.5 flex flex-col gap-2">
               <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-700">
                 <span className={`w-2 h-2 rounded-full ${agentOnline ? 'bg-green-500' : 'bg-amber-400 animate-pulse'}`}></span>
-                {agentOnline ? 'Agent en ligne' : "En attente de l'agent…"}
+                {agentOnline ? t('sb.local.agentOnline') : t('sb.local.agentWaiting')}
               </div>
-              <p className="text-[10px] text-gray-500">Remplace <code>DATABASE_URL</code> par ta base, puis lance sur une machine du réseau :</p>
+              <p className="text-[10px] text-gray-500">{t('sb.local.replacePrefix')}<code>DATABASE_URL</code>{t('sb.local.replaceSuffix')}</p>
               <pre className="text-[10px] bg-gray-900 text-gray-100 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{agentSetup.command}</pre>
               <button
                 onClick={() => navigator.clipboard.writeText(agentSetup.command)}
                 className="text-[11px] px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 self-start"
-              >Copier la commande</button>
-              {agentOnline && <p className="text-[10px] text-green-600">✓ Connecté — ferme, puis synchronise le schéma.</p>}
+              >{t('sb.local.copyCommand')}</button>
+              {agentOnline && <p className="text-[10px] text-green-600">✓ {t('sb.local.connected')}</p>}
             </div>
           )}
 
@@ -1919,7 +1918,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <div className="p-3 flex flex-col gap-3">
             {/* ── Part 1 — Add a new connection ───────────────────────── */}
             <div className="flex flex-col gap-1.5">
-            <h3 className="text-sm font-semibold text-gray-800">Database connectors</h3>
+            <h3 className="text-sm font-semibold text-gray-800">{t('sb.connectors.title')}</h3>
             <div className="grid grid-cols-2 gap-1.5">
               {DB_ENGINES.map(engine => {
                 const selected = activeConnectorType === engine.id;
@@ -1959,10 +1958,10 @@ const Sidebar: React.FC<SidebarProps> = ({
             {/* ── Part 2 — Saved connections ──────────────────────────── */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">Saved connections</p>
+                <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium">{t('sb.connectors.saved')}</p>
                 <button
                   onClick={loadConnectors}
-                  title="Refresh"
+                  title={t('sb.refresh')}
                   className="text-gray-400 hover:text-gray-600 p-0.5 rounded hover:bg-gray-100 transition-colors"
                 >
                   <i className={`bi bi-arrow-clockwise text-xs ${connectorsLoading ? 'animate-spin' : ''}`}></i>
@@ -1972,9 +1971,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               {!selectedOrgId ? (
                 <p className="text-[11px] text-gray-400">Select an organisation first (Organisation tab).</p>
               ) : connectorsLoading && savedConnectors.length === 0 ? (
-                <p className="text-[11px] text-gray-400">Loading…</p>
+                <p className="text-[11px] text-gray-400">{t('plans.loading')}</p>
               ) : savedConnectors.length === 0 ? (
-                <p className="text-[11px] text-gray-400">No saved connections yet.</p>
+                <p className="text-[11px] text-gray-400">{t('sb.connectors.empty')}</p>
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {savedConnectors.map(c => {
@@ -2048,7 +2047,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                               button above instead. */}
                           {!engineMeta && (
                             <button
-                              title="Sync / ingest"
+                              title={t('sb.action.sync')}
                               disabled={busy}
                               onClick={() => handleSyncConnector(c.id)}
                               className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
@@ -2057,14 +2056,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                           )}
                           <button
-                            title="Edit"
+                            title={t('common.edit')}
                             onClick={() => handleEditConnector(c)}
                             className="p-1.5 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                           >
                             <i className="bi bi-pencil text-sm"></i>
                           </button>
                           <button
-                            title="Delete"
+                            title={t('common.delete')}
                             disabled={busy}
                             onClick={() => handleDeleteConnector(c.id)}
                             className="p-1.5 rounded-md text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors"
@@ -2090,9 +2089,9 @@ const Sidebar: React.FC<SidebarProps> = ({
       case 'agents':
         return (
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-800 mb-3">Agents</h3>
-            <p className="text-xs text-gray-500">No agents available yet.</p>
-            <p className="text-xs text-gray-400 mt-2">AI agents will appear here as they become available.</p>
+            <h3 className="text-sm font-semibold text-gray-800 mb-3">{t('sidebar.agents')}</h3>
+            <p className="text-xs text-gray-500">{t('sb.agents.empty')}</p>
+            <p className="text-xs text-gray-400 mt-2">{t('sb.agents.hint')}</p>
           </div>
         );
       case 'organisation':
@@ -2448,7 +2447,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {/* DB-agent conversations — click to reopen and continue. */}
               {dbConversations.length > 0 && (
                 <div className="space-y-1 mb-3">
-                  <p className="text-xs text-gray-400 mb-2">Conversations</p>
+                  <p className="text-xs text-gray-400 mb-2">{t('sb.conversations')}</p>
                   {dbConversations.map((c) => (
                     <button
                       key={c.id}
@@ -2686,7 +2685,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => { setShowPlans(true); setActivePanel(null); }}
                 className={`relative w-12 flex flex-col items-center justify-center py-2 rounded-md transition-colors mb-1 ${hoverClass}`}
                 style={{ color: inactiveColor }}
-                title="Plans & tarifs"
+                title={t('plans.title')}
               >
                 <i className="bi bi-gem text-lg font-bold"></i>
                 <span className="text-[9px] mt-0.5 leading-tight font-bold">Plans</span>
@@ -2788,7 +2787,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => { setShowPlans(true); setActivePanel(null); }}
             className={`relative w-12 flex flex-col items-center justify-center py-2.5 rounded-md transition-colors duration-200 mb-1 ${hoverClass}`}
-            title="Plans & tarifs"
+            title={t('plans.title')}
             style={{ color: inactiveColor }}
           >
             <i className="bi bi-gem text-lg font-bold"></i>
