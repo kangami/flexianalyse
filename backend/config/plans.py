@@ -28,6 +28,8 @@ PLAN_LIMITS = {
         "fk_expand": False,
         "sql_model": "gpt-4o-mini",
         "max_rows": 50,
+        "max_databases": 1,        # connecteurs (cloud OU on-prem)
+        "monthly_questions": 50,   # plafond fair-use (questions IA / mois)
     },
     "pro": {
         "catalog_max": 150,
@@ -36,6 +38,8 @@ PLAN_LIMITS = {
         "fk_expand": True,
         "sql_model": "gpt-4o",
         "max_rows": 500,
+        "max_databases": 1,
+        "monthly_questions": 500,
     },
     "business": {
         "catalog_max": 500,
@@ -44,6 +48,8 @@ PLAN_LIMITS = {
         "fk_expand": True,
         "sql_model": "gpt-4o",
         "max_rows": 2000,
+        "max_databases": 5,
+        "monthly_questions": 2500,
     },
     "enterprise": {
         "catalog_max": None,   # illimité — crawl paginé en tâche de fond
@@ -52,77 +58,89 @@ PLAN_LIMITS = {
         "fk_expand": True,
         "sql_model": "gpt-4o",
         "max_rows": 5000,
+        "max_databases": None,     # illimité
+        "monthly_questions": None, # illimité (sur devis)
     },
 }
 
 # Features on/off par palier. Chaque palier hérite implicitement des précédents
 # via PLAN_ORDER (voir plan_allows) : on ne liste ici que ce qu'AJOUTE le palier.
+# NB : l'agent on-prem (dial-home) est disponible sur TOUS les paliers — il n'est
+# donc pas une feature gated ; c'est `max_databases` qui limite l'échelle.
 PLAN_FEATURE_ADDS = {
     "free":       set(),
     "pro":        {"chat_history", "data_dictionary", "csv_export"},
     "business":   {"scheduled_insights", "writes", "audit_full", "roles_advanced"},
-    "enterprise": {"self_hosted", "sso", "priority_support"},
+    "enterprise": {"sso", "priority_support", "multi_agent"},
 }
 
-# Catalogue d'affichage (page Plans). Prix en euros ; `price=None` = sur devis.
+# Catalogue d'affichage (page Plans). Prix en USD ; `price=None` = sur devis.
+# Facturation annuelle = 2 mois offerts (price_year). L'agent on-prem est inclus
+# partout ; le nombre de bases distingue les paliers.
 PLAN_CATALOG = {
     "free": {
         "name": "Free",
         "price": 0,
-        "currency": "EUR",
-        "period": "mois",
+        "price_year": 0,
+        "currency": "USD",
+        "period": "month",
         "tagline": "Pour essayer l'agent base de données",
         "features": [
-            "1 connexion base de données",
-            "Jusqu'à 15 tables cataloguées",
-            "50 questions / mois",
-            "Diagramme ER + questions anticipées",
+            "1 base de données (cloud ou on-prem)",
+            "Jusqu'à 15 tables",
+            "50 questions IA / mois",
+            "Database Report + Schema explorer",
+            "1 siège",
         ],
         "cta": "Commencer",
     },
     "pro": {
         "name": "Pro",
-        "price": 39,
-        "currency": "EUR",
-        "period": "utilisateur / mois",
+        "price": 29,
+        "price_year": 290,
+        "currency": "USD",
+        "period": "month",
         "tagline": "Pour un usage individuel régulier",
         "features": [
-            "3 connexions base de données",
-            "Jusqu'à 150 tables cataloguées",
-            "1 000 questions / mois",
-            "Historique de conversations + questions de suivi",
-            "Dictionnaire de données",
-            "Export CSV",
+            "1 base de données (cloud ou on-prem)",
+            "Jusqu'à 150 tables",
+            "500 questions IA / mois",
+            "Modèle avancé (gpt-4o)",
+            "3 sièges inclus (+12 $/siège)",
+            "Historique + questions de suivi",
         ],
         "cta": "Passer à Pro",
     },
     "business": {
         "name": "Business",
-        "price": 299,
-        "currency": "EUR",
-        "period": "mois",
+        "price": 99,
+        "price_year": 990,
+        "currency": "USD",
+        "period": "month",
         "tagline": "Pour les équipes",
         "features": [
-            "Connexions illimitées",
-            "Tables illimitées (crawl en tâche de fond)",
+            "5 bases de données",
+            "Jusqu'à 500 tables par base",
+            "2 500 questions IA / mois",
             "Écritures avec confirmation",
-            "Insights planifiés",
-            "Journaux d'audit complets",
-            "Rôles & permissions avancés",
+            "Journaux d'audit",
+            "10 sièges inclus (+15 $/siège)",
         ],
         "cta": "Passer à Business",
     },
     "enterprise": {
         "name": "Enterprise",
         "price": None,
-        "currency": "EUR",
+        "price_year": None,
+        "currency": "USD",
         "period": "",
         "tagline": "Pour les grands comptes",
         "features": [
             "Tout Business, plus :",
-            "Agent auto-hébergé (on-premise)",
-            "SSO / SAML",
-            "Support dédié & SLA",
+            "Bases & tables illimitées",
+            "Agents on-prem multiples",
+            "SSO / SAML · SLA",
+            "Support dédié",
         ],
         "cta": "Nous contacter",
     },
@@ -162,6 +180,8 @@ def plan_public(plan: str | None) -> dict:
             "catalog_max": limits["catalog_max"],
             "max_rows": limits["max_rows"],
             "retrieval": bool(limits["retrieval_top_k"]),
+            "max_databases": limits.get("max_databases"),
+            "monthly_questions": limits.get("monthly_questions"),
         },
     }
 
