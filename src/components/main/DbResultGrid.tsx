@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import SearchProgress from './SearchProgress';
+
+const PAGE_SIZE = 100;
 
 /**
  * DBeaver-style read-only result grid for the LEFT pane.
@@ -31,6 +33,13 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
   // Collapsed by default so a long analytical query (CTEs/window functions)
   // doesn't push the result grid off-screen.
   const [showSql, setShowSql] = useState(false);
+
+  const [page, setPage] = useState(0);
+  useEffect(() => { setPage(0); }, [rows]);
+  const pageCount = Math.ceil(rows.length / PAGE_SIZE) || 1;
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -99,9 +108,9 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
-                <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                  <td className="text-gray-400 px-2 py-1.5 border-b border-r border-gray-100 tabular-nums align-top">{i + 1}</td>
+              {pageRows.map((row, i) => (
+                <tr key={start + i} className={(start + i) % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="text-gray-400 px-2 py-1.5 border-b border-r border-gray-100 tabular-nums align-top">{start + i + 1}</td>
                   {columns.map((col) => {
                     const { text, isNull } = renderCell(row[col]);
                     return (
@@ -120,6 +129,32 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
           </table>
         )}
       </div>
+
+      {/* Pagination — 100 rows/page */}
+      {hasData && rows.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between px-4 py-1.5 border-t border-gray-200 bg-gray-50 flex-shrink-0 text-[10px] text-gray-500">
+          <span className="tabular-nums">{start + 1}–{Math.min(start + PAGE_SIZE, rows.length)} / {rows.length.toLocaleString()}</span>
+          <div className="flex items-center gap-2">
+            <button
+              disabled={safePage === 0}
+              onClick={() => setPage(safePage - 1)}
+              aria-label={t('fileviewer.page.previous')}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
+            </button>
+            <span className="tabular-nums font-medium">{t('grid.page', { current: safePage + 1, total: pageCount })}</span>
+            <button
+              disabled={safePage >= pageCount - 1}
+              onClick={() => setPage(safePage + 1)}
+              aria-label={t('fileviewer.page.next')}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

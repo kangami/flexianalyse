@@ -307,6 +307,7 @@ export const frFR = {
   'grid.rows': '{count} ligne{plural}',
   'grid.cols': '{count} col{plural}',
   'grid.empty': 'Posez une question sur vos données et le tableau de résultats apparaît ici.',
+  'grid.page': 'Page {current} / {total}',
 
   // SchemaFlow (diagramme ER)
   'schema.junctionTooltip': 'Table de jonction (relation N:N)',

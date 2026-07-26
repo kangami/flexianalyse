@@ -307,6 +307,7 @@ export const esES = {
   'grid.rows': '{count} fila{plural}',
   'grid.cols': '{count} col{plural}',
   'grid.empty': 'Haz una pregunta sobre tus datos y la tabla de resultados aparecerá aquí.',
+  'grid.page': 'Página {current} / {total}',
 
   // SchemaFlow (diagrama ER)
   'schema.junctionTooltip': 'Tabla de unión (relación N:N)',

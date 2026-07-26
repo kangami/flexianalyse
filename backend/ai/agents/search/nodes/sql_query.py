@@ -54,7 +54,7 @@ MAX_RESULT_ROWS      = 50    # cap rows pulled into the answer context
 # row limit (so aggregates compute over the full set), but a chat UI can't usefully
 # render thousands of rows — sending them just makes the client lag. We ship a
 # capped sample and tell the UI the true total.
-RESPONSE_ROW_CAP     = int(os.getenv("SQL_RESPONSE_ROWS", "200"))
+RESPONSE_ROW_CAP     = int(os.getenv("SQL_RESPONSE_ROWS", "1000"))
 # gpt-4o (not -mini) is markedly more reliable at multi-table joins, esp. joining
 # through association tables — worth the cost for correctness. Override via env.
 SQL_GEN_MODEL        = os.getenv("SQL_GEN_MODEL", "gpt-4o")

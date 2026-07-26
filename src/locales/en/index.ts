@@ -305,6 +305,7 @@ export const enUS = {
   'grid.rows': '{count} row{plural}',
   'grid.cols': '{count} col{plural}',
   'grid.empty': 'Ask a data question and the table result appears here.',
+  'grid.page': 'Page {current} / {total}',
 
   // SchemaFlow (ER diagram)
   'schema.junctionTooltip': 'Junction table (N:N relation)',
