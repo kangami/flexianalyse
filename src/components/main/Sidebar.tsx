@@ -1625,7 +1625,13 @@ const Sidebar: React.FC<SidebarProps> = ({
           body: JSON.stringify({ type: apiType, engine: activeConnectorType, name: connectorForm.name || `New ${activeConnectorType}`, connection_mode: 'local' }),
         });
         const cd = await cr.json();
-        if (!cr.ok) throw new Error(cd?.error || cr.statusText);
+        if (!cr.ok) {
+          if (cd?.code === 'db_limit') {
+            const n = cd.max_databases;
+            throw new Error(t('connector.dbLimit', { count: n, plural: n === 1 ? '' : 's' }));
+          }
+          throw new Error(cd?.error || cr.statusText);
+        }
         const tr = await authFetch(`${API}/api/v2/connectors/${cd.id}/agent-token`, { method: 'POST', headers: hdrs });
         const td = await tr.json();
         if (!tr.ok) throw new Error(td?.error || tr.statusText);
@@ -1703,7 +1709,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         body: JSON.stringify(body),
       });
 
-      if (!r.ok) throw new Error((await r.json())?.error || r.statusText);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        if (err?.code === 'db_limit') {
+          const n = err.max_databases;
+          throw new Error(t('connector.dbLimit', { count: n, plural: n === 1 ? '' : 's' }));
+        }
+        throw new Error(err?.error || r.statusText);
+      }
       const saved = await r.json();
       await loadConnectors();
       window.dispatchEvent(new CustomEvent('connectors:changed'));

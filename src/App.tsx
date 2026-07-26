@@ -12,6 +12,7 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfUse from './pages/TermsOfUse';
 import GetStarted from './pages/GetStarted';
 import SchemaExplorer from './pages/SchemaExplorer';
+import Pricing from './pages/Pricing';
 
 // Composant qui gère l'affichage conditionnel
 const AppContent: React.FC = () => {
@@ -59,6 +60,7 @@ const AppContent: React.FC = () => {
 
       {/* Feature pages */}
       <Route path="/schema-explorer" element={<SchemaExplorer />} />
+      <Route path="/pricing" element={<Pricing />} />
     </Routes>
   );
 };

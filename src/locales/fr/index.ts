@@ -247,6 +247,7 @@ export const frFR = {
   'connector.savedOpening': 'Enregistré — ouverture de l\'autorisation {service}…',
   'connector.addedSuccessfully': 'Connecteur ajouté avec succès !',
   'connector.error': 'Erreur : {message}',
+  'connector.dbLimit': 'Votre plan permet {count} base{plural} de données. Passez à un plan supérieur pour en connecter davantage.',
   'connector.errors.connectionUrlRequired': 'L\'URL de connexion est requise',
   'connector.errors.tenantIdRequired': 'L\'ID du locataire est requis',
   'connector.errors.siteUrlRequired': 'L\'URL du site est requise',

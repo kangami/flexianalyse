@@ -89,6 +89,12 @@ const Navbar: React.FC = () => {
             >
               How it works
             </button>
+            <button
+              onClick={() => navigate('/pricing')}
+              className="flex items-center gap-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors text-gray-700 hover:text-violet-700 hover:bg-gray-50"
+            >
+              Pricing
+            </button>
             {navItems.map((item) => (
               <div key={item.label} className="relative">
                 <button

@@ -231,6 +231,7 @@ export const enUS = {
   'connector.savedOpening': 'Saved — opening {service} authorization…',
   'connector.addedSuccessfully': 'Connector added successfully!',
   'connector.error': 'Error: {message}',
+  'connector.dbLimit': 'Your plan allows {count} database{plural}. Upgrade your plan to connect more.',
   'connector.errors.connectionUrlRequired': 'Connection URL is required',
   'connector.errors.tenantIdRequired': 'Tenant ID is required',
   'connector.errors.siteUrlRequired': 'Site URL is required',

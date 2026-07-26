@@ -244,6 +244,25 @@ def register(api_bp) -> None:  # noqa: C901
         if not name:
             return _err("name required")
 
+        # Plan gate: how many databases (SQL connectors) the org may connect.
+        if connector_type == "sql":
+            from config.plans import plan_limits
+            from models.organization import Organization
+            org = Organization.query.get(UUID(org_id))
+            max_db = plan_limits(org.plan if org else None).get("max_databases")
+            if max_db is not None:
+                current = Connector.query.filter_by(
+                    organization_id=UUID(org_id), type="sql", deleted_at=None
+                ).count()
+                if current >= max_db:
+                    # Machine-readable so the frontend can localise; English fallback.
+                    return jsonify({
+                        "error": f"Your plan allows {max_db} database{'s' if max_db > 1 else ''}. "
+                                 "Upgrade your plan to connect more.",
+                        "code": "db_limit",
+                        "max_databases": max_db,
+                    }), 403
+
         # 'local' → an on-prem dial-home agent holds the credentials; the cloud
         # stores none and reaches the DB through the agent gateway.
         connection_mode = "local" if data.get("connection_mode") == "local" else "cloud"
