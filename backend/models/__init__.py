@@ -6,6 +6,7 @@ from .permission import Permission, Policy, RolePermission
 from .connector import Connector, ConnectorCredentials, ToolScope
 from .connector_schema import ConnectorSchemaTable
 from .connector_report import ConnectorReport
+from .usage_counter import UsageCounter
 from .resource import Resource, ResourceBinding
 from .rate_limit import RateLimit
 from .conversation import Conversation, Message, ToolCall, ToolApproval
@@ -28,6 +29,7 @@ __all__ = [
     "ToolScope",
     "ConnectorSchemaTable",
     "ConnectorReport",
+    "UsageCounter",
     "Resource",
     "ResourceBinding",
     "RateLimit",

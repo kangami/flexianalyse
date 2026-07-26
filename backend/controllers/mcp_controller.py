@@ -81,6 +81,21 @@ def _get_org_id() -> str | None:
     return current_organization_id()
 
 
+def _quota_or_429(org_id: str):
+    """Reserve one fair-use question for the org. Returns a 429 Response when the
+    monthly cap is reached, else None (and the question is counted)."""
+    from services.usage import check_and_increment
+    ok, used, limit = check_and_increment(org_id)
+    if not ok:
+        return jsonify({
+            "error": f"You've reached your plan's monthly limit of {limit} questions.",
+            "code": "quota_exceeded",
+            "used": used,
+            "limit": limit,
+        }), 429
+    return None
+
+
 def _get_database_url_for_org(org_id: str) -> str | None:
     """Récupère la DATABASE_URL du connector SQL actif de l'org."""
     connector = Connector.query.filter_by(
@@ -447,6 +462,10 @@ def enterprise_search():
     if not query:
         return jsonify({'error': 'query required'}), 400
 
+    over = _quota_or_429(org_id)
+    if over:
+        return over
+
     try:
         from ai.agents.search.graph import run_search
         result = run_search(
@@ -502,6 +521,10 @@ def enterprise_search_stream():
     query = data.get('query')
     if not query:
         return jsonify({'error': 'query required'}), 400
+
+    over = _quota_or_429(org_id)
+    if over:
+        return over
 
     from ai.agents.search.graph import run_search_stream
 
@@ -636,6 +659,10 @@ def sql_run():
     if not sql:
         return jsonify({'error': 'sql required'}), 400
 
+    over = _quota_or_429(org_id)
+    if over:
+        return over
+
     from services.sql_write import statement_kind
     from ai.agents.search.nodes.sql_query import (
         _resolve_sql_connector, _decrypt_connector_url, _call_sql_tool,
@@ -682,6 +709,10 @@ def write_preview():
     if not org_id:
         return jsonify({'error': 'X-Organization-Id header required'}), 400
     data = request.get_json() or {}
+
+    over = _quota_or_429(org_id)
+    if over:
+        return over
 
     from services.sql_write import guard_write, generate_write_sql, MASS_WRITE_THRESHOLD
     from services.audit import record
@@ -866,6 +897,16 @@ def db_insights():
     except Exception as e:
         logger.error("DB insights error: %s", e, exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+@mcp_bp.route('/usage', methods=['GET'])
+def usage():
+    """Current-month fair-use question usage for the org: {used, limit, period}."""
+    org_id = _get_org_id()
+    if not org_id:
+        return jsonify({'error': 'X-Organization-Id header required'}), 400
+    from services.usage import get_usage
+    return jsonify(get_usage(org_id))
 
 
 @mcp_bp.route('/db-report', methods=['GET'])

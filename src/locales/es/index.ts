@@ -248,6 +248,7 @@ export const esES = {
   'connector.addedSuccessfully': 'Conector añadido con éxito!',
   'connector.error': 'Error: {message}',
   'connector.dbLimit': 'Tu plan permite {count} base{plural} de datos. Sube de plan para conectar más.',
+  'quota.exceeded': 'Has alcanzado el límite mensual de {limit} preguntas de tu plan. Sube de plan para seguir preguntando.',
   'connector.errors.connectionUrlRequired': 'La URL de conexión es requerida',
   'connector.errors.tenantIdRequired': 'El ID del inquilino es requerido',
   'connector.errors.siteUrlRequired': 'La URL del sitio es requerida',

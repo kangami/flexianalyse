@@ -232,6 +232,7 @@ export const enUS = {
   'connector.addedSuccessfully': 'Connector added successfully!',
   'connector.error': 'Error: {message}',
   'connector.dbLimit': 'Your plan allows {count} database{plural}. Upgrade your plan to connect more.',
+  'quota.exceeded': "You've reached your plan's monthly limit of {limit} questions. Upgrade your plan to keep asking.",
   'connector.errors.connectionUrlRequired': 'Connection URL is required',
   'connector.errors.tenantIdRequired': 'Tenant ID is required',
   'connector.errors.siteUrlRequired': 'Site URL is required',

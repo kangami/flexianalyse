@@ -343,7 +343,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const d = await res.json();
             setPendingQuery(null);
             if (!res.ok || !d.ok) {
-                setConversation(prev => [...prev, { id: turnId, query: sql, answer: `⚠️ ${d.error || res.statusText}`, sql, sources: [] }]);
+                const msg = d.code === 'quota_exceeded' ? t('quota.exceeded', { limit: d.limit }) : (d.error || res.statusText);
+                setConversation(prev => [...prev, { id: turnId, query: sql, answer: `⚠️ ${msg}`, sql, sources: [] }]);
                 return;
             }
             const cols: string[] = d.columns || [];
@@ -374,7 +375,8 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const d = await res.json();
             setPendingQuery(null);
             if (!res.ok || !d.ok) {
-                setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${d.error || t('home.write.refused')}`, sql: d.sql, sources: [] }]);
+                const msg = d.code === 'quota_exceeded' ? t('quota.exceeded', { limit: d.limit }) : (d.error || t('home.write.refused'));
+                setConversation(prev => [...prev, { id: turnId, query: input, answer: `⚠️ ${msg}`, sql: d.sql, sources: [] }]);
                 return;
             }
             setConversation(prev => [...prev, {
@@ -464,6 +466,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             });
             if (!res.ok || !res.body) {
                 const err = await res.json().catch(() => ({}));
+                if (err.code === 'quota_exceeded') throw new Error(t('quota.exceeded', { limit: err.limit }));
                 throw new Error(err.error || res.statusText);
             }
 
