@@ -45,6 +45,7 @@ interface DbChatPanelProps {
   questions: string[];
   insightsLoading: boolean;
   onShowDiagram: () => void;
+  onShowReport?: () => void;
   history?: { id: string; title: string | null; updated_at: string | null }[];
   activeConversationId?: string | null;
   onOpenConversation?: (id: string) => void;
@@ -162,7 +163,7 @@ const WriteCard: React.FC<{ turn: DbTurn; onConfirm: () => void; onCancel: () =>
   );
 };
 
-const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, history = [], activeConversationId, onOpenConversation, onConfirmWrite, onCancelWrite }) => {
+const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading, onSubmit, onNewSearch, connectors, scope, onScopeChange, questions, insightsLoading, onShowDiagram, onShowReport, history = [], activeConversationId, onOpenConversation, onConfirmWrite, onCancelWrite }) => {
   const { t } = useLanguage();
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -263,6 +264,7 @@ const DbChatPanel: React.FC<DbChatPanelProps> = ({ turns, pendingQuery, loading,
           questions={questions}
           loading={insightsLoading}
           onPick={onSubmit}
+          onShowReport={onShowReport}
           onShowDiagram={onShowDiagram}
           compact
         />

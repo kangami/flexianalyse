@@ -145,7 +145,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [reportStatus, setReportStatus] = useState<string>('none');
     const [reportGeneratedAt, setReportGeneratedAt] = useState<string | null>(null);
     const [reportGenerating, setReportGenerating] = useState(false);
-    const reportAutoOpened = useRef(false);
 
     const openDiagram = useCallback(() => { setShowReport(false); setShowDiagram(true); }, []);
     const openReport = useCallback(() => { setShowDiagram(false); setShowReport(true); }, []);
@@ -255,15 +254,6 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         } catch { setReportGenerating(false); }
     }, [account?.organization_id, searchScope, fetchReport]);
 
-    // As soon as a database is connected, land on the report (once).
-    useEffect(() => {
-        if (reportAutoOpened.current) return;
-        if (connectors.length > 0 && conversation.length === 0 && !enterpriseLoading) {
-            reportAutoOpened.current = true;
-            setShowReport(true);
-        }
-    }, [connectors.length, conversation.length, enterpriseLoading]);
-
     // Persisted conversation history for the current org (titles + order).
     const loadHistory = useCallback(() => {
         const headers: Record<string, string> = {};
@@ -343,7 +333,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
 
     // Direct SELECT/WITH typed by the user — run read-only and show the grid.
     const runDirectSql = async (sql: string) => {
-        setEnterpriseLoading(true); setPendingQuery(sql); setQuery(''); setShowDiagram(false);
+        setEnterpriseLoading(true); setPendingQuery(sql); setQuery(''); setShowDiagram(false); setShowReport(false);
         const turnId = `${Date.now()}`;
         try {
             const res = await authFetch(`${API_BASE}/api/mcp/sql/run`, {
@@ -374,7 +364,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     // A write (UPDATE/INSERT/DELETE), from raw SQL or NL — preview its impact and
     // show a confirmation card; nothing is executed until the user confirms.
     const runWritePreview = async (input: string, isDirect: boolean) => {
-        setEnterpriseLoading(true); setPendingQuery(input); setQuery(''); setShowDiagram(false);
+        setEnterpriseLoading(true); setPendingQuery(input); setQuery(''); setShowDiagram(false); setShowReport(false);
         const turnId = `${Date.now()}`;
         try {
             const body = isDirect ? { sql: input, connector_id: searchScope } : { query: input, connector_id: searchScope };
@@ -452,7 +442,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setEnterpriseLoading(true);
         setPendingQuery(question);
         setQuery('');
-        setShowDiagram(false);   // a data query shows the grid, not the schema
+        setShowDiagram(false); setShowReport(false);   // a data query shows the grid, not the schema/report
 
         const turnId = `${Date.now()}`;
         // Once the turn exists in the conversation, stream tokens into it.
@@ -574,7 +564,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
         setTableSql('');
         setQuery('');
         setShowDiagram(false);
-        setShowReport(true);   // land back on the database report
+        setShowReport(false);   // back to the query form + suggestions
     };
 
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -700,7 +690,10 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     // Once a search is submitted (or the schema diagram is opened), swap the
     // centered hero for the two-pane view: result grid / ER diagram on the LEFT,
     // running discussion on the RIGHT.
-    const reportView = showReport && conversation.length === 0 && !enterpriseLoading;
+    // The report can be opened over an active conversation (from the chat chips);
+    // a running query still shows the grid. Query handlers clear showReport so the
+    // result replaces the report once it lands.
+    const reportView = showReport && !enterpriseLoading;
     if (conversation.length > 0 || enterpriseLoading || showDiagram || showReport) {
         return (
             <div className="h-full w-full flex overflow-hidden">
@@ -834,6 +827,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                         onScopeChange={setSearchScope}
                         questions={insights.questions}
                         insightsLoading={insightsLoading}
+                        onShowReport={openReport}
                         onShowDiagram={openDiagram}
                         history={history}
                         activeConversationId={conversationId}

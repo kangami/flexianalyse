@@ -74,7 +74,7 @@ const OVERVIEW_FIELDS: { key: string; label: string; fmt: (v: unknown) => string
 
 const COMING_SOON = ['Security', 'Data Quality', 'Performance (runtime)', 'Migration Readiness'];
 
-const DatabaseReport: React.FC<Props> = ({ data, status, generatedAt, generating, onGenerate, onAsk, onDiagram }) => {
+const DatabaseReport: React.FC<Props> = ({ data, status, generatedAt, generating, onGenerate }) => {
   // ── Non-ready states ──────────────────────────────────────────────────────
   if (status !== 'done' || !data) {
     const running = status === 'pending' || status === 'running' || generating;
@@ -124,8 +124,6 @@ const DatabaseReport: React.FC<Props> = ({ data, status, generatedAt, generating
           {generatedAt && <p className="text-[10px] text-gray-400 mt-0.5">Generated {new Date(generatedAt).toLocaleString()}</p>}
         </div>
         <div className="flex items-center gap-1.5">
-          {onAsk && <button onClick={onAsk} className="px-3 py-1.5 rounded-lg text-white text-xs font-semibold" style={{ background: 'linear-gradient(135deg,#8b5cf6,#6d28d9)' }}>Ask a question</button>}
-          {onDiagram && <button onClick={onDiagram} className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 border border-gray-200 hover:bg-gray-50">Diagram</button>}
           <button onClick={onGenerate} disabled={generating} title="Regenerate" className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-500 border border-gray-200 hover:bg-gray-50 disabled:opacity-40">
             <i className={`bi bi-arrow-repeat ${generating ? 'animate-spin' : ''}`} />
           </button>
