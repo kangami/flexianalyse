@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
+import BookDemoButton from './BookDemoButton';
 
 interface NavDropdownItem {
   label: string;
@@ -136,8 +137,11 @@ const Navbar: React.FC = () => {
             ))}
           </div>
 
-          {/* Book a Demo Button */}
-          <div className="flex items-center">
+          {/* Book a Demo + Get Started */}
+          <div className="flex items-center gap-2">
+            <BookDemoButton className="px-4 py-2 text-sm font-semibold rounded-full text-violet-700 bg-white/80 border border-violet-200 hover:bg-white transition-colors">
+              Book a Demo
+            </BookDemoButton>
             <button onClick={() => navigate('/get-started')} className="relative px-5 py-2 text-sm font-semibold rounded-full border-2 border-transparent bg-clip-padding transition-all duration-200 hover:scale-105 hover:shadow-lg"
               style={{
                 backgroundImage: 'linear-gradient(white, white), linear-gradient(-45deg, #a78bfa, #8b5cf6, #7c3aed, #6d28d9, #4c1d95)',

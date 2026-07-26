@@ -9,6 +9,7 @@ import UseCasesSection from './UseCasesSection';
 import TestimonialsSection from './TestimonialsSection';
 import FAQSection from './FAQSection';
 import HowItWorks from './HowItWorks';
+import BookDemoButton from './BookDemoButton';
 
 const heroStats = [
   { v: '2 modes', l: 'Cloud & on-prem connection' },
@@ -132,6 +133,12 @@ const LandingPage: React.FC = () => {
               Start For Free
               <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
             </Link>
+            <BookDemoButton
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-xl text-white font-semibold text-lg border border-white/15 backdrop-blur-sm hover:bg-white/10 transition-all duration-200"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            >
+              Book a Demo
+            </BookDemoButton>
             <button
               onClick={() => document.getElementById('how-it-works')?.scrollIntoView({ behavior: 'smooth' })}
               className="inline-flex items-center gap-3 px-8 py-4 rounded-xl text-white font-semibold text-lg border border-white/15 backdrop-blur-sm hover:bg-white/10 transition-all duration-200"
