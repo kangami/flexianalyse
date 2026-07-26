@@ -24,6 +24,9 @@ class Connector(db.Model):
     schema_crawl_status = db.Column(db.String, nullable=True)  # pending | running | done | failed
     schema_crawled_at = db.Column(db.DateTime, nullable=True)
     schema_table_count = db.Column(db.Integer, nullable=True)
+    # Live crawl progress (embedding batches) for the sync ring in the UI.
+    schema_crawl_done = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    schema_crawl_total = db.Column(db.Integer, nullable=False, default=0, server_default='0')
     # Exclude detected audit/log/system tables from the ER diagram + Text-to-SQL
     # retrieval. On by default: on a large schema these tables pollute retrieval
     # (the agent confuses an audit copy for the business table) and clutter the

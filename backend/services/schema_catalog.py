@@ -33,6 +33,8 @@ UNLIMITED_CAP = 100_000
 # chacune un vecteur(1536) peut faire redémarrer une petite instance Postgres, et
 # des commits courts et fréquents empêchent la connexion de mourir pendant le crawl.
 INSERT_CHUNK = 250
+# Tables embedded per batch; progress (schema_crawl_done) is committed after each.
+EMBED_PROGRESS_BATCH = 100
 COMMIT_RETRIES = 3
 
 
@@ -106,7 +108,21 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
         # temps : l'embedding peut durer des dizaines de secondes et la connexion
         # ne doit pas rester ouverte inactive.
         descriptors = [table_descriptor(t) for t in tables]
-        embeddings = Embedder().embed_chunks(descriptors) if descriptors else []
+
+        # Embed in explicit batches so we can report progress after each one —
+        # the sync ring in the UI fills as the worker processes batches (the 3s
+        # connector poll picks up schema_crawl_done/total). Short commits also keep
+        # the DB connection warm during the long embedding phase.
+        connector.schema_crawl_total = len(descriptors)
+        connector.schema_crawl_done = 0
+        db.session.commit()
+
+        embedder = Embedder()
+        embeddings = []
+        for i in range(0, len(descriptors), EMBED_PROGRESS_BATCH):
+            embeddings.extend(embedder.embed_chunks(descriptors[i:i + EMBED_PROGRESS_BATCH]))
+            connector.schema_crawl_done = min(i + EMBED_PROGRESS_BATCH, len(descriptors))
+            db.session.commit()
 
         from services.audit_tables import is_audit_table
 

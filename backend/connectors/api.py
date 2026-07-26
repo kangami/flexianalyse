@@ -72,6 +72,8 @@ def _connector_to_dict(c: Connector) -> dict:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "schema_crawl_status": c.schema_crawl_status,
         "schema_table_count": c.schema_table_count,
+        "schema_crawl_done": getattr(c, "schema_crawl_done", 0) or 0,
+        "schema_crawl_total": getattr(c, "schema_crawl_total", 0) or 0,
     }
 
 

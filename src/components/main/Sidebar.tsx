@@ -89,7 +89,7 @@ const ConnectorProgressRing: React.FC<{
   children: React.ReactNode;
 }> = ({ percent, status, children }) => {
   const size = 42;
-  const stroke = 3.5;
+  const stroke = 2.5;
   const r = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
@@ -603,6 +603,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [savedConnectors, setSavedConnectors] = useState<{
     id: string; type: string; engine?: string | null; name: string; status: string;
     schema_crawl_status?: string | null; schema_table_count?: number | null;
+    schema_crawl_done?: number | null; schema_crawl_total?: number | null;
     progress?: { percent: number; status: string; total: number; done: number; failed: number; skipped: number } | null;
   }[]>([]);
   const [connectorsLoading, setConnectorsLoading] = useState(false);
@@ -2008,11 +2009,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                     const busy = connectorBusyId === c.id;
                     const editing = connectorEditId === c.id;
                     const pr = c.progress;
+                    // Schema-crawl progress ring for DB connectors: fills as the
+                    // Celery worker embeds batches (schema_crawl_done / total).
+                    const crawlRunning = c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending';
+                    const crawlPct = c.schema_crawl_total ? Math.min(100, Math.round(((c.schema_crawl_done ?? 0) / c.schema_crawl_total) * 100)) : 0;
+                    const ringPercent = engineMeta
+                      ? (crawlRunning ? crawlPct : c.schema_crawl_status === 'done' ? 100 : 0)
+                      : (pr?.percent ?? 0);
+                    const ringStatus = engineMeta
+                      ? (crawlRunning ? 'running' : c.schema_crawl_status === 'failed' ? 'failed' : c.schema_crawl_status === 'done' ? 'done' : 'idle')
+                      : (pr?.status ?? 'idle');
                     // DB connectors are queried live (Text-to-SQL) — no document
                     // ingestion; their status reflects the schema catalog crawl.
                     const subtitle = engineMeta
                       ? c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending'
-                        ? 'Syncing schema…'
+                        ? `Syncing schema… ${crawlPct}%`
                         : c.schema_crawl_status === 'failed'
                         ? 'Schema sync failed'
                         : c.schema_crawl_status === 'done'
@@ -2034,7 +2045,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             : 'border-gray-100 hover:border-purple-200 hover:shadow-sm'
                         }`}
                       >
-                        <ConnectorProgressRing percent={pr?.percent ?? 0} status={pr?.status ?? 'idle'}>
+                        <ConnectorProgressRing percent={ringPercent} status={ringStatus}>
                           <div className="w-7 h-7 rounded-md flex items-center justify-center bg-gray-50 border border-gray-100">
                             {engineMeta ? (
                               <DbEngineLogo engine={engineMeta.id} size={16} />
@@ -2063,8 +2074,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                               onClick={() => handleCrawlSchema(c.id)}
                               className="p-1.5 rounded-md text-gray-500 hover:text-purple-600 hover:bg-purple-50 disabled:opacity-40 transition-colors"
                             >
-                              <i className={`bi bi-diagram-3 text-sm ${
-                                c.schema_crawl_status === 'running' || c.schema_crawl_status === 'pending' ? 'animate-pulse text-purple-500' : ''
+                              <i className={`bi bi-arrow-repeat text-sm ${
+                                crawlRunning ? 'animate-spin text-purple-500' : ''
                               } ${c.schema_crawl_status === 'failed' ? 'text-red-500' : ''}`}></i>
                             </button>
                           )}
