@@ -3,6 +3,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import SearchProgress from './SearchProgress';
 
 const PAGE_SIZE = 100;
+const PAG_BTN = 'p-1 rounded-full text-gray-500 hover:bg-gray-100 hover:text-purple-600 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-500 transition-colors';
 
 /**
  * DBeaver-style read-only result grid for the LEFT pane.
@@ -42,7 +43,7 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
   const pageRows = rows.slice(start, start + PAGE_SIZE);
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full bg-white relative">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
@@ -82,7 +83,7 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
       )}
 
       {/* Body */}
-      <div className="flex-1 overflow-auto">
+      <div className={`flex-1 overflow-auto ${pageCount > 1 ? 'pb-14' : ''}`}>
         {loading ? (
           <div className="h-full flex items-center justify-center">
             <SearchProgress />
@@ -130,29 +131,25 @@ const DbResultGrid: React.FC<DbResultGridProps> = ({ columns, rows, sql, loading
         )}
       </div>
 
-      {/* Pagination — 100 rows/page */}
-      {hasData && rows.length > PAGE_SIZE && (
-        <div className="flex items-center justify-between px-4 py-1.5 border-t border-gray-200 bg-gray-50 flex-shrink-0 text-[10px] text-gray-500">
-          <span className="tabular-nums">{start + 1}–{Math.min(start + PAGE_SIZE, rows.length)} / {rows.length.toLocaleString()}</span>
-          <div className="flex items-center gap-2">
-            <button
-              disabled={safePage === 0}
-              onClick={() => setPage(safePage - 1)}
-              aria-label={t('fileviewer.page.previous')}
-              className="p-1 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
-            </button>
-            <span className="tabular-nums font-medium">{t('grid.page', { current: safePage + 1, total: pageCount })}</span>
-            <button
-              disabled={safePage >= pageCount - 1}
-              onClick={() => setPage(safePage + 1)}
-              aria-label={t('fileviewer.page.next')}
-              className="p-1 rounded hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-            </button>
-          </div>
+      {/* Pagination — floating rounded pill, centered, 100 rows/page */}
+      {hasData && pageCount > 1 && (
+        <div
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-0.5 rounded-full border border-gray-200 bg-white/95 backdrop-blur shadow-lg px-1.5 py-1"
+          title={t('grid.page', { current: safePage + 1, total: pageCount })}
+        >
+          <button disabled={safePage === 0} onClick={() => setPage(0)} aria-label={t('grid.first')} className={PAG_BTN}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 19l-7-7 7-7M11 19l-7-7 7-7" /></svg>
+          </button>
+          <button disabled={safePage === 0} onClick={() => setPage(safePage - 1)} aria-label={t('fileviewer.page.previous')} className={PAG_BTN}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
+          </button>
+          <span className="px-2 text-[11px] tabular-nums font-medium text-gray-600 select-none">{safePage + 1} / {pageCount}</span>
+          <button disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)} aria-label={t('fileviewer.page.next')} className={PAG_BTN}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
+          </button>
+          <button disabled={safePage >= pageCount - 1} onClick={() => setPage(pageCount - 1)} aria-label={t('grid.last')} className={PAG_BTN}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 5l7 7-7 7M13 5l7 7-7 7" /></svg>
+          </button>
         </div>
       )}
     </div>

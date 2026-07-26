@@ -137,7 +137,7 @@ def sql_query(state: SearchState) -> SearchState:
             **state,
             "generated_sql": sql,
             "sql_columns": result.get("columns", []),
-            "sql_rows": rows[:RESPONSE_ROW_CAP],
+            "sql_rows": rows,          # all fetched rows (bounded by the plan max_rows); the grid paginates client-side
             "sql_total_rows": len(rows),
             "sql_plan": result.get("plan", ""),
             "sql_uncertain": bool(result.get("uncertain")),

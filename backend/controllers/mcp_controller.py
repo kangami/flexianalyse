@@ -667,11 +667,11 @@ def sql_run():
     if result.get("status") != "success":
         return jsonify({'ok': False, 'error': result.get("message", "Query failed"), 'sql': sql})
     rows = result.get("rows", [])
-    # Ship a capped sample to the browser (a chat grid can't render thousands of
-    # rows without lagging); report the true matched count so the UI can note it.
+    # Ship every fetched row (already bounded by the plan max_rows); the grid
+    # paginates client-side at 100/page so the DOM never holds thousands at once.
     return jsonify({'ok': True, 'sql': sql,
                     'columns': result.get("columns", []),
-                    'rows': rows[:RESPONSE_ROW_CAP], 'total_rows': len(rows)})
+                    'rows': rows, 'total_rows': len(rows)})
 
 
 @mcp_bp.route('/write/preview', methods=['POST'])
