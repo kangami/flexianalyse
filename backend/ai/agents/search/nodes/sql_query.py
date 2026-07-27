@@ -124,9 +124,11 @@ def sql_query(state: SearchState) -> SearchState:
         sql = result.get("sql", "")
         rows = result.get("rows", [])
         if not sql and not rows:
-            # Not answerable from the DB schema → silently fall back to document
-            # search (no error note that would pollute a plain document answer).
-            return state
+            # Not answerable from the DB schema → fall back to document search.
+            # Keep a schema slice so that if documents also come up empty, the
+            # answer can explain what this database CAN answer instead of the
+            # generic "no information" dead-end.
+            return {**state, "schema_excerpt": schema[:1500]}
         if result.get("sql_error") and not rows:
             return {**state, "generated_sql": sql, "sql_error": result["sql_error"]}
 

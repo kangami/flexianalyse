@@ -227,6 +227,24 @@ def run_search_stream(
         state["prior_sql"] = prior_sql or ""
         state = understand_query(state)
 
+        # Schema-comprehension questions ("what tables do I have", "how are X and
+        # Y linked") are answered straight from the catalog — no SQL, no retrieval.
+        if state.get("question_type") == "schema" and "sql" in set(allowed_connectors or []):
+            from ai.agents.search.nodes.schema_answer import build_schema_context
+            ctx = build_schema_context(org_id, scope_connector_id, query)
+            if ctx:
+                sources = [{"title": "Schema catalog", "type": "schema", "connector": "sql", "score": 10}]
+                state = {**state, "context": ctx, "sources": sources}
+                yield ("meta", {
+                    "generated_sql": "", "sql_error": None, "sql_columns": [],
+                    "sql_rows": [], "sql_total_rows": 0,
+                    "sources": sources, "intent": state.get("intent", ""),
+                })
+                for delta in stream_answer_tokens(state):
+                    yield ("token", delta)
+                yield ("done", {})
+                return
+
         # SQL-first: try the database. If it answers, DON'T also run document
         # search — blending unrelated document chunks into a DB answer made the
         # model contradict a correct SQL result and cite the wrong connector.
@@ -258,5 +276,6 @@ def run_search_stream(
 
         yield ("done", {})
     except Exception as e:
+        # Raw exception text stays in the logs; the user gets a neutral message.
         logger.error("run_search_stream failed: %s", e, exc_info=True)
-        yield ("error", str(e))
+        yield ("error", "Une erreur interne est survenue — merci de réessayer. (Internal error — please retry.)")

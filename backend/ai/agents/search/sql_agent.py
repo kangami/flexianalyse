@@ -282,6 +282,10 @@ def _finalize_uncertain(state: SqlReActState) -> SqlReActState:
 # ── Routing ──────────────────────────────────────────────────────────────────
 
 def _route_after_execute(state: SqlReActState) -> str:
+    if state.get("sql_error") == "empty query":
+        # The generator declined (question not answerable from the schema) —
+        # retrying the exact same prompt would return "" again. Give up now.
+        return "give_up"
     if state.get("sql_error"):
         return "retry" if state.get("attempts", 0) < MAX_SQL_ATTEMPTS else "give_up"
     return "reflect"

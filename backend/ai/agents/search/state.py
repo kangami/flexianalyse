@@ -29,6 +29,8 @@ class SearchState(TypedDict):
     sql_plan: str                # ReAct plan (tables/joins/filters) behind the query
     sql_uncertain: bool          # query ran but the self-review couldn't validate it
     prior_sql: str               # last validated SQL of the conversation (follow-up consistency)
+    question_type: str           # data | schema | advice | chitchat (router)
+    schema_excerpt: str          # schema slice kept when SQL declined, for a helpful dead-end answer
 
     # ── Generation 
     context: str                 # assembled context for LLM

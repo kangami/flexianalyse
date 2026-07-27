@@ -116,8 +116,11 @@ def assemble_context(state: SearchState) -> SearchState:
             "score":     10,
         })
     elif state.get("sql_error") and (state.get("needs_database") or state.get("generated_sql")):
+        # Never splice the raw DB error into the prose — it leaks technical detail.
         parts.append(
-            f"\n## Live Database Query\n(No data returned — {state['sql_error']})"
+            "\n## Live Database Query\nThe database query failed this time. Say so "
+            "briefly in the answer language, without quoting any technical error, "
+            "and invite the user to rephrase or retry."
         )
     elif sql_answered:
         # The query ran fine but matched nothing — that IS the answer.
@@ -131,6 +134,18 @@ def assemble_context(state: SearchState) -> SearchState:
             "or that the query failed — it ran correctly; there is simply no such data."
         )
         sources.append({"title": "Live SQL query", "type": "sql", "connector": "sql", "score": 10})
+
+    # Helpful dead-end: nothing answered but we know the database — guide the
+    # user toward what it CAN answer instead of the generic "no information".
+    if not parts and state.get("schema_excerpt"):
+        parts.append("## Database overview (schema excerpt)")
+        parts.append(state["schema_excerpt"])
+        parts.append(
+            "\nINSTRUCTIONS: this question could not be answered with a database "
+            "query and no matching documents were found. Say so briefly in the "
+            "answer language, describe in one sentence what this database covers, "
+            "and suggest 2-3 concrete questions it CAN answer. Do not invent data."
+        )
 
     context = "\n".join(parts)
 
@@ -173,11 +188,11 @@ def _answer_messages(state: SearchState):
     lang_name = _detect_language_name(query)
 
     if not context.strip():
-        return None, (
-            "Je n'ai trouvé aucune information pertinente pour votre requête."
-            if lang_name == "French"
-            else "I couldn't find any relevant information for your query."
-        )
+        fallbacks = {
+            "French": "Je n'ai trouvé aucune information pertinente pour votre requête.",
+            "Spanish": "No encontré información relevante para tu consulta.",
+        }
+        return None, fallbacks.get(lang_name, "I couldn't find any relevant information for your query.")
 
     lang_line = (
         f"You MUST write your ENTIRE answer in {lang_name}, regardless of the "

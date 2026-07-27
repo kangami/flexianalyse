@@ -18,6 +18,7 @@ _SYSTEM_PROMPT = """You are a search query analyst for an enterprise AI assistan
 Analyze the user query and return a JSON object with:
 {
   "intent": "factual" | "analytical" | "exploratory",
+  "question_type": "data" | "schema" | "advice" | "chitchat",
   "entities": [{"name": "...", "type": "person|company|project|table|document|concept"}],
   "sub_queries": ["...", "..."],
   "needs_database": true | false
@@ -27,6 +28,18 @@ Intent types:
 - factual: looking for a specific fact ("who is X", "what is the value of Y")
 - analytical: needs aggregation or reasoning ("summarize", "compare", "how many")
 - exploratory: broad discovery ("what do we have about X", "show me everything related to Y")
+
+question_type — WHAT KIND of answer the user expects:
+- data: values/records/aggregates FROM the data ("how many rentals in July",
+  "top 10 customers", "list unpaid invoices")
+- schema: about the database STRUCTURE itself — which tables/columns exist, how
+  tables are related, what a table contains or means ("what tables do I have",
+  "how is customer linked to payment", "describe the rental table",
+  "explain my database")
+- advice: recommendations or guidance ABOUT the data — analyses to run, KPIs,
+  data quality, modeling/optimization suggestions ("what analyses could I run",
+  "which KPIs do you recommend", "how could I improve this schema")
+- chitchat: greetings, thanks, small talk with no informational request
 
 Sub-queries: decompose complex queries into 1-3 simpler atomic searches.
 For simple queries, sub_queries = [original_query].
@@ -45,16 +58,16 @@ Return ONLY the JSON object, no other text."""
 
 
 def _org_sql_tables(org_id: str) -> list[str]:
-    """SQL table names known for this org (local lookup) — given to the LLM so it
-    can reliably decide `needs_database` despite spelling/plural/language."""
+    """SQL table names known for this org — given to the LLM so it can reliably
+    decide `needs_database` despite spelling/plural/language. Reads the schema
+    catalog (the old Resource-based source is no longer populated for SQL)."""
     try:
-        from models.resource import Resource
-        rows = Resource.query.filter(
-            Resource.organization_id == org_id,
-            Resource.type.in_(("sql", "sql_table")),
-            Resource.deleted_at.is_(None),
-        ).all()
-        return [r.title for r in rows if r.title]
+        from models.connector_schema import ConnectorSchemaTable
+        rows = ConnectorSchemaTable.query.filter_by(organization_id=org_id).all()
+        return [
+            r.table_name for r in rows
+            if not getattr(r, "partition_parent", None) and not getattr(r, "is_audit", False)
+        ][:200]
     except Exception as e:
         logger.warning("Could not load SQL tables for understanding: %s", e)
         return []
@@ -82,9 +95,13 @@ def understand_query(state: SearchState) -> SearchState:
 
         data = json.loads(response.choices[0].message.content)
 
+        qtype = data.get("question_type", "data")
+        if qtype not in ("data", "schema", "advice", "chitchat"):
+            qtype = "data"
         return {
             **state,
             "intent": data.get("intent", "factual"),
+            "question_type": qtype,
             "entities": data.get("entities", []),
             "sub_queries": data.get("sub_queries", [state["query"]]),
             "needs_database": bool(data.get("needs_database", False)),
@@ -95,6 +112,7 @@ def understand_query(state: SearchState) -> SearchState:
         return {
             **state,
             "intent": "factual",
+            "question_type": "data",
             "entities": [],
             "sub_queries": [state["query"]],
             "needs_database": False,
