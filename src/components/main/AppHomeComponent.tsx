@@ -136,6 +136,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
     const [insights, setInsights] = useState<{ domain: string; questions: string[]; schema_mermaid: string; tables: DiagramTable[] }>({ domain: '', questions: [], schema_mermaid: '', tables: [] });
     const [insightsLoading, setInsightsLoading] = useState(false);
     const [showDiagram, setShowDiagram] = useState(false);
+    const [schemaFocus, setSchemaFocus] = useState<string[]>([]);
     const [hideAudit, setHideAudit] = useState(true);
     const [diagramConnectorId, setDiagramConnectorId] = useState<string | null>(null);
 
@@ -478,6 +479,15 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
             const startTurn = (meta: Record<string, unknown>) => {
                 turnStarted = true;
                 setPendingQuery(null);
+                // Schema question → swap the left pane to the ER diagram and
+                // animate the join path between the tables the answer covers.
+                if (meta.question_type === 'schema') {
+                    setSchemaFocus(Array.isArray(meta.schema_focus) ? meta.schema_focus as string[] : []);
+                    setShowReport(false);
+                    setShowDiagram(true);
+                } else if (meta.question_type) {
+                    setSchemaFocus([]);
+                }
                 setConversation(prev => [...prev, {
                     id: turnId,
                     query: question,
@@ -736,7 +746,7 @@ const AppHomeComponent: React.FC<AppHomeComponentProps> = ({
                             </div>
                             <div className="flex-1 min-h-0 relative">
                                 {insights.tables.length
-                                    ? <SchemaFlow tables={insights.tables} onTableSelect={openTableDetail} />
+                                    ? <SchemaFlow tables={insights.tables} onTableSelect={openTableDetail} focusTables={schemaFocus} />
                                     : <div className="h-full flex items-center justify-center text-gray-400 text-xs">{insightsLoading ? t('suggest.analysing') : t('home.diagram.noSchema')}</div>}
 
                                 {/* Table detail panel — appears when a table is clicked. */}

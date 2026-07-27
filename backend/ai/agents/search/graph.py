@@ -231,7 +231,7 @@ def run_search_stream(
         # Y linked") are answered straight from the catalog — no SQL, no retrieval.
         if state.get("question_type") == "schema" and "sql" in set(allowed_connectors or []):
             from ai.agents.search.nodes.schema_answer import build_schema_context
-            ctx = build_schema_context(org_id, scope_connector_id, query)
+            ctx, schema_focus = build_schema_context(org_id, scope_connector_id, query)
             if ctx:
                 sources = [{"title": "Schema catalog", "type": "schema", "connector": "sql", "score": 10}]
                 state = {**state, "context": ctx, "sources": sources}
@@ -239,6 +239,7 @@ def run_search_stream(
                     "generated_sql": "", "sql_error": None, "sql_columns": [],
                     "sql_rows": [], "sql_total_rows": 0,
                     "sources": sources, "intent": state.get("intent", ""),
+                    "question_type": "schema", "schema_focus": schema_focus,
                 })
                 for delta in stream_answer_tokens(state):
                     yield ("token", delta)
@@ -269,6 +270,7 @@ def run_search_stream(
             "sql_total_rows": state.get("sql_total_rows", len(state.get("sql_rows", []))),
             "sources":       state.get("sources", []),
             "intent":        state.get("intent", ""),
+            "question_type": state.get("question_type", "data"),
         })
 
         for delta in stream_answer_tokens(state):

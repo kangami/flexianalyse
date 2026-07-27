@@ -14,18 +14,22 @@ MAX_LISTED_TABLES = 150
 MAX_DETAILED = 6
 
 
-def build_schema_context(org_id: str, scope_connector_id: str | None, question: str) -> str:
-    """Contexte factuel du schéma pour la réponse. "" si pas de catalogue."""
+def build_schema_context(org_id: str, scope_connector_id: str | None, question: str) -> tuple[str, list[str]]:
+    """(contexte factuel du schéma, tables à surligner sur le diagramme).
+
+    Les tables retournées sont celles de la question + le chemin de jointure qui
+    les relie — le frontend bascule sur le diagramme ER et anime ce chemin.
+    ("", []) si pas de catalogue."""
     from ai.agents.search.nodes.sql_query import _resolve_sql_connector
     from ai.agents.search.schema_graph import SchemaGraph
     from models.connector_schema import ConnectorSchemaTable
 
     connector = _resolve_sql_connector(org_id, scope_connector_id)
     if not connector:
-        return ""
+        return "", []
     rows = ConnectorSchemaTable.query.filter_by(connector_id=connector.id).all()
     if not rows:
-        return ""
+        return "", []
 
     visible = [r for r in rows if not getattr(r, "partition_parent", None)]
     n_partitions = len(rows) - len(visible)
@@ -47,6 +51,8 @@ def build_schema_context(org_id: str, scope_connector_id: str | None, question: 
         + (f", {n_partitions} partition children (covered by their parent tables)" if n_partitions else "")
         + ".",
     ]
+
+    focus = [r.table_name for r in mentioned]
 
     if mentioned:
         parts.append("\n### Tables the question mentions (full detail)")
@@ -72,9 +78,10 @@ def build_schema_context(org_id: str, scope_connector_id: str | None, question: 
                     {"name": r.table_name, "columns": r.columns or [], "foreign_keys": r.foreign_keys or []}
                     for r in business
                 ])
-                path, _ = graph.render_join_path([r.table_name for r in mentioned])
+                path, on_tables = graph.render_join_path([r.table_name for r in mentioned])
                 if path:
                     parts.append(f"\n### How they are linked (real foreign-key path)\n{path}")
+                    focus = [t for t in on_tables if t] or focus
             except Exception as e:
                 logger.warning("Join path for schema answer failed: %s", e)
 
@@ -91,4 +98,4 @@ def build_schema_context(org_id: str, scope_connector_id: str | None, question: 
         "clear explanation of the schema (tables, columns, relationships) based ONLY "
         "on the facts above — never invent tables or columns, and do not show row data."
     )
-    return "\n".join(parts)
+    return "\n".join(parts), focus

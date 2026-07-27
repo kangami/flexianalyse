@@ -28,6 +28,8 @@ export interface DiagramTable {
 interface SchemaFlowProps {
   tables: DiagramTable[];
   onTableSelect?: (name: string) => void;
+  /** Tables to highlight and frame (e.g. the join path of a chat schema answer). */
+  focusTables?: string[];
 }
 
 const NODE_W = 190;
@@ -158,7 +160,7 @@ function buildGraph(tables: DiagramTable[]): { nodes: Node<TableData>[]; edges: 
   return { nodes, edges };
 }
 
-function Flow({ tables, onTableSelect }: SchemaFlowProps) {
+function Flow({ tables, onTableSelect, focusTables }: SchemaFlowProps) {
   const { theme } = useTheme();
   const { t } = useLanguage();
   const dark = theme !== 'white';
@@ -179,6 +181,9 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
 
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState<string | null>(null);
+  // External highlight (chat schema answer) — dismissable by clicking the pane.
+  const [extFocus, setExtFocus] = useState<string[]>([]);
+  useEffect(() => { setExtFocus(focusTables ?? []); }, [focusTables]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
 
@@ -194,14 +199,16 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
   // The active focus set = the focused/searched table(s) + their neighbours.
   const focusSet = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const present = new Set(baseNodes.map((n) => n.id));
     const seeds = new Set<string>();
     if (focused) seeds.add(focused);
     if (q) baseNodes.forEach((n) => { if (n.id.toLowerCase().includes(q)) seeds.add(n.id); });
+    extFocus.forEach((name) => { if (present.has(name)) seeds.add(name); });
     if (!seeds.size) return null;
     const set = new Set(seeds);
     seeds.forEach((s) => neighbors.get(s)?.forEach((n) => set.add(n)));
     return { seeds, set };
-  }, [query, focused, baseNodes, neighbors]);
+  }, [query, focused, extFocus, baseNodes, neighbors]);
 
   // The single best table to recenter on. A query like "contract" matches many
   // tables on a large schema; fitting ALL of them zooms the camera right out and
@@ -258,6 +265,14 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
     return () => clearTimeout(t);
   }, [primary, fitView]);
 
+  // External highlight: frame the WHOLE path (a handful of tables), animated.
+  useEffect(() => {
+    if (!extFocus.length) return;
+    const ids = extFocus.map((id) => ({ id }));
+    const t = setTimeout(() => fitView({ nodes: ids, duration: 500, padding: 0.35, maxZoom: 1.2 }), 80);
+    return () => clearTimeout(t);
+  }, [extFocus, fitView]);
+
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       setFocused(node.id);
@@ -277,9 +292,9 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
           placeholder={t('schema.search')}
           className="w-40 text-xs bg-transparent focus:outline-none text-gray-700 placeholder:text-gray-400"
         />
-        {(query || focused) && (
+        {(query || focused || extFocus.length > 0) && (
           <button
-            onClick={() => { setQuery(''); setFocused(null); fitView({ duration: 400, padding: 0.2 }); }}
+            onClick={() => { setQuery(''); setFocused(null); setExtFocus([]); fitView({ duration: 400, padding: 0.2 }); }}
             className="text-gray-400 hover:text-gray-600"
             title={t('schema.reset')}
           >
@@ -306,7 +321,7 @@ function Flow({ tables, onTableSelect }: SchemaFlowProps) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
-        onPaneClick={() => setFocused(null)}
+        onPaneClick={() => { setFocused(null); setExtFocus([]); }}
         onEdgeMouseEnter={showTip}
         onEdgeMouseMove={showTip}
         onEdgeMouseLeave={() => setTip(null)}
