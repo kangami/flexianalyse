@@ -30,6 +30,7 @@ class SearchState(TypedDict):
     sql_uncertain: bool          # query ran but the self-review couldn't validate it
     prior_sql: str               # last validated SQL of the conversation (follow-up consistency)
     question_type: str           # data | schema | advice | chitchat (router)
+    query_language: str          # language of the question (LLM-detected; beats langdetect on short queries)
     prior_result: dict           # {sql, columns, rows[:20]} of the last SQL turn — numeric follow-ups
     schema_excerpt: str          # schema slice kept when SQL declined, for a helpful dead-end answer
 

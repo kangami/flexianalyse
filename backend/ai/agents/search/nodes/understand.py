@@ -19,6 +19,7 @@ Analyze the user query and return a JSON object with:
 {
   "intent": "factual" | "analytical" | "exploratory",
   "question_type": "data" | "schema" | "advice" | "chitchat",
+  "language": "English name of the language the query is written in (e.g. French, English, Spanish)",
   "entities": [{"name": "...", "type": "person|company|project|table|document|concept"}],
   "sub_queries": ["...", "..."],
   "needs_database": true | false
@@ -102,6 +103,7 @@ def understand_query(state: SearchState) -> SearchState:
             **state,
             "intent": data.get("intent", "factual"),
             "question_type": qtype,
+            "query_language": (data.get("language") or "").strip(),
             "entities": data.get("entities", []),
             "sub_queries": data.get("sub_queries", [state["query"]]),
             "needs_database": bool(data.get("needs_database", False)),
@@ -113,6 +115,7 @@ def understand_query(state: SearchState) -> SearchState:
             **state,
             "intent": "factual",
             "question_type": "data",
+            "query_language": "",
             "entities": [],
             "sub_queries": [state["query"]],
             "needs_database": False,
