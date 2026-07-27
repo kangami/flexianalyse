@@ -186,7 +186,8 @@ def _known_sql_tables(org_id: str, connector_id: str | None = None) -> list[str]
                 q = q.filter(ConnectorSchemaTable.connector_id == UUID(connector_id))
             except (ValueError, TypeError):
                 pass
-        return [t.table_name for t in q.all() if t.table_name]
+        # Names only — loading full rows would drag the 1536-d embeddings along.
+        return [r[0] for r in q.with_entities(ConnectorSchemaTable.table_name).all() if r[0]]
     except Exception as e:
         logger.warning("Could not load catalog tables for org %s: %s", org_id, e)
         return []
@@ -420,6 +421,10 @@ def _fetch_schema(database_url: str) -> str:
 # Schema catalog + per-query table retrieval (schema-linking)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# SchemaGraph per connector, invalidated by re-sync (schema_crawled_at changes).
+_GRAPH_CACHE: dict = {}
+
+
 def _build_schema_graph(connector, database_url: str):
     """FK graph of the whole schema (from the catalog, or live if not crawled).
     Powers the join-path hint and the schema-aware error feedback in the ReAct
@@ -429,16 +434,31 @@ def _build_schema_graph(connector, database_url: str):
     try:
         tables = None
         if connector is not None:
+            key = str(connector.id)
+            ver = str(getattr(connector, "schema_crawled_at", None))
+            cached = _GRAPH_CACHE.get(key)
+            if cached and cached[0] == ver:
+                return cached[1]
+            from sqlalchemy.orm import load_only
             from models.connector_schema import ConnectorSchemaTable
-            rows = ConnectorSchemaTable.query.filter_by(connector_id=connector.id).all()
+            rows = (
+                ConnectorSchemaTable.query
+                .options(load_only(
+                    ConnectorSchemaTable.table_name, ConnectorSchemaTable.columns,
+                    ConnectorSchemaTable.foreign_keys, ConnectorSchemaTable.partition_parent,
+                ))
+                .filter_by(connector_id=connector.id).all()
+            )
             if rows:
                 tables = [
                     {"name": r.table_name, "columns": r.columns or [], "foreign_keys": r.foreign_keys or []}
                     for r in rows if not getattr(r, "partition_parent", None)
                 ]
-        if tables is None:
-            tables = [t for t in fetch_tables_meta(database_url, limit=100000)
-                      if not t.get("partition_parent")]
+                graph = SchemaGraph(tables)
+                _GRAPH_CACHE[key] = (ver, graph)
+                return graph
+        tables = [t for t in fetch_tables_meta(database_url, limit=100000)
+                  if not t.get("partition_parent")]
         return SchemaGraph(tables)
     except Exception as e:
         logger.warning("Schema graph build failed (%s) — join-path hints disabled", e)
@@ -457,7 +477,15 @@ def _fetch_schema_smart(connector, question: str, database_url: str, limits: dic
     from models.connector_schema import ConnectorSchemaTable
 
     try:
-        rows = ConnectorSchemaTable.query.filter_by(connector_id=connector.id).all()
+        base = ConnectorSchemaTable.query.filter_by(connector_id=connector.id)
+        # Small catalog (fits inline) → skip loading the 1536-d embeddings, they
+        # are only needed by the retrieval branch on large schemas.
+        n_total = base.count()
+        if n_total <= limits["inline_threshold"] or not limits["retrieval_top_k"]:
+            from sqlalchemy.orm import defer
+            rows = base.options(defer(ConnectorSchemaTable.embedding)).all()
+        else:
+            rows = base.all()
     except Exception as e:
         logger.warning("Schema catalog read failed (%s) — live introspection", e)
         return _fetch_schema(database_url)

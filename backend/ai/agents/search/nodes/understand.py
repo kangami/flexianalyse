@@ -90,7 +90,7 @@ def understand_query(state: SearchState) -> SearchState:
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            max_tokens=800,
+            max_tokens=300,
         )
 
         data = json.loads(response.choices[0].message.content)

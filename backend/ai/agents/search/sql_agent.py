@@ -107,7 +107,15 @@ class SqlReActState(TypedDict):
 # ── Nodes ────────────────────────────────────────────────────────────────────
 
 def _plan_node(state: SqlReActState) -> SqlReActState:
-    """Reason about HOW to answer before writing any SQL."""
+    """Reason about HOW to answer before writing any SQL.
+
+    On a follow-up (prior_sql present) the previous query already pins the
+    tables/date column/measures — skip the plan LLM call and go straight to
+    generation (the join-path computation below still runs on the question)."""
+    if state.get("prior_sql"):
+        plan = ""
+    else:
+        plan = None
     prior_block = (
         f"\nEarlier in this conversation, this query correctly answered the previous "
         f"question:\n{state['prior_sql']}\n"
@@ -130,20 +138,21 @@ Produce a SHORT plan to answer it with SQL — do NOT write SQL yet:
 - the exact filters (column and concrete value) implied by the question;
 - the aggregation / grouping / ordering needed.
 Max 5 lines."""
-    try:
-        resp = get_openai_client().chat.completions.create(
-            model=PLAN_MODEL,
-            messages=[
-                {"role": "system", "content": "You plan SQL queries precisely and concisely."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=250,
-            temperature=0,
-        )
-        plan = (resp.choices[0].message.content or "").strip()
-    except Exception as e:
-        logger.warning("SQL plan step failed: %s", e)
-        plan = ""
+    if plan is None:
+        try:
+            resp = get_openai_client().chat.completions.create(
+                model=PLAN_MODEL,
+                messages=[
+                    {"role": "system", "content": "You plan SQL queries precisely and concisely."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=250,
+                temperature=0,
+            )
+            plan = (resp.choices[0].message.content or "").strip()
+        except Exception as e:
+            logger.warning("SQL plan step failed: %s", e)
+            plan = ""
 
     # Compute the exact FK join path between the tables the plan names, straight
     # from the schema graph — so the generator follows the real route (e.g. through
@@ -252,7 +261,7 @@ Return JSON exactly: {{"valid": true/false, "reason": "...", "fix_hint": "..."}}
                 {"role": "system", "content": "You are a strict SQL reviewer. Return only valid JSON."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=300,
+            max_tokens=150,
             temperature=0,
         )
         data = json.loads(resp.choices[0].message.content)
