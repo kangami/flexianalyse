@@ -12,6 +12,7 @@ from controllers.role_controller import register as _register_roles
 from controllers.skeleton_controller import register as _register_skeletons
 from controllers.lead_controller import register as _register_leads
 from controllers.plan_controller import register as _register_plans
+from controllers.billing_controller import register as _register_billing
 from controllers.audit_controller import register as _register_audit
 from connectors.api import register as _register_connectors
 
@@ -21,8 +22,11 @@ api_bp = Blueprint("api_v2", __name__, url_prefix="/api/v2")
 
 # Routes joignables sans aucun token.
 # `submit_lead` est le formulaire Get Started côté public : il doit rester ouvert.
+# `stripe_webhook` est appelé par Stripe (pas d'utilisateur) et vérifié par
+# signature, donc il ne passe pas par l'auth Firebase.
 PUBLIC_ENDPOINTS = {
     "api_v2.submit_lead",
+    "api_v2.stripe_webhook",
 }
 
 # Routes exigeant un token Firebase valide mais PAS encore de ligne `users` :
@@ -120,4 +124,5 @@ def register_all():
     _register_connectors(api_bp)
     _register_leads(api_bp)
     _register_plans(api_bp)
+    _register_billing(api_bp)
     _register_audit(api_bp)

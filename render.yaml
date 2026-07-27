@@ -153,6 +153,19 @@ envVarGroups:
         sync: false
       - key: FRONTEND_URL           # your Vercel URL, e.g. https://flexianalyse.vercel.app
         sync: false
+      # Stripe billing (API handles checkout + webhook). Set in the dashboard.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO_MONTH
+        sync: false
+      - key: STRIPE_PRICE_PRO_YEAR
+        sync: false
+      - key: STRIPE_PRICE_BUSINESS_MONTH
+        sync: false
+      - key: STRIPE_PRICE_BUSINESS_YEAR
+        sync: false
 
   # Secrets shared by the API, worker and gateway for the dial-home agent.
   # Generated once and identical across the three services (JWT signing + /rpc auth).
