@@ -177,10 +177,11 @@ def _contextualize_query(query: str, history: list) -> str:
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": (
-                    "Reformule la dernière question de l'utilisateur en une question "
-                    "autonome et complète, en intégrant le contexte de la conversation. "
-                    "Réponds UNIQUEMENT par la question reformulée, dans la même langue. "
-                    "Si la question est déjà autonome, renvoie-la telle quelle."
+                    "Rewrite the LAST user question into a standalone, complete question "
+                    "using the conversation context. CRITICAL: write it in the SAME "
+                    "LANGUAGE the last user question is written in — ignore the language "
+                    "of the earlier messages. If the question is already standalone, "
+                    "return it unchanged. Reply with ONLY the rewritten question."
                 )},
                 {"role": "user", "content": f"Conversation:\n{convo}\n\nDernière question: {query}"},
             ],
@@ -223,8 +224,10 @@ def run_search_stream(
     from ai.agents.search.nodes.generate import assemble_context, stream_answer_tokens
 
     try:
+        original_query = query
         query = _contextualize_query(query, history or [])
         state = _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id)
+        state["original_query"] = original_query   # language reference: what the user actually typed
         state["prior_sql"] = prior_sql or ""
         state["prior_result"] = prior_result
         state = understand_query(state)

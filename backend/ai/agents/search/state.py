@@ -31,6 +31,7 @@ class SearchState(TypedDict):
     prior_sql: str               # last validated SQL of the conversation (follow-up consistency)
     question_type: str           # data | schema | advice | chitchat (router)
     query_language: str          # language of the question (LLM-detected; beats langdetect on short queries)
+    original_query: str          # what the user typed, before follow-up rewriting (language reference)
     prior_result: dict           # {sql, columns, rows[:20]} of the last SQL turn — numeric follow-ups
     schema_excerpt: str          # schema slice kept when SQL declined, for a helpful dead-end answer
 

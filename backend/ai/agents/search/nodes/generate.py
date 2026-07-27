@@ -199,9 +199,14 @@ def _answer_messages(state: SearchState):
     context = state.get("context", "")
     intent  = state.get("intent", "factual")
 
-    # LLM-detected language (understand_query) first — langdetect misfires on the
-    # short queries a DB agent gets; the statistical detector is only the fallback.
-    lang_name = state.get("query_language") or _detect_language_name(query)
+    # Language priority: LLM detection (reliable even on short queries; the
+    # follow-up rewriter now preserves the user's language), then langdetect on
+    # what the user actually TYPED, then on the rewritten query.
+    lang_name = (
+        state.get("query_language")
+        or _detect_language_name(state.get("original_query") or "")
+        or _detect_language_name(query)
+    )
 
     if not context.strip():
         fallbacks = {
