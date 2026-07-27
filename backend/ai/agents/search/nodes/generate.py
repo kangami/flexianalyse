@@ -147,6 +147,20 @@ def assemble_context(state: SearchState) -> SearchState:
             "and suggest 2-3 concrete questions it CAN answer. Do not invent data."
         )
 
+    # Numeric memory: the previous turn's result, for follow-ups that refer to it
+    # ("what % of the total?", "explain that number"). Ignored otherwise.
+    pr = state.get("prior_result")
+    if pr and pr.get("rows"):
+        parts.append("\n## Previous turn's result (reference only)")
+        if pr.get("sql"):
+            parts.append(f"Query: `{pr['sql']}`")
+        parts.append(_format_sql_rows(pr.get("columns", []), pr["rows"], max_rows=20))
+        parts.append(
+            "Use this ONLY if the current question refers back to the previous "
+            "result (e.g. 'that number', 'what % of the total', 'explain this'); "
+            "otherwise ignore it completely."
+        )
+
     context = "\n".join(parts)
 
     # Truncate if too long
@@ -226,8 +240,10 @@ Rules:
    THAT subject. If the context is about a DIFFERENT subject (e.g. another
    person's payslip), DO NOT use it, DO NOT report its figures, and DO NOT
    describe it as a partial match — it is simply not an answer.
-8. Answer ONLY the current question, on its own. Never refer to a previous
-   question, a previous answer, or any other subject the user did not ask about.
+8. Answer the current question. You MAY use the "Previous turn's result" block
+   when the question refers back to it (e.g. "that number", "what % of the
+   total", "compare with the previous result") — otherwise ignore it, and never
+   drag in subjects the user did not ask about.
 
 If the context contains nothing about the requested subject, say briefly that no
 information was found for that subject — written in the answer language — and

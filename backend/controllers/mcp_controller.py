@@ -534,6 +534,7 @@ def enterprise_search_stream():
     conversation_id = data.get('conversation_id')
     history: list = []
     prior_sql = ''
+    prior_result = None
     convo = None
     if conversation_id:
         convo = Conversation.query.filter_by(
@@ -549,13 +550,20 @@ def enterprise_search_stream():
         prior = Message.query.filter_by(conversation_id=convo.id, deleted_at=None) \
             .order_by(Message.created_at.asc()).all()
         history = [{"role": m.role, "content": m.content or ""} for m in prior]
-        # Dernier SQL généré de la conversation — ancre les follow-ups sur la même
-        # base de requête (mêmes tables / colonne de date / mesures).
-        prior_sql = next((
-            (m.message_metadata or {}).get('generated_sql', '')
-            for m in reversed(prior)
-            if m.role == 'assistant' and (m.message_metadata or {}).get('generated_sql')
-        ), '')
+        # Dernier tour SQL de la conversation : le SQL ancre les follow-ups sur la
+        # même base de requête, et un extrait du résultat permet les suites
+        # numériques ("quel % du total ?", "explique ce chiffre").
+        for m in reversed(prior):
+            md = (m.message_metadata or {}) if m.role == 'assistant' else {}
+            if md.get('generated_sql'):
+                prior_sql = md['generated_sql']
+                if md.get('sql_rows'):
+                    prior_result = {
+                        'sql': prior_sql,
+                        'columns': md.get('sql_columns') or [],
+                        'rows': (md.get('sql_rows') or [])[:20],
+                    }
+                break
 
     conv_id = str(convo.id)
     # Persist the user turn now (survives an early client disconnect).
@@ -576,6 +584,7 @@ def enterprise_search_stream():
                 scope_connector_id=data.get('connector_id'),
                 history=history,
                 prior_sql=prior_sql,
+                prior_result=prior_result,
             ):
                 if event == 'meta':
                     meta_payload = payload
