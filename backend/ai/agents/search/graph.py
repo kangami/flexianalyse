@@ -246,6 +246,25 @@ def run_search_stream(
                 yield ("done", {})
                 return
 
+        # Advice questions ("what analyses could I run", "which KPIs") get a
+        # consultative answer grounded in the catalog + inferred domain — no SQL.
+        if state.get("question_type") == "advice" and "sql" in set(allowed_connectors or []):
+            from ai.agents.search.nodes.schema_answer import build_advice_context
+            ctx = build_advice_context(org_id, scope_connector_id, query)
+            if ctx:
+                sources = [{"title": "Database insights", "type": "advice", "connector": "sql", "score": 10}]
+                state = {**state, "context": ctx, "sources": sources}
+                yield ("meta", {
+                    "generated_sql": "", "sql_error": None, "sql_columns": [],
+                    "sql_rows": [], "sql_total_rows": 0,
+                    "sources": sources, "intent": state.get("intent", ""),
+                    "question_type": "advice",
+                })
+                for delta in stream_answer_tokens(state):
+                    yield ("token", delta)
+                yield ("done", {})
+                return
+
         # SQL-first: try the database. If it answers, DON'T also run document
         # search — blending unrelated document chunks into a DB answer made the
         # model contradict a correct SQL result and cite the wrong connector.
