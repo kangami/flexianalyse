@@ -671,6 +671,13 @@ Rules:
   tables, return an empty string.
 - When grouping "X by Y" (e.g. users by organization), select a Y label column
   (e.g. organizations.name) alongside the X rows and ORDER BY it.
+- DATE RANGES on timestamp columns: NEVER use BETWEEN — the upper bound
+  'YYYY-MM-31' means midnight and silently drops the whole last day. Use a
+  half-open range instead: col >= 'start' AND col < 'first day AFTER the range'
+  (e.g. July 2022 → col >= '2022-07-01' AND col < '2022-08-01').
+- Counting after a 1-N JOIN: if you join a child table (e.g. orders ⋈ payments)
+  and the question counts the "1" side, use COUNT(DISTINCT parent.pk) — a plain
+  COUNT(*) counts child rows and inflates the number.
 - You MAY and SHOULD use CTEs (WITH ...), window functions
   (LAG/LEAD/RANK/ROW_NUMBER/SUM(...) OVER (PARTITION BY ... ORDER BY ...)) and
   date functions (DATE_TRUNC('month', ...)) when the question needs them — e.g.
