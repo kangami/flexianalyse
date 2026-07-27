@@ -68,6 +68,11 @@ def get_db_insights(org_id: str, connector_id: str | None = None) -> dict:
         logger.error("DB introspection failed: %s", e, exc_info=True)
         return {"domain": "", "questions": [], "schema_mermaid": "", "error": "Could not read the database schema"}
 
+    # Partitions enfants : la parente les représente déjà sur le diagramme.
+    non_partition = [t for t in tables if not t.get("partition_parent")]
+    if non_partition:
+        tables = non_partition
+
     if hide_audit:
         kept = [t for t in tables if not is_audit_table(t["name"])]
         if kept:                # never blank the diagram if everything looked like audit
@@ -105,6 +110,7 @@ def _introspect(db_url: str, limit: int) -> list[dict]:
             "name": t["name"],
             "columns": t["columns"],
             "row_estimate": t.get("row_estimate"),
+            "partition_parent": t.get("partition_parent"),
             "fks": [
                 {"columns": fk.get("columns", []), "referred_table": fk.get("referred_table")}
                 for fk in t.get("foreign_keys", []) if fk.get("referred_table")

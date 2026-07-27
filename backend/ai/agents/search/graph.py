@@ -203,6 +203,7 @@ def run_search_stream(
     allowed_connectors: list[str] = None,
     scope_connector_id: str = None,
     history: list = None,
+    prior_sql: str = "",
 ):
     """Streaming variant — yields (event, payload) tuples for SSE.
 
@@ -223,6 +224,7 @@ def run_search_stream(
     try:
         query = _contextualize_query(query, history or [])
         state = _initial_state(query, org_id, user_role, allowed_connectors, scope_connector_id)
+        state["prior_sql"] = prior_sql or ""
         state = understand_query(state)
 
         # SQL-first: try the database. If it answers, DON'T also run document

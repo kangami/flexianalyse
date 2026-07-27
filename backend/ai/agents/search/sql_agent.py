@@ -89,6 +89,7 @@ class SqlReActState(TypedDict):
     model: str           # SQL generation model (from the org's plan tier)
     max_rows: int
     schema_graph: object  # SchemaGraph | None — FK graph for join paths / error hints
+    prior_sql: str       # last validated SQL of the conversation — keeps follow-ups on the same query basis
     # working state
     plan: str
     join_paths: str      # exact FK join conditions between the tables the question needs
@@ -107,10 +108,17 @@ class SqlReActState(TypedDict):
 
 def _plan_node(state: SqlReActState) -> SqlReActState:
     """Reason about HOW to answer before writing any SQL."""
+    prior_block = (
+        f"\nEarlier in this conversation, this query correctly answered the previous "
+        f"question:\n{state['prior_sql']}\n"
+        "For CONSISTENCY, reuse the same tables, date column and measures unless the "
+        "new question explicitly asks for something else.\n"
+        if state.get("prior_sql") else ""
+    )
     prompt = f"""Schema. Each line is `table(column type, ...)` and may end with
 `[FK: col -> other_table(col)]`:
 {state['db_schema']}
-
+{prior_block}
 Question: {state['question']}
 
 Produce a SHORT plan to answer it with SQL — do NOT write SQL yet:
@@ -165,7 +173,7 @@ def _generate_node(state: SqlReActState) -> SqlReActState:
     sql = _generate_sql(
         state["question"], state["db_schema"], state["model"],
         plan=state.get("plan", ""), feedback=state.get("feedback", ""),
-        join_paths=state.get("join_paths", ""),
+        join_paths=state.get("join_paths", ""), prior_sql=state.get("prior_sql", ""),
     )
     return {**state, "sql": sql, "attempts": state.get("attempts", 0) + 1,
             "sql_error": None, "feedback": ""}
@@ -310,11 +318,12 @@ sql_react_agent = _build_sql_react_graph()
 
 
 def run_sql_react(question: str, schema: str, database_url: str, model: str,
-                  max_rows: int, schema_graph=None) -> dict:
+                  max_rows: int, schema_graph=None, prior_sql: str = "") -> dict:
     """Run the Plan→Act→Reflect SQL loop; returns the final working state."""
     initial: SqlReActState = {
         "question": question, "db_schema": schema, "database_url": database_url,
         "model": model, "max_rows": max_rows, "schema_graph": schema_graph,
+        "prior_sql": prior_sql or "",
         "plan": "", "join_paths": "", "sql": "", "columns": [], "rows": [],
         "sql_error": None, "feedback": "", "attempts": 0, "valid": False,
         "verdict_reason": "", "uncertain": False,

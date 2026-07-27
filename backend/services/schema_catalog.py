@@ -126,6 +126,16 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
 
         from services.audit_tables import is_audit_table
 
+        def table_role(meta: dict) -> str:
+            if meta.get("partition_parent"):
+                return "partition_child"
+            if is_audit_table(meta["name"]):
+                return "audit"
+            fks = meta.get("foreign_keys", [])
+            if len(fks) >= 2 and len(meta.get("columns", [])) <= len(fks) + 2:
+                return "junction"
+            return "business"
+
         now = datetime.now(timezone.utc)
         rows = [
             ConnectorSchemaTable(
@@ -137,6 +147,8 @@ def crawl_connector_schema(connector_id: str, org_id: str) -> dict:
                 foreign_keys=meta.get("foreign_keys", []),
                 row_estimate=meta.get("row_estimate"),
                 is_audit=is_audit_table(meta["name"]),
+                table_role=table_role(meta),
+                partition_parent=meta.get("partition_parent"),
                 embedding=emb,
                 introspected_at=now,
             )

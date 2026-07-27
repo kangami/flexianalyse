@@ -118,6 +118,7 @@ def sql_query(state: SearchState) -> SearchState:
             model=limits["sql_model"],
             max_rows=limits.get("max_rows", MAX_RESULT_ROWS),
             schema_graph=_build_schema_graph(connector, database_url),
+            prior_sql=state.get("prior_sql", ""),
         )
 
         sql = result.get("sql", "")
@@ -310,6 +311,30 @@ SCHEMA_FETCH_TIMEOUT = int(os.getenv("SQL_SCHEMA_TIMEOUT", "90"))
 QUERY_EXEC_TIMEOUT = int(os.getenv("SQL_QUERY_TIMEOUT", "60"))
 
 
+def _pg_child_partitions(database_url: str) -> dict:
+    """Partitions enfants Postgres → {enfant: parente} (via pg_inherits).
+
+    Interroger la parente couvre déjà toutes les partitions ; exposer les enfants
+    au LLM pousse à des UNION ALL manuels incomplets (payment_p2022_01..07 en
+    oubliant 08). On les annote ici ; le catalogue les stocke avec leur rôle et
+    les rendus (prompt, diagramme, graphe) les masquent."""
+    if not database_url.split("://", 1)[0].startswith("postgres"):
+        return {}
+    try:
+        res = _call_sql_tool("query_database", {
+            "sql_query": ("SELECT c.relname AS child, p.relname AS parent "
+                          "FROM pg_inherits i "
+                          "JOIN pg_class c ON c.oid = i.inhrelid "
+                          "JOIN pg_class p ON p.oid = i.inhparent"),
+            "limit": 10000,
+        }, database_url)
+        if res.get("status") == "success":
+            return {r["child"]: r["parent"] for r in res.get("rows", []) if r.get("child")}
+    except Exception as e:
+        logger.warning("Partition detection failed: %s", e)
+    return {}
+
+
 def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> list[dict]:
     """Structured schema: [{name, columns:[{name,type,pk}], foreign_keys:[...]}].
 
@@ -319,6 +344,7 @@ def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> l
     back to the old per-table calls if the MCP server predates that tool, so a
     rolling deploy keeps working. Shared by the Text-to-SQL node and dbAnalyse.
     """
+    partitions = _pg_child_partitions(database_url)
     res = _call_sql_tool(
         "show_full_schema", {"limit": limit}, database_url, timeout=SCHEMA_FETCH_TIMEOUT
     )
@@ -332,6 +358,7 @@ def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> l
                 ],
                 "foreign_keys": t.get("foreign_keys", []),
                 "row_estimate": t.get("row_estimate"),
+                "partition_parent": partitions.get(t.get("table")),
             }
             for t in res["tables"]
         ]
@@ -349,6 +376,7 @@ def fetch_tables_meta(database_url: str, limit: int = MAX_TABLES_IN_PROMPT) -> l
                     for c in sch.get("columns", [])
                 ],
                 "foreign_keys": sch.get("foreign_keys", []),
+                "partition_parent": partitions.get(name),
             })
         except Exception as e:
             logger.warning("Schema read failed for table %s: %s", name, e)
@@ -361,7 +389,8 @@ def _fetch_schema(database_url: str) -> str:
     if cached and (time.time() - cached[0]) < _SCHEMA_TTL:
         return cached[1]
 
-    tables = fetch_tables_meta(database_url)[:MAX_TABLES_IN_PROMPT]
+    tables = [t for t in fetch_tables_meta(database_url)
+              if not t.get("partition_parent")][:MAX_TABLES_IN_PROMPT]
     if not tables:
         return ""
 
@@ -403,10 +432,11 @@ def _build_schema_graph(connector, database_url: str):
             if rows:
                 tables = [
                     {"name": r.table_name, "columns": r.columns or [], "foreign_keys": r.foreign_keys or []}
-                    for r in rows
+                    for r in rows if not getattr(r, "partition_parent", None)
                 ]
         if tables is None:
-            tables = fetch_tables_meta(database_url, limit=100000)
+            tables = [t for t in fetch_tables_meta(database_url, limit=100000)
+                      if not t.get("partition_parent")]
         return SchemaGraph(tables)
     except Exception as e:
         logger.warning("Schema graph build failed (%s) — join-path hints disabled", e)
@@ -433,6 +463,12 @@ def _fetch_schema_smart(connector, question: str, database_url: str, limits: dic
     if not rows:
         # Not crawled yet → live introspection for this question (cached in-process).
         return _fetch_schema(database_url)
+
+    # Partitions enfants : jamais dans le schéma du générateur — la table parente
+    # les couvre toutes (sinon UNION ALL manuels incomplets sur les mois).
+    non_partition = [r for r in rows if not getattr(r, "partition_parent", None)]
+    if non_partition:
+        rows = non_partition
 
     # Drop audit/log/system tables so they don't pollute retrieval (the agent
     # otherwise confuses an audit copy for the business table on a large schema).
@@ -580,7 +616,8 @@ def _render_catalog_schema(rows) -> str:
 
 
 def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
-                  plan: str = "", feedback: str = "", join_paths: str = "") -> str:
+                  plan: str = "", feedback: str = "", join_paths: str = "",
+                  prior_sql: str = "") -> str:
     """Translate a natural-language question into a single read-only SELECT.
 
     `plan` (from the ReAct planner) and `feedback` (a critique/error from a prior
@@ -588,6 +625,13 @@ def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
     `join_paths` are exact FK join conditions computed from the schema graph, so the
     model joins along the real path instead of inventing a direct foreign key.
     """
+    prior_block = (
+        f"\nPREVIOUS QUERY of this conversation (it answered the prior question "
+        f"correctly):\n{prior_sql}\n"
+        "Stay CONSISTENT with it: same tables, same date column, same way of "
+        "counting/summing — unless the new question explicitly changes the subject.\n"
+        if prior_sql else ""
+    )
     plan_block = f"\nApproach to follow:\n{plan}\n" if plan else ""
     path_block = (
         "\nVERIFIED JOIN PATH — these are the ONLY correct join conditions between the\n"
@@ -601,7 +645,7 @@ def _generate_sql(question: str, schema: str, model: str = SQL_GEN_MODEL,
     prompt = f"""Database schema. Each line is `table(column type, ...)` and may
 end with `[FK: col -> other_table(col)]` describing foreign-key relationships:
 {schema}
-{plan_block}{path_block}{feedback_block}
+{prior_block}{plan_block}{path_block}{feedback_block}
 User question: {question}
 
 Write a single read-only SQL SELECT query (PostgreSQL dialect) that answers it.

@@ -28,6 +28,7 @@ class SearchState(TypedDict):
     sql_error: Optional[str]     # error message if the SQL step failed
     sql_plan: str                # ReAct plan (tables/joins/filters) behind the query
     sql_uncertain: bool          # query ran but the self-review couldn't validate it
+    prior_sql: str               # last validated SQL of the conversation (follow-up consistency)
 
     # ── Generation 
     context: str                 # assembled context for LLM

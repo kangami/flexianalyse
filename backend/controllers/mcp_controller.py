@@ -533,6 +533,7 @@ def enterprise_search_stream():
     # Resolve or open the conversation, and gather prior turns for follow-up context.
     conversation_id = data.get('conversation_id')
     history: list = []
+    prior_sql = ''
     convo = None
     if conversation_id:
         convo = Conversation.query.filter_by(
@@ -548,6 +549,13 @@ def enterprise_search_stream():
         prior = Message.query.filter_by(conversation_id=convo.id, deleted_at=None) \
             .order_by(Message.created_at.asc()).all()
         history = [{"role": m.role, "content": m.content or ""} for m in prior]
+        # Dernier SQL généré de la conversation — ancre les follow-ups sur la même
+        # base de requête (mêmes tables / colonne de date / mesures).
+        prior_sql = next((
+            (m.message_metadata or {}).get('generated_sql', '')
+            for m in reversed(prior)
+            if m.role == 'assistant' and (m.message_metadata or {}).get('generated_sql')
+        ), '')
 
     conv_id = str(convo.id)
     # Persist the user turn now (survives an early client disconnect).
@@ -567,6 +575,7 @@ def enterprise_search_stream():
                 allowed_connectors=data.get('allowed_connectors'),
                 scope_connector_id=data.get('connector_id'),
                 history=history,
+                prior_sql=prior_sql,
             ):
                 if event == 'meta':
                     meta_payload = payload

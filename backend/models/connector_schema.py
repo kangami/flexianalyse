@@ -29,6 +29,10 @@ class ConnectorSchemaTable(db.Model):
     # Set at crawl time by the audit-table name heuristic. When the connector's
     # hide_audit_tables is on, these are excluded from the diagram + retrieval.
     is_audit = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
+    # Rôle sémantique posé au crawl : business | partition_child | audit | junction.
+    # Les partition_child/audit sont masqués du retrieval, du diagramme et du graphe.
+    table_role = db.Column(db.String, nullable=False, default='business', server_default='business')
+    partition_parent = db.Column(db.String, nullable=True)  # table parente si partition enfant
     embedding = db.Column(Vector(int(os.getenv('EMBEDDING_DIMENSIONS', '1536'))), nullable=True)
     introspected_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
