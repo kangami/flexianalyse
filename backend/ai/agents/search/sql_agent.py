@@ -246,6 +246,9 @@ Judge ONLY whether it answers the question in MEANING:
 - Right filters: the column and value match the question's intent and time range.
   In particular, BETWEEN on a timestamp with an upper bound like '2022-07-31'
   drops the whole last day — the range must be half-open (>= start AND < next day).
+- 0 rows + a case-sensitive text equality (col = 'Some Name') is SUSPECT: the
+  stored case may differ. Mark it INVALID with the fix hint to compare
+  case-insensitively (UPPER(col) = UPPER('...')).
 - Right aggregation / grouping / ordering for what was asked. A COUNT(*) after a
   1-N join counts child rows, not the entities the question asks about.
 - The result is plausible for the question (not obviously the wrong thing).

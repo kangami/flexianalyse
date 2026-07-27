@@ -701,6 +701,10 @@ Rules:
   tables, return an empty string.
 - When grouping "X by Y" (e.g. users by organization), select a Y label column
   (e.g. organizations.name) alongside the X rows and ORDER BY it.
+- TEXT FILTERS (names, categories, labels): the stored case is unknown (may be
+  'KARL SEAL', 'Karl Seal' or 'karl seal') — ALWAYS compare case-insensitively:
+  UPPER(col) = UPPER('value') (portable across dialects). Never bet on the case
+  the user typed.
 - DATE RANGES on timestamp columns: NEVER use BETWEEN — the upper bound
   'YYYY-MM-31' means midnight and silently drops the whole last day. Use a
   half-open range instead: col >= 'start' AND col < 'first day AFTER the range'
