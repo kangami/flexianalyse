@@ -231,7 +231,7 @@ def run_search_stream(
 
         # Schema-comprehension questions ("what tables do I have", "how are X and
         # Y linked") are answered straight from the catalog — no SQL, no retrieval.
-        if state.get("question_type") == "schema" and "sql" in set(allowed_connectors or []):
+        if state.get("question_type") == "schema" and "sql" in set(state.get("allowed_connectors") or []):
             from ai.agents.search.nodes.schema_answer import build_schema_context
             ctx, schema_focus = build_schema_context(org_id, scope_connector_id, query)
             if ctx:
@@ -250,7 +250,7 @@ def run_search_stream(
 
         # Advice questions ("what analyses could I run", "which KPIs") get a
         # consultative answer grounded in the catalog + inferred domain — no SQL.
-        if state.get("question_type") == "advice" and "sql" in set(allowed_connectors or []):
+        if state.get("question_type") == "advice" and "sql" in set(state.get("allowed_connectors") or []):
             from ai.agents.search.nodes.schema_answer import build_advice_context
             ctx = build_advice_context(org_id, scope_connector_id, query)
             if ctx:
