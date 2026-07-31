@@ -21,6 +21,7 @@ import Navbar from '../components/landing/Navbar';
 import { useAuth } from '../components/auth/AuthProvider';
 import { auth, googleProvider } from '../lib/firebase';
 import { apiFetch, setPendingFullName } from '../lib/apiClient';
+import { useSeo } from '../lib/seo';
 
 const companySizes = ['1–100', '101–500', '501–1,000', '1,001–2,000', '2,000+'];
 
@@ -71,6 +72,10 @@ const friendlyAuthError = (error: unknown): string => {
 };
 
 const GetStarted: React.FC = () => {
+  useSeo(
+    'Get Started – FlexiAnalyse',
+    'Create your free FlexiAnalyse account and start chatting with your databases and documents in minutes. No credit card required.',
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated } = useAuth();

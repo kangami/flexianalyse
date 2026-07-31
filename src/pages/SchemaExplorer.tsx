@@ -3,9 +3,14 @@ import { Link } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import Navbar from '../components/landing/Navbar';
 import SchemaExplorerSection from '../components/landing/SchemaExplorerSection';
+import { useSeo } from '../lib/seo';
 
 /** Dedicated page for the Schema Explorer feature (linked from Platform menu). */
 const SchemaExplorer: React.FC = () => {
+  useSeo(
+    'Schema Explorer – FlexiAnalyse',
+    'Connect a database and get an interactive map of your schema in minutes. Search tables, explore relationships, and start asking questions in plain language.',
+  );
   return (
     <div className="w-full flex flex-col min-h-screen" style={{ background: '#0a0a0f' }}>
       <Navbar />

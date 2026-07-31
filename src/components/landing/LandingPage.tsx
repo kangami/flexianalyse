@@ -10,6 +10,7 @@ import TestimonialsSection from './TestimonialsSection';
 import FAQSection from './FAQSection';
 import HowItWorks from './HowItWorks';
 import BookDemoButton from './BookDemoButton';
+import { useSeo } from '../../lib/seo';
 
 const heroStats = [
   { v: '2 modes', l: 'Cloud & on-prem connection' },
@@ -31,6 +32,10 @@ const footerLinks = [
 ];
 
 const LandingPage: React.FC = () => {
+  useSeo(
+    'FlexiAnalyse – AI Assistant for Your Databases & Documents',
+    'Chat with your databases and documents in plain language. FlexiAnalyse answers with real SQL, grounded in your own data — cloud or fully on-prem, with a full audit trail.',
+  );
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // ── Background video crossfade ────────────────────────

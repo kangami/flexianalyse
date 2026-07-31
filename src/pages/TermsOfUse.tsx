@@ -1,6 +1,11 @@
 import React from 'react';
+import { useSeo } from '../lib/seo';
 
 const TermsOfUse = () => {
+  useSeo(
+    "Conditions d'utilisation – FlexiAnalyse",
+    "Les conditions d'utilisation de la plateforme FlexiAnalyse : abonnements, propriété intellectuelle, responsabilités et règles d'usage du service.",
+  );
   return (
     <div className="max-w-4xl mx-auto px-6 py-12">
       <h1 className="text-3xl font-bold mb-6">Conditions d'utilisation</h1>

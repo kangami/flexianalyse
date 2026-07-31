@@ -6,11 +6,16 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../components/auth/AuthProvider';
 import { authFetch, API_BASE } from '../lib/apiClient';
 import { TIERS, Tier, pricingCopy, tierPrice } from '../lib/pricing';
+import { useSeo } from '../lib/seo';
 
 /** Public pricing page. Tiers, prices and copy come from the shared src/lib/pricing
  * module (same source as the in-app Plans overlay). Annual billing = 2 months off. */
 
 const Pricing: React.FC = () => {
+  useSeo(
+    'Pricing – FlexiAnalyse',
+    'Simple plans for every team: free tier, Pro, Business and Enterprise. Every plan includes on-prem database connection and answers grounded in real SQL.',
+  );
   const { language } = useLanguage();
   const c = pricingCopy(language);
   const tiers = TIERS;

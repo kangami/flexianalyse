@@ -1,6 +1,11 @@
 import React from 'react';
+import { useSeo } from '../lib/seo';
 
 const PrivacyPolicy = () => {
+  useSeo(
+    'Politique de confidentialité – FlexiAnalyse',
+    "Comment FlexiAnalyse collecte, utilise et protège vos données personnelles sur sa plateforme d'analyse de documents et de bases de données par IA.",
+  );
   return (
     <div className="max-w-4xl mx-auto px-6 py-12">
       <h1 className="text-3xl font-bold mb-6">Politique de confidentialité</h1>
